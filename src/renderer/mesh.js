@@ -479,21 +479,23 @@ function chainSegments(segments) {
 // measured in world units at its depth. Vertices on the far side of the object
 // are still hidden; only a wall thinner than that pull lets one show through.
 const POINT_SIZE = 8; // px
+const POINT_SELECTED_SCALE = 1.5; // a selected vertex is this much larger
 const POINT_DEPTH_BIAS = 3;
 
 const POINT_VERTEX_SHADER = /* glsl */ `
   uniform float size; // px, in device pixels
   uniform float pixelWorld; // world size of a CSS pixel at unit distance
   attribute vec3 color;
+  attribute float scale; // per-vertex size factor
   varying vec3 vColor;
 
   void main() {
     vColor = color;
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-    float pull = ${POINT_DEPTH_BIAS.toFixed(1)} * ${(POINT_SIZE / 2).toFixed(1)} * pixelWorld * -viewPosition.z;
+    float pull = ${POINT_DEPTH_BIAS.toFixed(1)} * ${(POINT_SIZE / 2).toFixed(1)} * scale * pixelWorld * -viewPosition.z;
     viewPosition.xyz -= normalize(viewPosition.xyz) * pull;
     gl_Position = projectionMatrix * viewPosition;
-    gl_PointSize = size;
+    gl_PointSize = size * scale;
   }
 `;
 
@@ -626,6 +628,7 @@ export class MeshView {
       'color',
       new THREE.BufferAttribute(new Float32Array(vertices.length * 3), 3),
     );
+    this.points.geometry.setAttribute('scale', new THREE.BufferAttribute(new Float32Array(vertices.length).fill(1), 1));
 
     this.highlight = NO_HIGHLIGHT; // its indices referred to the old topology
     this.updatePositions();
@@ -774,11 +777,14 @@ export class MeshView {
 
   updateColors(selection, hovered) {
     const attribute = this.points.geometry.getAttribute('color');
+    const scale = this.points.geometry.getAttribute('scale');
     for (let i = 0; i < attribute.count; i++) {
       let color = selection.has(i) ? COLOR_SELECTED : this.light ? COLOR_VERTEX_FOCUS : COLOR_VERTEX;
       if (i === hovered) color = this.light ? COLOR_HOVERED_FOCUS : COLOR_HOVERED;
       attribute.setXYZ(i, color.r, color.g, color.b);
+      scale.setX(i, selection.has(i) ? POINT_SELECTED_SCALE : 1);
     }
     attribute.needsUpdate = true;
+    scale.needsUpdate = true;
   }
 }

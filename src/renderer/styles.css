@@ -126,6 +126,11 @@ body {
   cursor: pointer;
 }
 
+/* Pushed to the bottom of the toolbar. */
+#toolbar [data-action="toggle-views"] {
+  margin-top: auto;
+}
+
 #toolbar button:hover {
   background: var(--hover);
 }

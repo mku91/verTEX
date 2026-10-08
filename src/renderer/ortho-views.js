@@ -7,6 +7,7 @@ const PICK_RADIUS = 9; // px
 const CLICK_TOLERANCE = 4; // px of pointer travel that still counts as a click
 const MIN_GRID_SPACING = 8; // px; denser grid lines and snap dots are not drawn
 const DOT_OPACITY = 0.35;
+const FAR_EDGE_OPACITY = 0.35; // brightness of lines at the farthest point of the object
 const ZOOM_SPEED = 0.0015; // per wheel delta unit
 const MIN_SCALE = 2; // px per world unit
 const MAX_SCALE = 20000;
@@ -436,16 +437,7 @@ export class OrthoViews {
 
     this.drawSnapDots(view);
 
-    context.strokeStyle = theme.text;
-    context.lineWidth = 1;
-    context.beginPath();
-    for (const [a, b] of this.shown.edges) {
-      const p = this.project(view, mesh.vertices[a]);
-      const q = this.project(view, mesh.vertices[b]);
-      context.moveTo(p.x, p.y);
-      context.lineTo(q.x, q.y);
-    }
-    context.stroke();
+    this.drawEdges(view);
 
     // The line of a cut being placed.
     const cut = this.editor.cut;
@@ -481,7 +473,7 @@ export class OrthoViews {
       context.fillStyle = selection.has(index) ? theme.selected : theme.textDim;
       if (index === this.hovered || boxed.has(index)) context.fillStyle = theme.hovered;
       context.beginPath();
-      context.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+      context.arc(p.x, p.y, selection.has(index) ? 5 : 3.5, 0, Math.PI * 2); // selected ones are larger
       context.fill();
     }
 
@@ -495,6 +487,40 @@ export class OrthoViews {
       context.fillRect(x, y, w, h);
       context.globalAlpha = 1;
       context.strokeRect(x, y, w, h);
+    }
+  }
+
+  // The wireframe, with a depth cue: the nearer a vertex is to the viewer of
+  // this view, the brighter the lines at it, from full brightness at the
+  // nearest point of the object down to FAR_EDGE_OPACITY (never black) at the
+  // farthest. Every edge is a gradient between its two ends.
+  drawEdges(view) {
+    const { context } = view;
+    const { vertices } = this.editor.mesh;
+    // Depth grows towards the viewer.
+    const depth = (index) => -vertices[index].dot(view.direction);
+    const depths = this.shown.vertices.map(depth);
+    const farthest = Math.min(...depths);
+    const range = Math.max(...depths) - farthest;
+    const opacity = (index) =>
+      range < 1e-9 ? 1 : FAR_EDGE_OPACITY + (1 - FAR_EDGE_OPACITY) * ((depth(index) - farthest) / range);
+
+    // Far edges first, so that the near, brighter ones lie on top of them.
+    const edges = [...this.shown.edges].sort((e, f) => depth(e[0]) + depth(e[1]) - depth(f[0]) - depth(f[1]));
+    context.lineWidth = 1;
+    for (const [a, b] of edges) {
+      const p = this.project(view, vertices[a]);
+      const q = this.project(view, vertices[b]);
+      // An edge seen end-on is just a dot, and a gradient needs some length.
+      if (Math.hypot(q.x - p.x, q.y - p.y) < 0.5) continue;
+      const gradient = context.createLinearGradient(p.x, p.y, q.x, q.y);
+      gradient.addColorStop(0, withAlpha(theme.text, opacity(a)));
+      gradient.addColorStop(1, withAlpha(theme.text, opacity(b)));
+      context.strokeStyle = gradient;
+      context.beginPath();
+      context.moveTo(p.x, p.y);
+      context.lineTo(q.x, q.y);
+      context.stroke();
     }
   }
 
@@ -619,4 +645,10 @@ export class OrthoViews {
     }
     context.globalAlpha = 1;
   }
+}
+
+// A '#rrggbb' colour as an rgba() string with the given opacity.
+function withAlpha(hex, alpha) {
+  const value = parseInt(hex.slice(1), 16);
+  return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
 }

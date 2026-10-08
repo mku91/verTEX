@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+  <title>verTEX</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../../node_modules/three/build/three.module.js",
+        "three/addons/": "../../node_modules/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <span class="logo">ver<b>TEX</b></span>
+      <div id="modes" title="Режим выделения (Tab / Shift+Tab)">
+        <button data-mode="object">Объект</button>
+        <button data-mode="face">Грань</button>
+        <button data-mode="edge">Ребро</button>
+        <button data-mode="vertex">Вершина</button>
+      </div>
+      <div id="top-actions">
+        <button id="cut-toggle" data-action="toggle-cut" title="Разрез: разрез объекта по линии на грани (K)" aria-label="Разрез">
+          <svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"/></svg>
+        </button>
+        <button id="extrude-toggle" data-action="toggle-extrude" title="Экструд: выдавить грани или рёбра (X)" aria-label="Экструд">
+          <svg viewBox="0 0 24 24"><path d="M12 2l5 5h-3.5v5h-3V7H7zM4 14h16v6H4zm2 2v2h12v-2z"/></svg>
+        </button>
+        <button id="pencil-toggle" data-action="toggle-pencil" title="Карандаш: рисовать вершины и рёбра, вытягивая их из вершин (P)" aria-label="Карандаш">
+          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <aside id="toolbar">
+      <button data-tool="select" title="Выделение (Q)">
+        <svg viewBox="0 0 24 24"><path d="M6 3l12 9-5.2 1.1 3 6-2.2 1.1-3-6L6 18z"/></svg>
+      </button>
+      <button data-tool="move" title="Перемещение (W)">
+        <svg viewBox="0 0 24 24"><path d="M12 2l3.5 4h-2.5v5h5V8.5l4 3.5-4 3.5V13h-5v5h2.5L12 22l-3.5-4H11v-5H6v2.500L2 12l4-3.500V11h5V6H8.500z"/></svg>
+      </button>
+      <button data-tool="rotate" title="Вращение (E)">
+        <svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 0 7.700 10.200l-2.300-.700A5.600 5.600 0 1 1 12 6.400c1.500 0 2.900.600 3.900 1.600L13 11h8V3l-3.400 3.400A8 8 0 0 0 12 4z"/></svg>
+      </button>
+      <button data-tool="scale" title="Масштаб (S)">
+        <svg viewBox="0 0 24 24"><path d="M3 13h8v8H3zM13 3h8v8h-2.400V7.100l-5 5-1.700-1.700 5-5H13z"/></svg>
+      </button>
+
+      <hr>
+
+      <button data-action="add-cube" title="Добавить куб">
+        <svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7zm0 2.300L5.800 7.700 12 11.200l6.200-3.500zM5 9.400v6.400l6 3.400v-6.400zm14 0l-6 3.400v6.400l6-3.400z"/></svg>
+      </button>
+      <button data-action="delete" title="Удалить выделенные вершины (Delete)">
+        <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm3.500 2v8h1.500v-8zm3.500 0v8h1.500v-8z"/></svg>
+      </button>
+      <button data-action="toggle-views" title="Три вида (V)">
+        <svg viewBox="0 0 24 24"><path d="M3 3h18v10H3zm2 2v6h14V5zM3 15h5v6H3zm6.5 0h5v6h-5zm6.5 0h5v6h-5z"/></svg>
+      </button>
+      <button data-action="frame" title="Показать выделение (F)">
+        <svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3zm12 0h6v6h-2V5h-4zM3 15h2v4h4v2H3zm16 0h2v6h-6v-2h4zM9 9h6v6H9z"/></svg>
+      </button>
+    </aside>
+
+    <div id="workspace">
+    <main id="viewport">
+      <div id="axis-gizmo" title="Фиксация перемещения вершины: 1 — свободно, 2 — X, 3 — Y, 4 — Z"></div>
+      <div id="shading">
+        <button id="shading-button" title="Вид объекта">
+          <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+        </button>
+        <div id="shading-menu" hidden>
+          <button data-shading="solid">Сплошной</button>
+          <button data-shading="wireframe">Каркас</button>
+          <button data-shading="orientation" title="Лицевая сторона грани — голубая, обратная — красная (N)">Ориентация граней</button>
+          <button disabled title="Текстур и развёртки в программе пока нет">Текстуры <small>пока нет</small></button>
+        </div>
+      </div>
+      <div id="extrude-popup" hidden title="Куда выдавить ребро: клик по оси, по центру — авто"></div>
+    </main>
+    <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
+    <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
+    </div>
+
+    <aside id="panel">
+      <section>
+        <h2>Выделение</h2>
+        <p id="selection-count"></p>
+        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="x"></label>
+        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="y"></label>
+        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="z"></label>
+      </section>
+      <section>
+        <h2>Сетка</h2>
+        <label>
+          <span>Шаг привязки</span>
+          <select id="snap-step">
+            <option value="1">1</option>
+            <option value="0.5">1/2</option>
+            <option value="0.25" selected>1/4</option>
+            <option value="0.125">1/8</option>
+            <option value="0.0625">1/16</option>
+          </select>
+        </label>
+      </section>
+      <section>
+        <h2>Меш</h2>
+        <dl>
+          <dt>Вершины</dt><dd id="stat-vertices"></dd>
+          <dt>Рёбра</dt><dd id="stat-edges"></dd>
+          <dt>Грани</dt><dd id="stat-faces"></dd>
+        </dl>
+      </section>
+    </aside>
+
+    <footer id="statusbar"><span id="status-hint"></span></footer>
+  </div>
+
+  <div id="settings-dialog" hidden>
+    <div class="dialog">
+      <h2>Настройки</h2>
+      <label>
+        <span>Тема</span>
+        <select id="theme"></select>
+      </label>
+      <div class="dialog-buttons">
+        <button id="settings-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

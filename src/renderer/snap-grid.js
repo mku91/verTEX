@@ -1,0 +1,227 @@
+import * as THREE from 'three';
+import { theme, axisColor } from './theme.js';
+
+const AXES = ['x', 'y', 'z'];
+// Dots along a single axis take that axis' colour.
+const dotColor = (lock) => (lock.length === 1 ? axisColor(lock) : theme.snapDot);
+const FINE_DIVISOR = 10; // fine mode splits every grid cell into this many
+const PLANE_CELLS = 64; // free mode: dots shown this many cells around the vertex
+const AXIS_CELLS = 256; // axis lock: dots shown this many cells along the axis
+const WORLD_ORIGIN = new THREE.Vector3();
+const VIEW_CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => new THREE.Vector2(x, y));
+
+// Dots are largest and most opaque at the dragged vertex and fade with distance.
+const DOT_SIZE = 7; // px at the vertex
+const DOT_OPACITY = 0.35; // at the vertex
+const FALLOFF_RADIUS = 0.4; // in viewport heights
+const FAR_SIZE = 0.4; // fraction of DOT_SIZE at and beyond the radius
+const FAR_OPACITY = 0.15; // fraction of DOT_OPACITY at and beyond the radius
+
+const DOT_VERTEX_SHADER = /* glsl */ `
+  uniform vec3 focus;
+  uniform float radius;
+  uniform float reach;
+  uniform float size;
+  varying float vAlpha;
+
+  void main() {
+    float distanceToFocus = distance(position, focus);
+    float weight = 1.0 - smoothstep(0.0, radius, distanceToFocus);
+    vAlpha = mix(${FAR_OPACITY.toFixed(3)}, 1.0, weight);
+    // Dots vanish before the edge of the dot window, so the edge is never seen.
+    vAlpha *= 1.0 - smoothstep(0.6 * reach, reach, distanceToFocus);
+    gl_PointSize = size * mix(${FAR_SIZE.toFixed(3)}, 1.0, weight);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const DOT_FRAGMENT_SHADER = /* glsl */ `
+  uniform vec3 color;
+  uniform float opacity;
+  varying float vAlpha;
+
+  void main() {
+    float disc = 1.0 - smoothstep(0.35, 0.5, length(gl_PointCoord - 0.5));
+    gl_FragColor = vec4(color, opacity * vAlpha * disc);
+    #include <colorspace_fragment>
+  }
+`;
+
+// World-space lattice that dragged vertices snap to, and the dots that show
+// which lattice points the current drag can reach.
+export class SnapGrid {
+  constructor(viewport) {
+    this.viewport = viewport;
+    this.step = 0.25;
+    this.fine = false; // precision modifier held
+    this.raycaster = new THREE.Raycaster();
+
+    this.dots = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.ShaderMaterial({
+        uniforms: {
+          color: { value: new THREE.Color() },
+          opacity: { value: DOT_OPACITY },
+          size: { value: DOT_SIZE * viewport.renderer.getPixelRatio() },
+          focus: { value: new THREE.Vector3() }, // the dragged vertex
+          radius: { value: 1 }, // world distance at which dots reach their minimum
+          reach: { value: 1 }, // world distance at which dots vanish
+        },
+        vertexShader: DOT_VERTEX_SHADER,
+        fragmentShader: DOT_FRAGMENT_SHADER,
+        transparent: true,
+        // Drawn over the model: targets behind or inside it stay visible.
+        depthTest: false,
+        depthWrite: false,
+      }),
+    );
+    this.dots.frustumCulled = false;
+    this.dots.renderOrder = 1;
+    this.dots.visible = false;
+    viewport.scene.add(this.dots);
+  }
+
+  // Lattice step in effect: the base step, or a tenth of it in fine mode.
+  get activeStep() {
+    return this.fine ? this.step / FINE_DIVISOR : this.step;
+  }
+
+  // Starts a drag of a point at `start`.
+  // `lock`: 'free' (one layer of lattice points along `plane`, which passes
+  // through `start`), or the axes the point may move along: 'x', 'xy', ...
+  // `origin`: a point the lattice passes through. The world origin snaps to
+  // absolute grid positions; `start` itself snaps the travel to whole steps.
+  begin(start, lock, plane, origin = WORLD_ORIGIN) {
+    this.start = start.clone();
+    this.origin = origin.clone();
+    this.plane = plane;
+    this.axes = lock === 'free' ? null : [...lock];
+    this.active = this.activeStep;
+    // Dots are built in a window of this many cells around the point.
+    this.cells = this.axes?.length === 1 ? AXIS_CELLS : PLANE_CELLS;
+
+    if (!this.axes) {
+      // The plane is tilted against the lattice, so the reachable points form
+      // one layer: a lattice point per column along the plane's dominant axis.
+      this.normal = plane.normal;
+      this.k = AXES.reduce((best, axis) =>
+        Math.abs(this.normal[axis]) > Math.abs(this.normal[best]) ? axis : best);
+      [this.a, this.b] = AXES.filter((axis) => axis !== this.k);
+    }
+
+    // The falloff radius is fixed on screen: a share of the view height at the point's depth.
+    const { camera } = this.viewport;
+    const depth = start.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
+    const viewHeight = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const { uniforms } = this.dots.material;
+    // The window follows the point with a lag of up to half its size, so the
+    // other half is the distance at which dots are guaranteed to exist.
+    uniforms.reach.value = (this.cells / 2) * this.active;
+    uniforms.radius.value = Math.min(FALLOFF_RADIUS * viewHeight, uniforms.reach.value);
+    uniforms.color.value.set(dotColor(lock));
+
+    this.buildDots(start);
+    this.focus(start);
+    this.dots.visible = true;
+  }
+
+  // Lattice index of a coordinate, and back.
+  index(value, axis) {
+    return Math.round((value - this.origin[axis]) / this.active);
+  }
+
+  coordinate(index, axis) {
+    return this.origin[axis] + index * this.active;
+  }
+
+  // Fills the dot window centered on `center`.
+  buildDots(center) {
+    this.windowCenter = center.clone();
+    const points = [];
+
+    if (this.axes) {
+      // A line or a flat grid through the start point.
+      const [a, b] = this.axes;
+      const middleA = this.index(center[a], a);
+      const middleB = b ? this.index(center[b], b) : 0;
+      const spanB = b ? this.cells : 0;
+      for (let ia = -this.cells; ia <= this.cells; ia++) {
+        for (let ib = -spanB; ib <= spanB; ib++) {
+          const point = this.start.clone();
+          point[a] = this.coordinate(middleA + ia, a);
+          if (b) point[b] = this.coordinate(middleB + ib, b);
+          points.push(point);
+        }
+      }
+    } else {
+      const [a0, a1] = this.visibleRange(this.a, center);
+      const [b0, b1] = this.visibleRange(this.b, center);
+      for (let ia = a0; ia <= a1; ia++) {
+        for (let ib = b0; ib <= b1; ib++) {
+          const point = new THREE.Vector3();
+          point[this.a] = this.coordinate(ia, this.a);
+          point[this.b] = this.coordinate(ib, this.b);
+          this.solveLayer(point);
+          points.push(point);
+        }
+      }
+    }
+
+    this.dots.geometry.dispose();
+    this.dots.geometry = new THREE.BufferGeometry().setFromPoints(points);
+  }
+
+  // Centers the dot falloff on the dragged point.
+  focus(position) {
+    this.dots.material.uniforms.focus.value.copy(position);
+    // The point drifted halfway to the window's edge: move the window to it.
+    const limit = (this.cells / 2) * this.active;
+    const drifted = AXES.some((axis) => Math.abs(position[axis] - this.windowCenter[axis]) > limit);
+    if (drifted) this.buildDots(position);
+  }
+
+  end() {
+    this.dots.visible = false;
+  }
+
+  // Moves `position` to the nearest snap point of the current drag.
+  snap(position) {
+    const round = (axis) => {
+      position[axis] = this.coordinate(this.index(position[axis], axis), axis);
+    };
+    if (this.axes) {
+      this.axes.forEach(round);
+      return;
+    }
+    round(this.a);
+    round(this.b);
+    this.solveLayer(position);
+  }
+
+  // Sets the dominant-axis coordinate to the lattice value closest to the drag plane.
+  solveLayer(point) {
+    const { a, b, k, normal, start } = this;
+    const offset = normal[a] * (point[a] - start[a]) + normal[b] * (point[b] - start[b]);
+    point[k] = this.coordinate(this.index(start[k] - offset / normal[k], k), k);
+  }
+
+  // Lattice index range along `axis`: the visible part of the drag plane,
+  // clipped to the dot window around `center`.
+  visibleRange(axis, center) {
+    let min = Infinity;
+    let max = -Infinity;
+    const hit = new THREE.Vector3();
+    for (const corner of VIEW_CORNERS) {
+      this.raycaster.setFromCamera(corner, this.viewport.camera);
+      if (!this.raycaster.ray.intersectPlane(this.plane, hit)) continue;
+      min = Math.min(min, hit[axis]);
+      max = Math.max(max, hit[axis]);
+    }
+    const middle = this.index(center[axis], axis);
+    const toIndex = (value) => (value - this.origin[axis]) / this.active;
+    return [
+      Math.max(Math.floor(toIndex(min)), middle - this.cells),
+      Math.min(Math.ceil(toIndex(max)), middle + this.cells),
+    ];
+  }
+}

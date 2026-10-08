@@ -1,0 +1,17 @@
+{
+  "name": "vertex",
+  "productName": "verTEX",
+  "version": "0.1.0",
+  "description": "Low-poly 3D editor focused on vertices",
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  }
+}

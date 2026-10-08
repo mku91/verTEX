@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="#14161a" stroke-width="1.2" stroke-linejoin="round">
+  <!-- The tip, at (2, 22), is the cursor's hot spot. -->
+  <path d="M7 13 17 3 21 7 11 17z" fill="#ffd23f"/>
+  <path d="M17 3 18.5 1.5 22.5 5.5 21 7z" fill="#e0606a"/>
+  <path d="M2 22 7 13 11 17z" fill="#f1e3c4"/>
+  <path d="M2 22 3.7 18.9 5.1 20.3z" fill="#14161a"/>
+</svg>

@@ -32,10 +32,23 @@
         <button id="extrude-toggle" data-action="toggle-extrude" title="Экструд: выдавить грани или рёбра (X)" aria-label="Экструд">
           <svg viewBox="0 0 24 24"><path d="M12 2l5 5h-3.5v5h-3V7H7zM4 14h16v6H4zm2 2v2h12v-2z"/></svg>
         </button>
+        <button id="polygon-toggle" data-action="toggle-polygon" title="Полигон: нарисовать плоский полигон по точкам сетки (G)" aria-label="Полигон">
+          <svg viewBox="0 0 24 24"><path d="M12 2l9.5 6.9-3.6 11.1H6.1L2.5 8.9zm0 2.5L4.85 9.65 7.55 18h8.9l2.7-8.35z"/></svg>
+        </button>
         <button id="pencil-toggle" data-action="toggle-pencil" title="Карандаш: рисовать вершины и рёбра, вытягивая их из вершин (P)" aria-label="Карандаш">
           <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
         </button>
       </div>
+      <label id="grid-step" title="Шаг привязки к сетке (Ctrl во время перетаскивания — в 10 раз мельче)">
+        <span>Сетка</span>
+        <select id="snap-step">
+          <option value="1">1</option>
+          <option value="0.5">1/2</option>
+          <option value="0.25" selected>1/4</option>
+          <option value="0.125">1/8</option>
+          <option value="0.0625">1/16</option>
+        </select>
+      </label>
     </header>
 
     <aside id="toolbar">
@@ -84,6 +97,13 @@
           <button disabled title="Текстур и развёртки в программе пока нет">Текстуры <small>пока нет</small></button>
         </div>
       </div>
+      <div id="properties" hidden>
+        <p id="selection-count"></p>
+        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="x"></label>
+        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="y"></label>
+        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="z"></label>
+      </div>
+      <div id="polygon-popup" hidden title="Плоскость полигона: клик по оси, которой она перпендикулярна"></div>
       <div id="extrude-popup" hidden title="Куда выдавить ребро: клик по оси, по центру — авто"></div>
     </main>
     <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
@@ -91,32 +111,17 @@
     </div>
 
     <aside id="panel">
-      <section>
-        <h2>Выделение</h2>
-        <p id="selection-count"></p>
-        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="x"></label>
-        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="y"></label>
-        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="z"></label>
+      <section id="outliner-section">
+        <h2>Сцена</h2>
+        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать"></div>
       </section>
-      <section>
-        <h2>Сетка</h2>
-        <label>
-          <span>Шаг привязки</span>
-          <select id="snap-step">
-            <option value="1">1</option>
-            <option value="0.5">1/2</option>
-            <option value="0.25" selected>1/4</option>
-            <option value="0.125">1/8</option>
-            <option value="0.0625">1/16</option>
-          </select>
-        </label>
-      </section>
-      <section>
-        <h2>Меш</h2>
+      <section id="stats">
+        <h2 id="stats-title" title="Данные выделенных объектов; без выделения — всей сцены"></h2>
         <dl>
           <dt>Вершины</dt><dd id="stat-vertices"></dd>
           <dt>Рёбра</dt><dd id="stat-edges"></dd>
           <dt>Грани</dt><dd id="stat-faces"></dd>
+          <dt title="Объём данных модели: координаты вершин и состав граней. Память, занятая редактором, больше.">Размер</dt><dd id="stat-size"></dd>
         </dl>
       </section>
     </aside>

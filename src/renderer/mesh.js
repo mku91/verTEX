@@ -12,32 +12,104 @@ export const edgeKey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
 
 // Editing model: shared vertices, polygonal faces (loops of vertex indices)
 // and wires: loose edges between two vertices that belong to no face.
+// Every vertex belongs to one of the named objects; a face or a wire belongs
+// to the object of its vertices.
 // This is the source of truth; three.js geometry is derived from it in MeshView.
 export class EditableMesh {
   constructor() {
     this.vertices = []; // THREE.Vector3[]
     this.faces = []; // number[][], counter-clockwise when seen from outside
     this.wires = []; // [a, b][], edges drawn on their own
+    this.objects = []; // { id, name }[], in the order they are listed
+    this.vertexObject = []; // the object id of every vertex
+    this.nextObjectId = 1;
   }
 
-  addVertex(x, y, z) {
+  // Adds a vertex to the object with the given id.
+  addVertex(x, y, z, object) {
     this.vertices.push(new THREE.Vector3(x, y, z));
+    this.vertexObject.push(object);
     return this.vertices.length - 1;
+  }
+
+  // Creates an empty object and returns its id. A name that is taken gets a
+  // numbered suffix: "Куб", "Куб.001", ...
+  addObject(name) {
+    const id = this.nextObjectId++;
+    this.objects.push({ id, name: this.freeName(name) });
+    return id;
+  }
+
+  // `name`, or its first numbered variant that no other object has.
+  freeName(name, except = null) {
+    const taken = new Set(this.objects.filter((object) => object !== except).map((object) => object.name));
+    if (!taken.has(name)) return name;
+    const base = name.replace(/\.\d{3}$/, '');
+    for (let n = 1; ; n++) {
+      const candidate = `${base}.${String(n).padStart(3, '0')}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+  }
+
+  // Makes every vertex of object `gone` part of object `kept`.
+  mergeObjects(kept, gone) {
+    this.vertexObject = this.vertexObject.map((id) => (id === gone ? kept : id));
+    this.objects = this.objects.filter((object) => object.id !== gone);
   }
 
   addFace(indices) {
     this.faces.push(indices);
   }
 
-  // Unit cube standing on the grid. Returns indices of the new vertices.
+  // Adds a flat polygon through the given points, in order, as an object of
+  // its own (new vertices, shared with nothing). It is turned towards the
+  // viewer, who looks in the direction `facing`. Returns the new vertices.
+  addPolygon(points, facing) {
+    const object = this.addObject('Полигон');
+    const loop = points.map((point) => this.addVertex(point.x, point.y, point.z, object));
+    const indices = [...loop];
+    if (this.loopNormal(loop).dot(facing) > 0) loop.reverse();
+    this.faces.push(loop);
+    return indices;
+  }
+
+  // Splits a face into triangles, as [a, b, c] vertex index triples wound the
+  // same way as the face. Ear clipping, so faces that are not convex come out
+  // right; a fan from the first vertex is the fallback for degenerate ones.
+  triangulate(faceIndex) {
+    const face = this.faces[faceIndex];
+    if (face.length === 3) return [face];
+    const fan = () => face.slice(1, -1).map((vertex, i) => [face[0], vertex, face[i + 2]]);
+
+    const normal = this.faceNormal(faceIndex);
+    if (normal.lengthSq() < 0.5) return fan();
+    // Flatten the face onto its own plane.
+    const u = new THREE.Vector3(1, 0, 0);
+    if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
+    u.cross(normal).normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u);
+    const contour = face.map((i) => new THREE.Vector2(this.vertices[i].dot(u), this.vertices[i].dot(v)));
+
+    const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
+    if (triangles.length !== face.length - 2) return fan();
+    return triangles.map(([a, b, c]) => {
+      // Keep the face's winding: counter-clockwise in the (u, v) plane.
+      const area = (contour[b].x - contour[a].x) * (contour[c].y - contour[a].y) -
+        (contour[c].x - contour[a].x) * (contour[b].y - contour[a].y);
+      return area >= 0 ? [face[a], face[b], face[c]] : [face[a], face[c], face[b]];
+    });
+  }
+
+  // Unit cube standing on the grid, as a new object. Returns indices of the new vertices.
   addCube(size = 1) {
+    const object = this.addObject('Куб');
     const h = size / 2;
     const base = this.vertices.length;
     const corners = [
       [-h, 0, -h], [h, 0, -h], [h, 0, h], [-h, 0, h],
       [-h, size, -h], [h, size, -h], [h, size, h], [-h, size, h],
     ];
-    for (const [x, y, z] of corners) this.addVertex(x, y, z);
+    for (const [x, y, z] of corners) this.addVertex(x, y, z, object);
     const quads = [
       [4, 7, 6, 5], // +Y
       [0, 1, 2, 3], // -Y
@@ -48,6 +120,26 @@ export class EditableMesh {
     ];
     for (const quad of quads) this.addFace(quad.map((i) => base + i));
     return corners.map((_, i) => base + i);
+  }
+
+  // Size of the model's own data in bytes, as it would be stored compactly:
+  // three 32-bit floats per vertex and a 32-bit index per face corner and per
+  // wire end. The editor's working copies in memory are several times larger.
+  // With `islands` (entries of islands()) only those objects are counted.
+  byteSize(islands = null) {
+    if (!islands) {
+      const corners = this.faces.reduce((sum, face) => sum + face.length, 0);
+      return this.vertices.length * 12 + corners * 4 + this.wires.length * 8;
+    }
+    let bytes = 0;
+    const counted = new Set();
+    for (const island of islands) {
+      bytes += island.vertices.length * 12;
+      for (const face of island.faces) bytes += this.faces[face].length * 4;
+      for (const vertex of island.vertices) counted.add(vertex);
+    }
+    // A wire lies wholly inside one object.
+    return bytes + this.wires.filter(([a]) => counted.has(a)).length * 8;
   }
 
   // Unique undirected edges as [a, b] pairs with a < b: the sides of the
@@ -74,16 +166,20 @@ export class EditableMesh {
   // vertex carries is inherited), joined to it by a wire. Returns its index.
   sprout(parent) {
     this.vertices.push(this.vertices[parent].clone());
+    this.vertexObject.push(this.vertexObject[parent]);
     const child = this.vertices.length - 1;
     this.wires.push([parent, child]);
     return child;
   }
 
   // Joins two vertices with a wire, unless an edge already runs between them.
+  // Vertices of two objects make those one object, the first vertex's: an edge
+  // can't belong to two.
   connect(a, b) {
     if (a === b) return;
     const key = edgeKey(a, b);
     if (!this.edges().some(([c, d]) => edgeKey(c, d) === key)) this.wires.push([a, b]);
+    if (this.vertexObject[a] !== this.vertexObject[b]) this.mergeObjects(this.vertexObject[a], this.vertexObject[b]);
   }
 
   // If the edge a-b closes a loop, fills the loop with a face and returns
@@ -225,7 +321,7 @@ export class EditableMesh {
           const end = this.vertices[b];
           const point = start.clone().lerp(end, (value - start[axis]) / (end[axis] - start[axis]));
           point[axis] = value; // exactly on the plane, free of rounding
-          cutVertices.set(key, this.addVertex(point.x, point.y, point.z));
+          cutVertices.set(key, this.addVertex(point.x, point.y, point.z, this.vertexObject[a]));
         }
         loop.push(cutVertices.get(key));
         onPlane.add(cutVertices.get(key));
@@ -283,7 +379,7 @@ export class EditableMesh {
       for (const vertex of this.faces[faceIndex]) {
         if (copies.has(vertex)) continue;
         const { x, y, z } = this.vertices[vertex];
-        copies.set(vertex, this.addVertex(x, y, z));
+        copies.set(vertex, this.addVertex(x, y, z, this.vertexObject[vertex]));
       }
     }
 
@@ -327,7 +423,7 @@ export class EditableMesh {
     const copyOf = (vertex) => {
       if (!copies.has(vertex)) {
         const { x, y, z } = this.vertices[vertex];
-        copies.set(vertex, this.addVertex(x, y, z));
+        copies.set(vertex, this.addVertex(x, y, z, this.vertexObject[vertex]));
       }
       return copies.get(vertex);
     };
@@ -343,9 +439,37 @@ export class EditableMesh {
     return [...copies.values()];
   }
 
-  // Connected pieces of the mesh, each as { vertices, faces } index lists.
-  // A vertex that no face uses forms an island of its own.
+  // The objects as { id, name, vertices, faces } with index lists, in the
+  // order of `objects`. (Called "islands" by the callers: before objects had
+  // an identity of their own, they were the connected pieces of the mesh.)
   islands() {
+    this.adoptObjects();
+    const byId = new Map(
+      this.objects.map(({ id, name }) => [id, { id, name, vertices: [], faces: [] }]),
+    );
+    this.vertexObject.forEach((id, vertex) => byId.get(id).vertices.push(vertex));
+    this.faces.forEach((face, i) => byId.get(this.vertexObject[face[0]]).faces.push(i));
+    return [...byId.values()];
+  }
+
+  // Makes sure every vertex has a known object. Data that carries none (a
+  // state saved before objects existed) gets one object per connected piece.
+  adoptObjects() {
+    const known = new Set(this.objects.map((object) => object.id));
+    const complete =
+      this.vertexObject.length === this.vertices.length && this.vertexObject.every((id) => known.has(id));
+    if (complete) return;
+    this.objects = [];
+    this.vertexObject = new Array(this.vertices.length);
+    for (const piece of this.connectedPieces()) {
+      const id = this.addObject('Объект');
+      for (const vertex of piece) this.vertexObject[vertex] = id;
+    }
+  }
+
+  // The vertices of each connected piece of the mesh. A vertex that no face or
+  // wire uses is a piece of its own.
+  connectedPieces() {
     const parent = this.vertices.map((_, i) => i);
     const find = (i) => {
       while (parent[i] !== i) {
@@ -360,13 +484,11 @@ export class EditableMesh {
     for (const [a, b] of this.wires) parent[find(a)] = find(b);
 
     const byRoot = new Map();
-    const islandOf = (vertex) => {
-      const root = find(vertex);
-      if (!byRoot.has(root)) byRoot.set(root, { vertices: [], faces: [] });
-      return byRoot.get(root);
-    };
-    this.vertices.forEach((_, i) => islandOf(i).vertices.push(i));
-    this.faces.forEach((face, i) => islandOf(face[0]).faces.push(i));
+    this.vertices.forEach((_, i) => {
+      const root = find(i);
+      if (!byRoot.has(root)) byRoot.set(root, []);
+      byRoot.get(root).push(i);
+    });
     return [...byRoot.values()];
   }
 
@@ -402,6 +524,10 @@ export class EditableMesh {
     this.wires = this.wires
       .filter((wire) => wire.every((i) => remap.has(i)))
       .map((wire) => wire.map((i) => remap.get(i)));
+    // An object with no vertices left is gone.
+    this.vertexObject = this.vertexObject.filter((_, i) => remap.has(i));
+    const alive = new Set(this.vertexObject);
+    this.objects = this.objects.filter((object) => alive.has(object.id));
     return remap;
   }
 }
@@ -584,6 +710,18 @@ export class MeshView {
     this.overlays.hoveredFaces.renderOrder = 1;
     this.highlight = NO_HIGHLIGHT;
 
+    // The polygon tool's outline in progress: its sides and its points, drawn
+    // over everything.
+    this.sketchLine = edgeOverlay(COLOR_SELECTED);
+    this.sketchLine.material.depthTest = false;
+    this.sketchLine.renderOrder = 3;
+    this.sketchLine.visible = false;
+    this.sketchPoints = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
+    this.sketchPoints.material.depthTest = false;
+    this.sketchPoints.renderOrder = 6;
+    this.sketchPoints.onBeforeRender = this.points.onBeforeRender;
+    this.sketchPoints.visible = false;
+
     // Preview of a cut; drawn through the model so the whole outline is seen.
     this.cutLine = edgeOverlay(COLOR_CUT);
     this.cutLine.material.depthTest = false;
@@ -597,6 +735,8 @@ export class MeshView {
       this.points,
       ...Object.values(this.overlays),
       this.cutLine,
+      this.sketchLine,
+      this.sketchPoints,
     ];
     for (const object of objects) {
       object.frustumCulled = false;
@@ -609,12 +749,12 @@ export class MeshView {
   rebuild() {
     const { vertices, faces } = this.mesh;
 
-    // Fan triangulation; fine for the convex polygons we produce so far.
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
-    faces.forEach((face, faceIndex) => {
-      for (let i = 1; i < face.length - 1; i++) {
-        this.triangleIndices.push(face[0], face[i], face[i + 1]);
+    this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
+    this.faceTriangles.forEach((triangles, faceIndex) => {
+      for (const triangle of triangles) {
+        this.triangleIndices.push(...triangle);
         this.triangleFaces.push(faceIndex);
       }
     });
@@ -674,6 +814,7 @@ export class MeshView {
     this.overlays.selectedEdges.material.color.copy(COLOR_SELECTED);
     this.overlays.hoveredEdges.material.color.copy(COLOR_HOVERED);
     this.cutLine.material.color.copy(COLOR_CUT);
+    this.sketchLine.material.color.copy(COLOR_SELECTED);
     this.tints.front.material.color.set(theme.faceFront);
     this.tints.back.material.color.set(theme.faceBack);
   }
@@ -703,6 +844,41 @@ export class MeshView {
       tint.visible = !this.focus && this.shading === 'orientation';
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
+  }
+
+  // Shows the polygon tool's outline: its points so far, joined in order, and
+  // the point under the cursor, which the outline stretches to. `closing`
+  // marks that a click would close the outline at its first point. Null hides it.
+  setSketch(sketch) {
+    this.sketchLine.visible = false;
+    this.sketchPoints.visible = false;
+    if (!sketch) return;
+    const { points, cursor, closing } = sketch;
+    const path = cursor ? [...points, cursor] : points;
+
+    if (path.length >= 2) {
+      const positions = [];
+      for (let i = 0; i < path.length - 1; i++) positions.push(...path[i].toArray(), ...path[i + 1].toArray());
+      this.sketchLine.geometry.dispose();
+      this.sketchLine.geometry = new LineSegmentsGeometry().setPositions(positions);
+      this.sketchLine.visible = true;
+    }
+    if (path.length >= 1) {
+      const colors = [];
+      const scales = [];
+      path.forEach((point, i) => {
+        const isCursor = cursor && i === path.length - 1;
+        const marked = isCursor || (closing && i === 0);
+        colors.push(...(marked ? COLOR_HOVERED_FOCUS : COLOR_SELECTED).toArray());
+        scales.push(closing && i === 0 ? POINT_SELECTED_SCALE : 1);
+      });
+      this.sketchPoints.geometry.dispose();
+      const geometry = new THREE.BufferGeometry().setFromPoints(path);
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geometry.setAttribute('scale', new THREE.Float32BufferAttribute(scales, 1));
+      this.sketchPoints.geometry = geometry;
+      this.sketchPoints.visible = true;
+    }
   }
 
   // Shows where a cut would go: a list of [Vector3, Vector3] segments, drawn
@@ -746,14 +922,13 @@ export class MeshView {
   }
 
   applyHighlight() {
-    const { vertices, faces } = this.mesh;
+    const { vertices } = this.mesh;
 
     for (const name of ['selectedFaces', 'hoveredFaces']) {
       const points = [];
       for (const faceIndex of this.highlight[name]) {
-        const face = faces[faceIndex];
-        for (let i = 1; i < face.length - 1; i++) {
-          points.push(vertices[face[0]], vertices[face[i]], vertices[face[i + 1]]);
+        for (const triangle of this.faceTriangles[faceIndex]) {
+          points.push(...triangle.map((i) => vertices[i]));
         }
       }
       const overlay = this.overlays[name];

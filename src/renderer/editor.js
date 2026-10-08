@@ -25,7 +25,7 @@ export const AXIS_LOCKS = {
 export const MODES = ['object', 'face', 'edge', 'vertex'];
 
 // Selection modes each modal operation works in; the first one is its default.
-const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'] };
+export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'] };
 
 const MIN_AXIS_SINE = 0.1; // below this angle to the view ray a locked axis is undraggable
 const PICK_RADIUS = 12; // px, vertices
@@ -64,6 +64,8 @@ export class Editor extends EventTarget {
     this.cut = null;
     // The extrusion being pulled out: its new vertices and how far they went.
     this.extrude = null;
+    // The polygon tool's state: its work plane and the outline drawn so far.
+    this.polygon = null;
     this.axisLock = 'free';
     this.tool = 'select';
     this.raycaster = new THREE.Raycaster();
@@ -264,10 +266,11 @@ export class Editor extends EventTarget {
         down = null;
         if (event.button !== 0) return;
         // The pencil works through ordinary vertex drags, see sproutVertex().
-        if (this.operation === 'cut' || this.operation === 'extrude') {
+        if (this.operation && this.operation !== 'pencil') {
           event.stopImmediatePropagation();
           if (this.operation === 'cut') this.pressCut(event.clientX, event.clientY);
-          else this.pressExtrude(event.clientX, event.clientY);
+          else if (this.operation === 'extrude') this.pressExtrude(event.clientX, event.clientY);
+          else this.pressPolygon(event.clientX, event.clientY);
           return;
         }
         // A gizmo handle under the cursor takes the press; otherwise the element does.
@@ -308,6 +311,10 @@ export class Editor extends EventTarget {
       }
       if (this.extrude) {
         this.moveExtrude(event.clientX, event.clientY);
+        return;
+      }
+      if (this.polygon) {
+        this.movePolygon(event.clientX, event.clientY);
         return;
       }
       if (this.box) {
@@ -360,6 +367,7 @@ export class Editor extends EventTarget {
     const wasIdle = this.operation === null;
     this.cancelCut();
     this.cancelExtrude();
+    this.endPolygon();
 
     if (name) {
       if (wasIdle) this.modeBeforeOperation = this.mode;
@@ -374,6 +382,7 @@ export class Editor extends EventTarget {
       }
       if (name === 'cut' && keys.length === 1) this.beginCut(keys[0]);
       if (name === 'extrude' && keys.length > 0) this.beginExtrude(keys);
+      if (name === 'polygon') this.polygon = { axis: null, offset: 0, points: [], cursor: null, problem: null };
     } else {
       this.operation = null;
       if (this.mode !== this.modeBeforeOperation) this.setMode(this.modeBeforeOperation);
@@ -389,8 +398,190 @@ export class Editor extends EventTarget {
   // operation if there is nothing. Returns false when no operation is on.
   escapeOperation() {
     if (!this.operation) return false;
-    if (!this.cancelDrag() && !this.cancelCut() && !this.cancelExtrude()) this.setOperation(null);
+    const cancelled =
+      this.cancelDrag() || this.cancelCut() || this.cancelExtrude() || this.clearPolygonOutline();
+    if (!cancelled) this.setOperation(null);
     return true;
+  }
+
+  // --- polygon -----------------------------------------------------------
+  //
+  // The polygon tool draws a flat polygon point by point on a work plane: the
+  // plane `axis` = `offset`, perpendicular to a world axis. Points snap to the
+  // grid in that plane. Closing the outline makes it a face, an object of its own.
+
+  // Picks the work plane by the axis it is perpendicular to ('free' = none
+  // yet). Starts the outline over.
+  setPolygonPlane(axis) {
+    const polygon = this.polygon;
+    if (!polygon || !(axis in AXIS_LOCKS)) return;
+    polygon.axis = axis === 'free' ? null : axis;
+    polygon.points = [];
+    polygon.cursor = null;
+    polygon.problem = null;
+    this.showPolygonGrid();
+    this.updatePolygonSketch();
+  }
+
+  // Moves the work plane along its axis by whole grid steps; only before the
+  // first point is placed.
+  shiftPolygonPlane(steps) {
+    const polygon = this.polygon;
+    if (!polygon?.axis || polygon.points.length) return;
+    const step = this.snapGrid.activeStep;
+    polygon.offset = Math.round(polygon.offset / step + steps) * step;
+    polygon.cursor = null;
+    this.showPolygonGrid();
+    this.updatePolygonSketch();
+  }
+
+  // Shows the snap points of the work plane, around the cursor (or, before the
+  // pointer has been there, around the point of the plane nearest to what the
+  // camera looks at).
+  showPolygonGrid() {
+    const polygon = this.polygon;
+    if (!polygon.axis) {
+      this.snapGrid.end();
+      return;
+    }
+    const start = polygon.cursor?.clone() ?? this.viewport.orbit.target.clone();
+    start[polygon.axis] = polygon.offset;
+    const inPlane = ['x', 'y', 'z'].filter((axis) => axis !== polygon.axis).join('');
+    this.snapGrid.begin(start, inPlane, null);
+    if (!polygon.cursor) this.snapGrid.snap(start);
+    this.snapGrid.focus(start);
+  }
+
+  // The grid point of the work plane under the pointer.
+  movePolygon(clientX, clientY) {
+    const polygon = this.polygon;
+    if (!polygon.axis) return;
+    const plane = new THREE.Plane(AXIS_LOCKS[polygon.axis], -polygon.offset);
+    const hit = this.pointerRay(clientX, clientY).intersectPlane(plane, new THREE.Vector3());
+    if (!hit) return;
+    this.snapGrid.snap(hit);
+    hit[polygon.axis] = polygon.offset;
+    polygon.cursor = hit;
+    this.snapGrid.focus(hit);
+    this.updatePolygonSketch();
+  }
+
+  // LMB in the polygon tool: adds the point under the pointer to the outline;
+  // on the first point it closes the outline instead.
+  pressPolygon(clientX, clientY) {
+    const polygon = this.polygon;
+    this.movePolygon(clientX, clientY);
+    const { cursor, points } = polygon;
+    if (!cursor) return;
+    polygon.problem = null;
+    if (this.polygonClosesAt(cursor)) {
+      this.closePolygon();
+      return;
+    }
+    if (points.some((point) => point.distanceTo(cursor) < 1e-6)) return; // already in the outline
+    points.push(cursor.clone());
+    this.updatePolygonSketch();
+  }
+
+  polygonClosesAt(point) {
+    const { points } = this.polygon;
+    return points.length >= 3 && points[0].distanceTo(point) < 1e-6;
+  }
+
+  // Takes back the last point of the outline.
+  undoPolygonPoint() {
+    if (!this.polygon?.points.length) return;
+    this.polygon.points.pop();
+    this.polygon.problem = null;
+    this.updatePolygonSketch();
+  }
+
+  // Drops the outline but stays in the tool. Returns false if there was nothing to drop.
+  clearPolygonOutline() {
+    if (!this.polygon?.points.length) return false;
+    this.polygon.points = [];
+    this.polygon.problem = null;
+    this.updatePolygonSketch();
+    return true;
+  }
+
+  // Turns the outline into a face. The result is selected in face mode, ready
+  // to be extruded, and the tool is left.
+  closePolygon() {
+    const polygon = this.polygon;
+    if (!polygon || polygon.points.length < 3) return;
+    polygon.problem = this.polygonProblem();
+    if (polygon.problem) {
+      this.updatePolygonSketch();
+      return;
+    }
+    const before = this.snapshot();
+    const center = polygon.points.reduce((sum, point) => sum.add(point), new THREE.Vector3());
+    center.divideScalar(polygon.points.length);
+    const facing = center.sub(this.viewport.camera.position).normalize();
+    const vertices = this.mesh.addPolygon(polygon.points, facing);
+    this.history.push(before);
+
+    this.endPolygon();
+    this.selection = new Set(vertices);
+    this.rebuildView(); // face mode: selects the new face
+    this.modeBeforeOperation = 'face'; // stay in face mode after the tool
+    this.setOperation(null);
+  }
+
+  // Why the outline can't become a face, or null if it can.
+  polygonProblem() {
+    const { points, axis } = this.polygon;
+    const [u, v] = ['x', 'y', 'z'].filter((candidate) => candidate !== axis);
+    const flat = points.map((point) => ({ x: point[u], y: point[v] }));
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    // For p on the line through a and b: whether it is between them.
+    const within = (a, b, p) =>
+      Math.min(a.x, b.x) - 1e-9 <= p.x && p.x <= Math.max(a.x, b.x) + 1e-9 &&
+      Math.min(a.y, b.y) - 1e-9 <= p.y && p.y <= Math.max(a.y, b.y) + 1e-9;
+
+    // Two sides that are not neighbours must not cross or touch.
+    const count = flat.length;
+    for (let i = 0; i < count; i++) {
+      for (let j = i + 1; j < count; j++) {
+        if (j === i + 1 || (i === 0 && j === count - 1)) continue;
+        const [a, b, c, d] = [flat[i], flat[(i + 1) % count], flat[j], flat[(j + 1) % count]];
+        const d1 = cross(a, b, c);
+        const d2 = cross(a, b, d);
+        const d3 = cross(c, d, a);
+        const d4 = cross(c, d, b);
+        const crossing = d1 * d2 < 0 && d3 * d4 < 0;
+        // An end of one side lying on the other side.
+        const touching =
+          (Math.abs(d1) < 1e-12 && within(a, b, c)) ||
+          (Math.abs(d2) < 1e-12 && within(a, b, d)) ||
+          (Math.abs(d3) < 1e-12 && within(c, d, a)) ||
+          (Math.abs(d4) < 1e-12 && within(c, d, b));
+        if (crossing || touching) return 'контур пересекает сам себя';
+      }
+    }
+    // Checked after the crossings: a figure of eight has no net area either.
+    let doubleArea = 0;
+    flat.forEach((a, i) => {
+      const b = flat[(i + 1) % count];
+      doubleArea += a.x * b.y - b.x * a.y;
+    });
+    if (Math.abs(doubleArea) < 1e-9) return 'точки лежат на одной прямой';
+    return null;
+  }
+
+  // Leaves the polygon tool's state behind.
+  endPolygon() {
+    if (!this.polygon) return;
+    this.polygon = null;
+    this.snapGrid.end();
+    this.view.setSketch(null);
+  }
+
+  updatePolygonSketch() {
+    const { points, cursor } = this.polygon;
+    this.view.setSketch({ points, cursor, closing: Boolean(cursor) && this.polygonClosesAt(cursor) });
+    this.emitChange();
   }
 
   // --- extrude -----------------------------------------------------------
@@ -1176,6 +1367,11 @@ export class Editor extends EventTarget {
       this.setExtrudeAxis(mode);
       return;
     }
+    // And in the polygon tool, its work plane.
+    if (this.polygon) {
+      this.setPolygonPlane(mode);
+      return;
+    }
     if (!(mode in AXIS_LOCKS) || mode === this.axisLock) return;
     this.axisLock = mode;
     if (this.cut) this.placeCut(this.cut.point); // the lock is the cut's axis
@@ -1192,6 +1388,7 @@ export class Editor extends EventTarget {
     if (on === this.snapGrid.fine) return;
     this.snapGrid.fine = on;
     if (this.cut) this.placeCut(this.cut.point);
+    if (this.polygon?.axis) this.showPolygonGrid();
     if (this.drag?.start) {
       this.constrainDrag();
       this.dragTo(this.drag.lastX, this.drag.lastY);
@@ -1206,6 +1403,26 @@ export class Editor extends EventTarget {
     this.selection = new Set(vertices);
     this.adoptSelection();
     this.selectionChanged();
+  }
+
+  // Selects a whole object, by its index in the objects list; from any mode
+  // this goes to object mode. `additive` toggles it in the selection.
+  selectObject(index, additive) {
+    if (this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    if (this.mode !== 'object') this.setMode('object');
+    this.select(index, additive);
+  }
+
+  // Renames an object; a name already taken gets a numbered suffix.
+  renameObject(index, name) {
+    const object = this.mesh.objects[index];
+    name = name.trim();
+    if (!object || !name || name === object.name || this.busy()) return;
+    this.history.push(this.snapshot());
+    object.name = this.mesh.freeName(name, object);
+    this.updateTopology(); // the names are copied there
+    this.emitChange();
   }
 
   selectAll() {
@@ -1263,6 +1480,8 @@ export class Editor extends EventTarget {
     this.mesh.vertices = [];
     this.mesh.faces = [];
     this.mesh.wires = [];
+    this.mesh.objects = [];
+    this.mesh.vertexObject = [];
     this.mesh.addCube();
     this.selection.clear();
     this.target = new Set(this.mesh.vertices.keys());
@@ -1306,7 +1525,12 @@ export class Editor extends EventTarget {
 
   // A drag in progress owns the mesh; history must not change it underneath.
   busy() {
-    return Boolean(this.drag?.start) || this.gizmo.dragging || this.extrude !== null;
+    return (
+      Boolean(this.drag?.start) ||
+      this.gizmo.dragging ||
+      this.extrude !== null ||
+      Boolean(this.polygon?.points.length)
+    );
   }
 
   // Copy of the document: the mesh plus the selection that goes with it.
@@ -1315,6 +1539,9 @@ export class Editor extends EventTarget {
       vertices: this.mesh.vertices.map((vertex) => vertex.clone()),
       faces: this.mesh.faces.map((face) => [...face]),
       wires: this.mesh.wires.map((wire) => [...wire]),
+      objects: this.mesh.objects.map((object) => ({ ...object })),
+      vertexObject: [...this.mesh.vertexObject],
+      nextObjectId: this.mesh.nextObjectId,
       selection: [...this.selection],
       target: [...this.target],
     };
@@ -1324,6 +1551,10 @@ export class Editor extends EventTarget {
     this.mesh.vertices = state.vertices.map((vertex) => vertex.clone());
     this.mesh.faces = state.faces.map((face) => [...face]);
     this.mesh.wires = state.wires.map((wire) => [...wire]);
+    // A state from before objects existed has none; the mesh then makes them up.
+    this.mesh.objects = (state.objects ?? []).map((object) => ({ ...object }));
+    this.mesh.vertexObject = [...(state.vertexObject ?? [])];
+    this.mesh.nextObjectId = Math.max(this.mesh.nextObjectId, state.nextObjectId ?? 1);
     this.selection = new Set(state.selection);
     this.target = new Set(state.target);
     this.rebuildView();
@@ -1369,8 +1600,10 @@ export class Editor extends EventTarget {
       `висящие рёбра (${wires.length}) — номер: две вершины`,
       ...wires.map((wire, i) => `  ${i}: ${wire.join(' ')}`),
       '',
-      `объекты (${this.topology.islands.length}) — номер: вершины | грани`,
-      ...this.topology.islands.map((island, i) => `  ${i}: ${list(island.vertices)} | ${list(island.faces)}`),
+      `объекты (${this.topology.islands.length}) — номер «имя»: вершины | грани`,
+      ...this.topology.islands.map(
+        (island, i) => `  ${i} «${island.name}»: ${list(island.vertices)} | ${list(island.faces)}`,
+      ),
       '',
       `выделение, элементы режима «${this.mode}»: ${list([...this.picked])}`,
       `выделение, вершины: ${list(sorted(this.selection))}`,

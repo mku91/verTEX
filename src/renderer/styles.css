@@ -93,7 +93,12 @@ body {
   border-left: 1px solid var(--border);
 }
 
-#modes button:hover,
+#modes button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#modes button:hover:enabled,
 #top-actions button:hover {
   background: var(--hover);
 }
@@ -169,7 +174,8 @@ body {
 }
 
 /* Bottom center of the viewport. */
-#extrude-popup {
+#extrude-popup,
+#polygon-popup {
   bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
@@ -180,7 +186,8 @@ body {
   pointer-events: none;
 }
 
-#extrude-popup circle {
+#extrude-popup circle,
+#polygon-popup circle {
   pointer-events: auto;
 }
 
@@ -395,10 +402,19 @@ body {
 }
 
 #panel {
+  display: flex;
+  flex-direction: column;
   grid-area: panel;
   overflow-y: auto;
   background: var(--bg-raised);
   border-left: 1px solid var(--border);
+}
+
+/* The statistics sit at the bottom of the panel. */
+#panel #stats {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
 }
 
 #panel section {
@@ -415,15 +431,87 @@ body {
   text-transform: uppercase;
 }
 
-#panel p {
-  margin: 0 0 8px;
+/* The list of objects fills the panel above the statistics. */
+#outliner-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 0;
 }
 
-#panel label {
+#outliner {
+  flex: 1;
+  min-height: 0;
+  margin: 0 -12px;
+  overflow-y: auto;
+}
+
+.outliner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px 3px 20px;
+  cursor: pointer;
+}
+
+.outliner-row:hover {
+  background: var(--hover);
+}
+
+/* An object with something selected in it, and a wholly selected one. */
+.outliner-row.active {
+  box-shadow: inset 2px 0 0 var(--selection);
+}
+
+.outliner-row.selected {
+  background: color-mix(in srgb, var(--selection) 28%, transparent);
+  box-shadow: inset 2px 0 0 var(--selection);
+}
+
+.outliner-row svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: var(--text-dim);
+}
+
+.outliner-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Floating panel with the selection's position, in the viewport's corner. */
+#properties {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 190px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+}
+
+#properties p {
+  margin: 0 0 6px;
+}
+
+#properties label {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* Grid step, at the right end of the top bar. */
+#grid-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--text-dim);
 }
 
 .axis {
@@ -436,8 +524,9 @@ body {
 .axis.y { color: var(--axis-y); }
 .axis.z { color: var(--axis-z); }
 
-#panel input,
-#panel select {
+#properties input,
+#outliner input,
+#grid-step select {
   flex: 1;
   min-width: 0;
   padding: 3px 6px;
@@ -448,13 +537,14 @@ body {
   font: inherit;
 }
 
-#panel input:focus,
-#panel select:focus {
+#properties input:focus,
+#outliner input:focus,
+#grid-step select:focus {
   border-color: var(--accent);
   outline: 0;
 }
 
-#panel input:disabled {
+#properties input:disabled {
   opacity: 0.4;
 }
 

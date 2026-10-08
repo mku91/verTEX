@@ -1,8 +1,10 @@
 import { Viewport } from './viewport.js';
-import { Editor, MODES } from './editor.js';
+import { Editor, MODES, OPERATION_MODES } from './editor.js';
 import { AxisGizmo } from './axis-gizmo.js';
 import { OrthoViews } from './ortho-views.js';
 import { ExtrudePopup } from './extrude-popup.js';
+import { PolygonPopup } from './polygon-popup.js';
+import { Outliner } from './outliner.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
@@ -12,6 +14,8 @@ const editor = new Editor(viewport);
 new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
+new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
+new Outliner(document.getElementById('outliner'), editor);
 
 const HINTS = {
   select: 'ЛКМ — тянуть элемент под курсором · Клик — выбрать · Shift+клик — добавить/убрать · Shift+тянуть — рамка · Tab — режим · 1–4 — фиксация оси · Ctrl — шаг ÷10 · ПКМ — камера · Пробел+ПКМ — панорама',
@@ -37,6 +41,7 @@ const ACTIONS = {
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
+  'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
   new: () => editor.newScene(),
   undo: () => editor.undo(),
   redo: () => editor.redo(),
@@ -51,6 +56,12 @@ const KEYS = {
   KeyK: () => ACTIONS['toggle-cut'](),
   KeyX: () => ACTIONS['toggle-extrude'](),
   KeyP: () => ACTIONS['toggle-pencil'](),
+  KeyG: () => ACTIONS['toggle-polygon'](),
+  // The polygon tool's own keys; they do nothing outside it.
+  Enter: () => editor.closePolygon(),
+  Backspace: () => editor.undoPolygonPoint(),
+  PageUp: () => editor.shiftPolygonPlane(1),
+  PageDown: () => editor.shiftPolygonPlane(-1),
   Digit1: () => editor.setAxisLock('free'),
   Digit2: () => editor.setAxisLock('x'),
   Digit3: () => editor.setAxisLock('y'),
@@ -72,7 +83,7 @@ const KEYS = {
 const ELEMENT_NAMES = { object: 'объектов', face: 'граней', edge: 'рёбер', vertex: 'вершин' };
 
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
-const modeButtons = [...document.querySelectorAll('[data-mode]')];
+const modeButtons = [...document.querySelectorAll('#modes [data-mode]')]; // not the gizmos' own data-mode
 const coordInputs = [...document.querySelectorAll('[data-axis]')];
 const $ = (id) => document.getElementById(id);
 
@@ -178,10 +189,12 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (event.code === 'Tab') {
-    // Tab / Shift+Tab cycle the selection mode.
+    // Tab / Shift+Tab cycle the selection mode; inside an operation, only
+    // through the modes it works in.
     event.preventDefault();
-    const next = MODES.indexOf(editor.mode) + (event.shiftKey ? -1 : 1);
-    editor.setMode(MODES[(next + MODES.length) % MODES.length]);
+    const modes = editor.operation ? MODES.filter((mode) => OPERATION_MODES[editor.operation].includes(mode)) : MODES;
+    const next = modes.indexOf(editor.mode) + (event.shiftKey ? -1 : 1);
+    editor.setMode(modes[(next + modes.length) % modes.length]);
     return;
   }
   if ((event.ctrlKey || event.metaKey) && !event.altKey) {
@@ -274,6 +287,17 @@ function setViewsSize(share) {
   setViewsSize(parseFloat(localStorage.getItem(VIEWS_SIZE_KEY)) || VIEWS_SIZE_DEFAULT);
 }
 
+// 532 -> "532 Б", 20480 -> "20 КБ", 1572864 -> "1.5 МБ".
+function formatBytes(bytes) {
+  const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+  let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) {
+    bytes /= 1024;
+    unit++;
+  }
+  return `${unit === 0 || bytes >= 100 ? Math.round(bytes) : +bytes.toFixed(1)} ${units[unit]}`;
+}
+
 function refresh() {
   const { mesh, selection, tool, mode, picked } = editor;
 
@@ -282,6 +306,8 @@ function refresh() {
   }
   for (const button of modeButtons) {
     button.classList.toggle('active', button.dataset.mode === mode);
+    // An operation switches off the modes it can't work in.
+    button.disabled = editor.operation !== null && !OPERATION_MODES[editor.operation].includes(button.dataset.mode);
   }
 
   const center = editor.selectionCenter();
@@ -291,17 +317,40 @@ function refresh() {
     input.value = selection.size ? +center[input.dataset.axis].toFixed(5) : '';
   }
 
+  $('properties').hidden = picked.size === 0; // only while something is selected
   $('selection-count').textContent = picked.size
     ? `Выбрано ${ELEMENT_NAMES[mode]}: ${picked.size}`
     : 'Ничего не выбрано';
-  $('stat-vertices').textContent = mesh.vertices.length;
-  $('stat-edges').textContent = mesh.edges().length;
-  $('stat-faces').textContent = mesh.faces.length;
+  // The statistics are those of the objects holding the selection; of the
+  // whole scene if nothing is selected.
+  const { islands, islandOfVertex, edges } = editor.topology;
+  const objects = [...new Set([...selection].map((vertex) => islandOfVertex[vertex]))].map((i) => islands[i]);
+  const scope = objects.length ? objects : islands;
+  const counted = new Set(scope.flatMap((island) => island.vertices));
+  $('stats-title').textContent =
+    objects.length === 0 ? 'Сцена' : objects.length === 1 ? 'Объект' : `Объекты (${objects.length})`;
+  $('stat-vertices').textContent = counted.size;
+  $('stat-edges').textContent = edges.filter(([a]) => counted.has(a)).length;
+  $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
+  $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
-  for (const name of ['cut', 'extrude', 'pencil']) {
+  for (const name of ['cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
   let hint = HINTS[editor.operation ?? tool];
+  if (editor.polygon) {
+    const { axis, offset, points, problem } = editor.polygon;
+    const plane = { x: 'YZ', y: 'XZ', z: 'XY' }[axis];
+    if (!axis) {
+      hint = 'Полигон: выберите плоскость на гизмо внизу (или клавишами 2/3/4) · Esc или G — выйти';
+    } else if (problem) {
+      hint = `Полигон не создан: ${problem} · Backspace — убрать последнюю точку · Esc — начать контур заново`;
+    } else if (points.length === 0) {
+      hint = `Полигон: плоскость ${plane}, ${axis.toUpperCase()} = ${+offset.toFixed(5)} · Клик — первая точка · PgUp/PgDn — сдвинуть плоскость · Esc или G — выйти`;
+    } else {
+      hint = `Полигон: точек ${points.length} · Клик — следующая точка · клик по первой точке или Enter — замкнуть · Backspace — убрать последнюю · Esc — начать заново`;
+    }
+  }
   if (editor.extrude) {
     hint = `Экструд: ${+editor.extrude.distance.toFixed(5)} · Клик — зафиксировать · Ctrl — мелкий шаг · Esc — отмена`;
   }

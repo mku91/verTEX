@@ -5,6 +5,7 @@ import { OrthoViews } from './ortho-views.js';
 import { ExtrudePopup } from './extrude-popup.js';
 import { PolygonPopup } from './polygon-popup.js';
 import { Outliner } from './outliner.js';
+import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
@@ -15,10 +16,10 @@ new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
-new Outliner(document.getElementById('outliner'), editor);
+new Outliner(document.getElementById('outliner-section'), editor);
 
 const HINTS = {
-  select: 'ЛКМ — тянуть элемент под курсором · Клик — выбрать · Shift+клик — добавить/убрать · Shift+тянуть — рамка · Tab — режим · 1–4 — фиксация оси · Ctrl — шаг ÷10 · ПКМ — камера · Пробел+ПКМ — панорама',
+  select: 'ЛКМ — тянуть элемент под курсором · Клик — выбрать · Shift+клик — добавить/убрать · Shift+тянуть — рамка · Tab — режим · 1–4 — фиксация оси · Ctrl — мелкая сетка · ПКМ — камера · Пробел+ПКМ — панорама',
   move: 'Тяните стрелки гизмо, чтобы переместить выделение',
   rotate: 'Тяните кольца гизмо, чтобы повернуть выделение вокруг его центра',
   scale: 'Тяните маркеры гизмо, чтобы масштабировать выделение от его центра',
@@ -28,7 +29,6 @@ const HINTS = {
 };
 
 const ACTIONS = {
-  'add-cube': () => editor.addCube(),
   delete: () => editor.deleteSelection(),
   frame: () => {
     editor.frame();
@@ -101,6 +101,14 @@ for (const input of coordInputs) {
   const apply = (value) => editor.setSelectionCenter(input.dataset.axis, value);
   const parse = () => parseFloat(input.value.replace(',', '.'));
   input.addEventListener('change', () => apply(parse()));
+  // Dragging the field up or down moves the selection; the whole drag is one undo step.
+  let beforeScrub = null;
+  scrubbable(input, {
+    read: parse,
+    write: (value) => editor.setSelectionCenter(input.dataset.axis, value, false),
+    begin: () => { beforeScrub = editor.snapshot(); },
+    end: () => editor.commit(beforeScrub),
+  });
   // Arrow keys step the value by the grid step, like a number field's spinner.
   input.addEventListener('keydown', (event) => {
     if (event.code !== 'ArrowUp' && event.code !== 'ArrowDown') return;
@@ -116,10 +124,73 @@ for (const [id, { label }] of Object.entries(THEMES)) $('theme').add(new Option(
 $('theme').value = theme.id;
 $('theme').addEventListener('change', (event) => setTheme(event.target.value));
 
-$('snap-step').addEventListener('change', (event) => {
-  editor.snapGrid.step = parseFloat(event.target.value);
-  event.target.blur(); // give the keyboard back to the editor shortcuts
-});
+// --- grid controls (top bar): the snap step and its fine division -------
+
+const COARSE_STEPS = [1, 0.5, 0.25, 0.125, 0.0625];
+const COARSE_LABELS = ['1', '1/2', '1/4', '1/8', '1/16'];
+const GRID_KEYS = { coarse: 'vertex.gridStep', fine: 'vertex.gridFineDivisor' };
+const gridControls = [...document.querySelectorAll('.grid-control')].map((element) => ({
+  kind: element.dataset.grid,
+  button: element.querySelector('button'),
+  value: element.querySelector('.grid-value'),
+  popup: element.querySelector('.grid-popup'),
+  slider: element.querySelector('input'),
+  output: element.querySelector('output'),
+}));
+
+// Shows the grid settings on the buttons and in the popups.
+function showGrid() {
+  const { step, fineDivisor } = editor.snapGrid;
+  for (const control of gridControls) {
+    if (control.kind === 'coarse') {
+      const index = COARSE_STEPS.indexOf(step);
+      control.slider.value = index;
+      control.value.textContent = COARSE_LABELS[index];
+      control.output.textContent = `Шаг ${COARSE_LABELS[index]}`;
+    } else {
+      control.slider.value = fineDivisor;
+      control.value.textContent = `÷${fineDivisor}`;
+      control.output.textContent = `Клетка делится на ${fineDivisor} — шаг ${+(step / fineDivisor).toFixed(5)}`;
+    }
+  }
+}
+function closeGridPopups(except = null) {
+  let closed = false;
+  for (const control of gridControls) {
+    if (control === except) continue;
+    closed ||= !control.popup.hidden;
+    control.popup.hidden = true;
+    control.button.classList.remove('active');
+  }
+  return closed;
+}
+for (const control of gridControls) {
+  control.button.addEventListener('click', () => {
+    closeGridPopups(control);
+    control.popup.hidden = !control.popup.hidden;
+    control.button.classList.toggle('active', !control.popup.hidden);
+  });
+  control.slider.addEventListener('input', () => {
+    const value = Number(control.slider.value);
+    if (control.kind === 'coarse') editor.snapGrid.step = COARSE_STEPS[value];
+    else editor.snapGrid.fineDivisor = value;
+    localStorage.setItem(GRID_KEYS[control.kind], control.kind === 'coarse' ? COARSE_STEPS[value] : value);
+    showGrid();
+  });
+  // Released: give the keyboard back to the editor shortcuts.
+  control.slider.addEventListener('change', () => control.slider.blur());
+}
+// A press anywhere else closes the popups.
+window.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest?.('.grid-control')) closeGridPopups();
+}, true);
+{
+  const step = parseFloat(localStorage.getItem(GRID_KEYS.coarse));
+  const divisor = parseInt(localStorage.getItem(GRID_KEYS.fine), 10);
+  if (COARSE_STEPS.includes(step)) editor.snapGrid.step = step;
+  if (divisor >= 2 && divisor <= 10) editor.snapGrid.fineDivisor = divisor;
+  showGrid();
+}
 
 // --- settings dialog (File -> Settings) ---------------------------------
 
@@ -178,6 +249,7 @@ window.addEventListener('keydown', (event) => {
     closeShadingMenu();
     return;
   }
+  if (event.code === 'Escape' && closeGridPopups()) return;
   if (event.target instanceof HTMLSelectElement) return;
   if (event.target instanceof HTMLInputElement) {
     if (event.code === 'Enter' || event.code === 'Escape') event.target.blur();
@@ -231,6 +303,9 @@ for (const type of ['keydown', 'keyup']) {
 // Buttons must not take focus, or Space would press the last clicked one.
 for (const id of ['toolbar', 'modes', 'top-actions', 'shading']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault());
+}
+for (const control of gridControls) {
+  control.button.addEventListener('mousedown', (event) => event.preventDefault());
 }
 
 window.vertex?.onMenu((action) => ACTIONS[action]?.());

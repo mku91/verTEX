@@ -39,16 +39,30 @@
           <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
         </button>
       </div>
-      <label id="grid-step" title="Шаг привязки к сетке (Ctrl во время перетаскивания — в 10 раз мельче)">
-        <span>Сетка</span>
-        <select id="snap-step">
-          <option value="1">1</option>
-          <option value="0.5">1/2</option>
-          <option value="0.25" selected>1/4</option>
-          <option value="0.125">1/8</option>
-          <option value="0.0625">1/16</option>
-        </select>
-      </label>
+      <div id="grid-controls">
+        <div class="grid-control" data-grid="coarse">
+          <button title="Крупная сетка: шаг привязки">
+            <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM12 3v18M3 12h18"/></svg>
+            <span class="grid-value"></span>
+          </button>
+          <div class="grid-popup" hidden>
+            <div class="grid-popup-title">Крупная сетка</div>
+            <input type="range" min="0" max="4" step="1">
+            <output></output>
+          </div>
+        </div>
+        <div class="grid-control" data-grid="fine">
+          <button title="Мелкая сетка: на сколько частей делится клетка, пока зажат Ctrl">
+            <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM7.5 3v18M12 3v18M16.5 3v18M3 7.5h18M3 12h18M3 16.5h18"/></svg>
+            <span class="grid-value"></span>
+          </button>
+          <div class="grid-popup" hidden>
+            <div class="grid-popup-title">Мелкая сетка (Ctrl)</div>
+            <input type="range" min="2" max="10" step="1">
+            <output></output>
+          </div>
+        </div>
+      </div>
     </header>
 
     <aside id="toolbar">
@@ -67,9 +81,6 @@
 
       <hr>
 
-      <button data-action="add-cube" title="Добавить куб">
-        <svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7zm0 2.300L5.800 7.700 12 11.200l6.200-3.500zM5 9.400v6.400l6 3.400v-6.400zm14 0l-6 3.400v6.400l6-3.400z"/></svg>
-      </button>
       <button data-action="delete" title="Удалить выделенные вершины (Delete)">
         <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm3.500 2v8h1.500v-8zm3.500 0v8h1.500v-8z"/></svg>
       </button>
@@ -112,8 +123,26 @@
 
     <aside id="panel">
       <section id="outliner-section">
-        <h2>Сцена</h2>
-        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать"></div>
+        <div class="outliner-header">
+          <h2>Сцена</h2>
+          <button id="add-object" title="Добавить объект">+</button>
+        </div>
+        <div id="add-menu" hidden>
+          <button data-primitive="cube">Куб</button>
+          <button data-primitive="cone">Конус…</button>
+          <button data-primitive="cylinder">Цилиндр…</button>
+          <button data-primitive="sphere">Сфера…</button>
+          <button data-group>Группа</button>
+        </div>
+        <form id="add-form" hidden>
+          <h3></h3>
+          <div class="fields"></div>
+          <div class="form-buttons">
+            <button type="button" data-cancel>Отмена</button>
+            <button type="submit">Создать</button>
+          </div>
+        </form>
+        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх"></div>
       </section>
       <section id="stats">
         <h2 id="stats-title" title="Данные выделенных объектов; без выделения — всей сцены"></h2>

@@ -433,6 +433,7 @@ body {
 
 /* The list of objects fills the panel above the statistics. */
 #outliner-section {
+  position: relative; /* for the "+" menu */
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -447,11 +448,154 @@ body {
   overflow-y: auto;
 }
 
-.outliner-row {
+.outliner-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.outliner-header h2 {
+  margin: 0;
+}
+
+#add-object {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: 600 15px/1 inherit;
+  cursor: pointer;
+}
+
+#add-object:hover,
+#add-object.active {
+  background: var(--hover);
+}
+
+/* Drops down from the "+" button. */
+#add-menu {
+  position: absolute;
+  top: 34px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+#add-menu[hidden],
+#add-form[hidden] {
+  display: none;
+}
+
+#add-menu button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Not an object: set apart from the primitives. */
+#add-menu button[data-group] {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 4px 4px;
+}
+
+#add-menu button:hover {
+  background: var(--hover);
+}
+
+/* Covers the window under a modal form and takes every click meant for it. */
+.modal-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+}
+
+.modal-blocker[hidden] {
+  display: none;
+}
+
+/* Parameters of the object about to be added: floats in the middle of the window. */
+#add-form {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--border) 70%, transparent);
+  transform: translate(-50%, -50%);
+}
+
+#add-form h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#add-form label {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 12px 3px 20px;
+}
+
+#add-form label span {
+  flex: 1;
+  color: var(--text-dim);
+}
+
+#add-form input {
+  flex: 0 0 64px;
+  width: 64px;
+}
+
+.form-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.form-buttons button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.form-buttons button[type="submit"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.outliner-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px 3px 6px;
   cursor: pointer;
 }
 
@@ -469,6 +613,31 @@ body {
   box-shadow: inset 2px 0 0 var(--selection);
 }
 
+/* While a row is dragged: where it would be nested. */
+.outliner-row.drop-target {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+#outliner.drop-root {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+#outliner.dragging,
+#outliner.dragging .outliner-row {
+  cursor: grabbing;
+}
+
+/* Folds an object's children; empty, but taking its place, on rows without any. */
+.outliner-arrow {
+  flex: none;
+  width: 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
 .outliner-row svg {
   flex: none;
   width: 14px;
@@ -476,10 +645,73 @@ body {
   fill: var(--text-dim);
 }
 
-.outliner-row span {
+.outliner-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The eye at the end of a row: hides or shows the object. */
+.outliner-eye {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+
+.outliner-eye:hover {
+  background: var(--border);
+  opacity: 1;
+}
+
+.outliner-row.hidden .outliner-name,
+.outliner-row.hidden > svg {
+  opacity: 0.4;
+}
+
+/* The row its right-click menu is open for. */
+.outliner-row.context {
+  background: var(--hover);
+}
+
+/* A menu at the pointer. */
+.context-menu {
+  position: fixed;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.context-menu[hidden] {
+  display: none;
+}
+
+.context-menu button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.context-menu button:disabled {
+  color: var(--text-dim);
+  cursor: default;
 }
 
 /* Floating panel with the selection's position, in the viewport's corner. */
@@ -506,12 +738,79 @@ body {
 }
 
 /* Grid step, at the right end of the top bar. */
-#grid-step {
+#grid-controls {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.grid-control {
+  position: relative;
+}
+
+.grid-control > button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.grid-control > button:hover,
+.grid-control > button.active {
+  background: var(--hover);
+}
+
+.grid-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+/* Drops down from its button: a slider and the value it sets. */
+.grid-popup {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 200px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+}
+
+.grid-popup[hidden] {
+  display: none;
+}
+
+.grid-popup-title {
   color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.grid-popup input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.grid-popup output {
+  font-variant-numeric: tabular-nums;
 }
 
 .axis {
@@ -526,7 +825,7 @@ body {
 
 #properties input,
 #outliner input,
-#grid-step select {
+#add-form input {
   flex: 1;
   min-width: 0;
   padding: 3px 6px;
@@ -539,9 +838,18 @@ body {
 
 #properties input:focus,
 #outliner input:focus,
-#grid-step select:focus {
+#add-form input:focus {
   border-color: var(--accent);
   outline: 0;
+}
+
+/* Number fields that are also dragged up and down, see scrub.js. */
+.scrubbable {
+  cursor: ns-resize;
+}
+
+.scrubbable.scrubbing {
+  border-color: var(--accent);
 }
 
 #properties input:disabled {

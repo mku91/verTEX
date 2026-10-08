@@ -39,6 +39,19 @@ const CUT_DASH = 9;
 const CUT_GAP = 9;
 const CUT_FLOW = 40; // px per second
 
+// Adds a primitive to a mesh as a new object and returns its vertices, or
+// undefined for an unknown kind. Options: cone { sides, size }, cylinder
+// { sides, size, height }, sphere { segments, size }.
+function buildPrimitive(mesh, kind, options) {
+  switch (kind) {
+    case 'cube': return mesh.addCube();
+    case 'cone': return mesh.addCone(options.sides, options.size);
+    case 'cylinder': return mesh.addCylinder(options.sides, options.size, options.height);
+    case 'sphere': return mesh.addSphere(options.segments, options.size);
+    default: return undefined;
+  }
+}
+
 // Editor state: mesh, selection, selection mode, active tool. Dispatches 'change' on any update.
 export class Editor extends EventTarget {
   constructor(viewport) {
@@ -888,6 +901,7 @@ export class Editor extends EventTarget {
       const bottom = Math.max(box.y0, box.y1) - origin.top;
       const inside = [];
       this.mesh.vertices.forEach((vertex, i) => {
+        if (this.topology.hiddenVertices.has(i)) return;
         const p = screen.project(vertex);
         if (!p || p.x < left || p.x > right || p.y < top || p.y > bottom) return;
         if (!this.isOccluded(vertex)) inside.push(i);
@@ -1125,18 +1139,19 @@ export class Editor extends EventTarget {
     switch (this.mode) {
       case 'edge': return key.split('_').map(Number);
       case 'face': return this.mesh.faces[key];
-      case 'object': return this.topology.islands[key].vertices;
+      case 'object': return this.topology.islands[key].group; // a group: everything in it
       default: return [key];
     }
   }
 
-  // Keys of every element of the current mode.
+  // Keys of every element of the current mode; what is hidden is left out.
   allElements() {
+    const hidden = this.topology.hiddenVertices;
     switch (this.mode) {
       case 'edge': return this.topology.edges.map(([a, b]) => edgeKey(a, b));
-      case 'face': return this.mesh.faces.map((_, i) => i);
-      case 'object': return this.topology.islands.map((_, i) => i);
-      default: return this.mesh.vertices.map((_, i) => i);
+      case 'face': return this.mesh.faces.map((_, i) => i).filter((i) => !hidden.has(this.mesh.faces[i][0]));
+      case 'object': return this.topology.islands.map((_, i) => i).filter((i) => !this.topology.islands[i].hidden);
+      default: return this.mesh.vertices.map((_, i) => i).filter((i) => !hidden.has(i));
     }
   }
 
@@ -1149,7 +1164,45 @@ export class Editor extends EventTarget {
       for (const face of island.faces) islandOfFace[face] = i;
       for (const vertex of island.vertices) islandOfVertex[vertex] = i;
     });
-    this.topology = { edges: this.mesh.edges(), islands, islandOfFace, islandOfVertex };
+    // The tree: every entry's place in it, and its `group` - its own vertices
+    // or, for a group, those of everything inside, which is what selecting it takes.
+    const indexOfId = new Map(islands.map((island, i) => [island.id, i]));
+    for (const island of islands) island.children = [];
+    islands.forEach((island, i) => {
+      island.parentIndex = indexOfId.get(island.parent) ?? null;
+      if (island.parentIndex !== null) islands[island.parentIndex].children.push(i);
+    });
+    // Visibility: `hiddenOwn` is the entry's own switch, `hidden` the outcome -
+    // a hidden group hides all it holds. Hidden things are in nobody's `group`.
+    const hiddenVertices = new Set();
+    const resolve = (island, under) => {
+      island.hiddenOwn = island.hidden;
+      island.hidden = under || island.hiddenOwn;
+      if (island.hidden) for (const vertex of island.vertices) hiddenVertices.add(vertex);
+      for (const child of island.children) resolve(islands[child], island.hidden);
+    };
+    for (const island of islands) if (island.parentIndex === null) resolve(island, false);
+    const collect = (island) => {
+      if (island.group) return;
+      island.group = island.hidden ? [] : [...island.vertices];
+      island.groupFaces = island.hidden ? [] : [...island.faces];
+      for (const child of island.children) {
+        collect(islands[child]);
+        island.group.push(...islands[child].group);
+        island.groupFaces.push(...islands[child].groupFaces);
+      }
+    };
+    islands.forEach(collect);
+    const edges = this.mesh.edges().filter(([a]) => !hiddenVertices.has(a));
+    this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices };
+    this.view.hidden = hiddenVertices; // takes effect at the view's next rebuild
+  }
+
+  // Takes what has become hidden out of the selection and the target.
+  dropHidden() {
+    const { hiddenVertices } = this.topology;
+    this.selection = new Set([...this.selection].filter((i) => !hiddenVertices.has(i)));
+    this.target = new Set([...this.target].filter((i) => !hiddenVertices.has(i)));
   }
 
   // Makes `selection` the vertices of the picked elements.
@@ -1173,8 +1226,12 @@ export class Editor extends EventTarget {
   // picked when all of its vertices are selected.
   adoptSelection() {
     const vertices = this.selection;
+    // (An empty group has no vertices to be selected by.)
     this.picked = new Set(
-      this.allElements().filter((key) => this.elementVertices(key).every((i) => vertices.has(i))),
+      this.allElements().filter((key) => {
+        const own = this.elementVertices(key);
+        return own.length > 0 && own.every((i) => vertices.has(i));
+      }),
     );
     this.syncSelection();
   }
@@ -1184,7 +1241,7 @@ export class Editor extends EventTarget {
     const { mode, hovered } = this;
     const faces = (keys) => {
       if (mode === 'face') return keys;
-      if (mode === 'object') return keys.flatMap((key) => this.topology.islands[key].faces);
+      if (mode === 'object') return keys.flatMap((key) => this.topology.islands[key].groupFaces);
       return [];
     };
     const edges = (keys) => (mode === 'edge' ? keys.map((key) => this.elementVertices(key)) : []);
@@ -1259,6 +1316,7 @@ export class Editor extends EventTarget {
     let best = null;
     let bestDistance = PICK_RADIUS;
     this.mesh.vertices.forEach((vertex, i) => {
+      if (this.topology.hiddenVertices.has(i)) return;
       const p = screen.project(vertex);
       if (!p) return;
       const distance = Math.hypot(p.x - screen.x, p.y - screen.y);
@@ -1408,10 +1466,101 @@ export class Editor extends EventTarget {
   // Selects a whole object, by its index in the objects list; from any mode
   // this goes to object mode. `additive` toggles it in the selection.
   selectObject(index, additive) {
-    if (this.busy()) return;
+    if (this.busy() || this.topology.islands[index]?.hidden) return;
     if (this.operation) this.setOperation(null);
     if (this.mode !== 'object') this.setMode('object');
     this.select(index, additive);
+  }
+
+  // Shows, as a wireframe in the scene, the object addPrimitive() would make
+  // with these arguments; a null kind takes the preview away. Nothing is added
+  // to the model.
+  previewPrimitive(kind, options = {}) {
+    const draft = new EditableMesh();
+    const made = kind && buildPrimitive(draft, kind, options);
+    this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
+    this.viewport.requestRender();
+  }
+
+  // Adds an empty group to the scene tree.
+  addGroup() {
+    if (this.busy()) return;
+    this.history.push(this.snapshot());
+    this.mesh.addObject('Группа', 'group');
+    this.updateTopology();
+    this.emitChange();
+  }
+
+  // Puts an object or a group into a group (indices in the objects list), or,
+  // with null, back on the top level. Only a group takes anything in, and not
+  // itself or a group it is inside of.
+  setParent(index, parentIndex) {
+    const child = this.mesh.objects[index];
+    const parent = parentIndex === null ? null : this.mesh.objects[parentIndex];
+    if (!child || parent === undefined || this.busy()) return;
+    const parentId = parent?.id ?? null;
+    if ((child.parent ?? null) === parentId || !this.mesh.canParent(child.id, parentId)) return;
+    this.history.push(this.snapshot());
+    child.parent = parentId;
+    // Groups changed, and with them what "selected" means - and what is seen,
+    // if the group is a hidden one.
+    this.updateTopology();
+    this.dropHidden();
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
+  // Hides an object or a group (index in the objects list) with all it holds,
+  // or shows it again. What is hidden is not drawn and can't be picked.
+  setHidden(index, hidden) {
+    const object = this.mesh.objects[index];
+    if (!object || Boolean(object.hidden) === hidden || this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    this.history.push(this.snapshot());
+    object.hidden = hidden;
+    this.updateTopology();
+    this.dropHidden();
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
+  // Deletes an object or a group (index in the objects list) with all it
+  // holds, whatever is selected.
+  deleteObject(index) {
+    const { islands } = this.topology;
+    if (!islands[index] || this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    this.history.push(this.snapshot());
+    const { vertices, groups } = this.contents([index]);
+    const remap = this.mesh.removeVertices(vertices);
+    this.mesh.dropObjects(groups);
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.target = kept(this.target);
+    this.selection = kept(this.selection);
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
+  // Everything under the given entries of the objects list, the hidden
+  // included: the vertices, and the ids of the groups.
+  contents(indices) {
+    const { islands } = this.topology;
+    const vertices = new Set();
+    const groups = new Set();
+    const collect = (index) => {
+      const island = islands[index];
+      for (const vertex of island.vertices) vertices.add(vertex);
+      if (island.kind === 'group') groups.add(island.id);
+      island.children.forEach(collect);
+    };
+    indices.forEach(collect);
+    return { vertices, groups };
+  }
+
+  // Flies the camera to an object or a group (index in the objects list).
+  focusObject(index) {
+    const { vertices } = this.contents([index]);
+    this.viewport.frame([...vertices].map((i) => this.mesh.vertices[i]), true);
   }
 
   // Renames an object; a name already taken gets a numbered suffix.
@@ -1437,10 +1586,16 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
-  addCube() {
+  // Adds a new object at the origin and selects it: 'cube', 'cone'
+  // ({ sides, size }), 'cylinder' ({ sides, size, height }) or 'sphere'
+  // ({ segments, size }).
+  addPrimitive(kind, options = {}) {
     if (this.busy()) return;
+    this.previewPrimitive(null);
     const before = this.snapshot();
-    this.selection = new Set(this.mesh.addCube());
+    const vertices = buildPrimitive(this.mesh, kind, options);
+    if (!vertices) return;
+    this.selection = new Set(vertices);
     this.commit(before);
     this.rebuildView();
     this.setTool('move');
@@ -1464,7 +1619,17 @@ export class Editor extends EventTarget {
       this.mesh.wires = this.mesh.wires.filter(([a, b]) => !this.picked.has(edgeKey(a, b)));
       remap = this.mesh.removeFaces(faces);
     } else {
-      remap = this.mesh.removeVertices(this.selection);
+      // A deleted group goes with everything inside it, hidden things too.
+      const doomed = new Set(this.selection);
+      let groups = new Set();
+      if (this.mode === 'object') {
+        const { islands } = this.topology;
+        const inside = this.contents([...this.picked].filter((key) => islands[key].kind === 'group'));
+        for (const vertex of inside.vertices) doomed.add(vertex);
+        groups = inside.groups;
+      }
+      remap = this.mesh.removeVertices(doomed);
+      this.mesh.dropObjects(groups);
     }
     // What is left of the edited object stays the target.
     this.target = new Set([...this.target].filter((i) => remap.has(i)).map((i) => remap.get(i)));
@@ -1493,17 +1658,21 @@ export class Editor extends EventTarget {
 
   frame() {
     const { vertices } = this.mesh;
-    const points = this.selection.size ? [...this.selection].map((i) => vertices[i]) : vertices;
+    const visible = vertices.filter((_, i) => !this.topology.hiddenVertices.has(i));
+    const points = this.selection.size ? [...this.selection].map((i) => vertices[i]) : visible;
     this.viewport.frame(points);
   }
 
   // Moves the selection so that its center lands on `value` along `axis` ('x' | 'y' | 'z').
-  setSelectionCenter(axis, value) {
+  // With `record` off the move makes no undo step: a caller that changes the
+  // value many times in one gesture takes a snapshot() first and commit()s it
+  // when the gesture ends.
+  setSelectionCenter(axis, value, record = true) {
     if (this.selection.size === 0 || !Number.isFinite(value) || this.busy()) return;
-    const before = this.snapshot();
+    const before = record ? this.snapshot() : null;
     const offset = value - this.selectionCenter()[axis];
     for (const i of this.selection) this.mesh.vertices[i][axis] += offset;
-    this.commit(before);
+    if (before) this.commit(before);
     this.view.updatePositions();
     this.placeGizmo();
     this.emitChange();
@@ -1602,7 +1771,10 @@ export class Editor extends EventTarget {
       '',
       `объекты (${this.topology.islands.length}) — номер «имя»: вершины | грани`,
       ...this.topology.islands.map(
-        (island, i) => `  ${i} «${island.name}»: ${list(island.vertices)} | ${list(island.faces)}`,
+        (island, i) =>
+          island.kind === 'group'
+            ? `  ${i} группа «${island.name}»${island.hidden ? ' (скрыта)' : ''}: ${list(island.children)}`
+            : `  ${i} «${island.name}»${island.parentIndex === null ? '' : ` (в группе ${island.parentIndex})`}${island.hidden ? ' (скрыт)' : ''}: ${list(island.vertices)} | ${list(island.faces)}`,
       ),
       '',
       `выделение, элементы режима «${this.mode}»: ${list([...this.picked])}`,
@@ -1633,8 +1805,8 @@ export class Editor extends EventTarget {
     this.snapGrid.end();
     this.hovered = null;
     this.viewport.renderer.domElement.style.cursor = '';
+    this.updateTopology(); // first: it tells the view what is hidden
     this.view.rebuild();
-    this.updateTopology();
     this.adoptSelection();
     this.refreshHighlight();
   }

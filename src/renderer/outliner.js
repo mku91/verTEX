@@ -1,63 +1,289 @@
+import { scrubbable } from './scrub.js';
+
 const OBJECT_ICON =
   '<svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7zm0 2.3L5.8 7.7 12 11.2l6.2-3.5zM5 9.4v6.4l6 3.4v-6.4zm14 0l-6 3.4v6.4l6-3.4z"/></svg>';
+const GROUP_ICON =
+  '<svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const EYE_ICON = '<svg viewBox="0 0 24 24"><path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+const EYE_OFF_ICON = '<svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5c0 .65-.13 1.26-.36 1.83l2.92 2.92A11.8 11.8 0 0 0 23 12c-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65a3 3 0 0 0 3 3c.22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53a5 5 0 0 1-5-5c0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16a3 3 0 0 0-3-3l-.17.01z"/></svg>';
+const INDENT = 14; // px per nesting level
+const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
+// Ctrl combinations that still work in the fields of the modal form.
+const CLIPBOARD_KEYS = new Set(['KeyA', 'KeyC', 'KeyV', 'KeyX', 'KeyZ', 'KeyY']);
 
-// The list of the scene's objects, by name. A click selects an object
-// (Shift+click adds it to the selection or takes it out), a double click
-// renames it. Rows of objects that hold a selection are highlighted.
+// Parameters asked for before a primitive is made: field id, label, default
+// and limits. A kind without fields is made at once.
+const PRIMITIVES = {
+  cube: { title: 'Куб', fields: [] },
+  cone: {
+    title: 'Конус',
+    fields: [
+      { id: 'sides', label: 'Вершин в основании', value: 8, min: 3, max: 64, whole: true },
+      { id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 },
+    ],
+  },
+  cylinder: {
+    title: 'Цилиндр',
+    fields: [
+      { id: 'sides', label: 'Вершин в основании', value: 8, min: 3, max: 64, whole: true },
+      { id: 'size', label: 'Диаметр', value: 1, min: 0.01, max: 100 },
+      { id: 'height', label: 'Высота', value: 1, min: 0.01, max: 100 },
+    ],
+  },
+  sphere: {
+    title: 'Сфера',
+    fields: [
+      { id: 'segments', label: 'Детализация', value: 8, min: 3, max: 48, whole: true },
+      { id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 },
+    ],
+  },
+};
+
+// The scene tree: objects and groups by name, a group's contents indented under it.
+//   click          - select the object, or everything in the group; Shift+click adds or removes it
+//   double click   - rename
+//   drag onto a group - put it in; onto an object - next to it; onto empty space - top level
+//   the arrow      - fold or unfold a group
+//   the eye        - hide or show the object, or the group with all it holds
+//   right click    - a menu: fly the camera to it, hide or show, delete
+// Above the list, "+" opens the menu of things to add.
 export class Outliner {
-  constructor(element, editor) {
-    this.list = element;
+  constructor(section, editor) {
     this.editor = editor;
+    this.list = section.querySelector('#outliner');
+    this.menu = section.querySelector('#add-menu');
+    this.form = section.querySelector('#add-form');
+    this.addButton = section.querySelector('#add-object');
     this.shown = ''; // what the list was last built from
     this.renaming = false;
+    this.folded = new Set(); // ids of objects whose children are hidden
+    this.press = null; // a press on a row that may become a drag
+    this.suppressClick = false;
 
-    this.list.addEventListener('click', (event) => {
-      const row = event.target.closest('[data-object]');
-      if (row && !this.renaming) editor.selectObject(Number(row.dataset.object), event.shiftKey);
-    });
-    this.list.addEventListener('dblclick', (event) => {
-      const row = event.target.closest('[data-object]');
-      if (row) this.rename(row);
-    });
-    // Rows must not take the keyboard focus away from the editor.
-    this.list.addEventListener('mousedown', (event) => {
-      if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
-    });
+    this.bindList();
+    this.bindContextMenu();
+    this.bindAdding(section);
     editor.addEventListener('change', () => this.update());
     this.update();
   }
 
+  // --- the list ----------------------------------------------------------
+
   update() {
     if (this.renaming) return; // don't pull the text field from under the user
     const { islands, islandOfVertex } = this.editor.topology;
-    const selected = new Set([...this.editor.selection].map((vertex) => islandOfVertex[vertex]));
+    const { selection, picked } = this.editor;
     // Whole objects are selected only in object mode; elsewhere the object is just being worked on.
     const whole = this.editor.mode === 'object';
-    const signature = JSON.stringify([islands.map((island) => island.name), [...selected], whole]);
+    const selected = new Set([...selection].map((vertex) => islandOfVertex[vertex]));
+    // A group is selected when picked itself or when all it holds is.
+    islands.forEach((island, index) => {
+      if (island.kind !== 'group' || !whole) return;
+      const full = island.group.length > 0 && island.group.every((vertex) => selection.has(vertex));
+      if (picked.has(index) || full) selected.add(index);
+    });
+    const signature = JSON.stringify([
+      islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden]),
+      [...selected],
+      whole,
+      [...this.folded],
+    ]);
     if (signature === this.shown) return;
     this.shown = signature;
 
-    this.list.replaceChildren(
-      ...islands.map((island, index) => {
-        const row = document.createElement('div');
-        row.className = 'outliner-row';
-        row.dataset.object = index;
-        if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
-        row.innerHTML = OBJECT_ICON;
-        const name = document.createElement('span');
-        name.textContent = island.name;
-        row.append(name);
-        row.title = `${island.vertices.length} вершин, ${island.faces.length} граней`;
-        return row;
-      }),
-    );
+    const rows = [];
+    const addRow = (index, depth) => {
+      const island = islands[index];
+      const folded = this.folded.has(island.id);
+      const row = document.createElement('div');
+      row.className = 'outliner-row';
+      row.dataset.object = index;
+      row.style.paddingLeft = `${6 + depth * INDENT}px`;
+      if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
+
+      const arrow = document.createElement('span');
+      arrow.className = 'outliner-arrow';
+      if (island.children.length) {
+        arrow.textContent = folded ? '▸' : '▾';
+        arrow.dataset.fold = island.id;
+      }
+      const name = document.createElement('span');
+      name.className = 'outliner-name';
+      name.textContent = island.name;
+      row.append(arrow);
+      const group = island.kind === 'group';
+      row.classList.toggle('group', group);
+      row.insertAdjacentHTML('beforeend', group ? GROUP_ICON : OBJECT_ICON);
+      row.append(name);
+      row.title = group
+        ? `Группа: внутри ${island.children.length}`
+        : `${island.vertices.length} вершин, ${island.faces.length} граней`;
+      // Hidden, by its own eye or by a group's above it.
+      row.classList.toggle('hidden', island.hidden);
+      const eye = document.createElement('span');
+      eye.className = 'outliner-eye';
+      eye.dataset.eye = '';
+      eye.title = island.hiddenOwn ? 'Показать' : 'Скрыть';
+      eye.innerHTML = island.hiddenOwn ? EYE_OFF_ICON : EYE_ICON;
+      row.append(eye);
+      rows.push(row);
+      if (!folded) for (const child of island.children) addRow(child, depth + 1);
+    };
+    islands.forEach((island, index) => {
+      if (island.parentIndex === null) addRow(index, 0);
+    });
+    this.list.replaceChildren(...rows);
+  }
+
+  bindList() {
+    const { list, editor } = this;
+    const rowAt = (target) => target.closest?.('[data-object]') ?? null;
+
+    list.addEventListener('click', (event) => {
+      if (this.suppressClick) {
+        this.suppressClick = false;
+        return;
+      }
+      const eye = event.target.closest('[data-eye]');
+      if (eye) {
+        const index = Number(rowAt(eye).dataset.object);
+        editor.setHidden(index, !editor.topology.islands[index].hiddenOwn);
+        return;
+      }
+      const fold = event.target.closest('[data-fold]');
+      if (fold) {
+        const id = Number(fold.dataset.fold);
+        if (!this.folded.delete(id)) this.folded.add(id);
+        this.update();
+        return;
+      }
+      const row = rowAt(event.target);
+      if (row && !this.renaming) editor.selectObject(Number(row.dataset.object), event.shiftKey);
+    });
+    list.addEventListener('dblclick', (event) => {
+      const row = rowAt(event.target);
+      if (row && !event.target.closest('[data-fold], [data-eye]')) this.rename(row);
+    });
+    // Rows must not take the keyboard focus away from the editor.
+    list.addEventListener('mousedown', (event) => {
+      if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
+    });
+
+    // Dragging a row onto a group puts it into that group.
+    list.addEventListener('pointerdown', (event) => {
+      this.suppressClick = false; // the last drag's click never came
+      const row = rowAt(event.target);
+      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye]')) return;
+      this.press = { index: Number(row.dataset.object), x: event.clientX, y: event.clientY, dragging: false };
+    });
+    window.addEventListener('pointermove', (event) => {
+      const press = this.press;
+      if (!press) return;
+      if (!press.dragging) {
+        if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_THRESHOLD) return;
+        press.dragging = true;
+        list.classList.add('dragging');
+      }
+      this.markDropTarget(this.dropTarget(event));
+    });
+    window.addEventListener('pointerup', (event) => {
+      const press = this.press;
+      this.press = null;
+      if (!press?.dragging) return;
+      list.classList.remove('dragging');
+      const target = this.dropTarget(event);
+      this.markDropTarget(undefined);
+      this.suppressClick = rowAt(event.target) !== null; // the click that follows the release
+      if (target !== undefined) editor.setParent(press.index, target);
+    });
+  }
+
+  // The menu of a row, opened with the right button. It acts on that row,
+  // whatever is selected.
+  bindContextMenu() {
+    const { list, editor } = this;
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.hidden = true;
+    document.body.append(menu);
+    this.contextMenu = menu;
+    const close = () => {
+      if (menu.hidden) return false;
+      menu.hidden = true;
+      list.querySelector('.context')?.classList.remove('context');
+      return true;
+    };
+
+    list.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      close();
+      const row = event.target.closest?.('[data-object]');
+      if (!row || this.renaming) return;
+      const index = Number(row.dataset.object);
+      const island = editor.topology.islands[index];
+      const item = (label, run, enabled = true) => {
+        const button = document.createElement('button');
+        button.textContent = label;
+        button.disabled = !enabled;
+        button.addEventListener('click', () => {
+          close();
+          run();
+        });
+        return button;
+      };
+      menu.replaceChildren(
+        item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
+        item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
+        item('Удалить', () => editor.deleteObject(index)),
+      );
+      row.classList.add('context');
+      menu.hidden = false;
+      // At the pointer, but inside the window.
+      const { width, height } = menu.getBoundingClientRect();
+      menu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 4)}px`;
+      menu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 4)}px`;
+    });
+    // Its buttons must not take the keyboard focus.
+    menu.addEventListener('mousedown', (event) => event.preventDefault());
+    // A press anywhere else closes it, and so do Esc and leaving the window.
+    window.addEventListener('pointerdown', (event) => {
+      if (!menu.contains(event.target)) close();
+    }, true);
+    window.addEventListener('keydown', (event) => {
+      if (event.code === 'Escape' && close()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+    window.addEventListener('blur', close);
+  }
+
+  // Where a dragged row would land: a group's index, null for the top level
+  // (empty space of the list), undefined outside the list. Over an object's
+  // row that is the group the object is in: the row lands next to it.
+  dropTarget(event) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const row = element?.closest('[data-object]');
+    if (row && this.list.contains(row)) {
+      const index = Number(row.dataset.object);
+      const island = this.editor.topology.islands[index];
+      return island.kind === 'group' ? index : island.parentIndex;
+    }
+    return element && this.list.contains(element) ? null : undefined;
+  }
+
+  markDropTarget(target) {
+    for (const row of this.list.children) {
+      row.classList.toggle('drop-target', Number(row.dataset.object) === target);
+    }
+    this.list.classList.toggle('drop-root', target === null);
   }
 
   // Replaces a row's name with a text field; Enter or a click away keeps the
   // new name, Esc drops it.
   rename(row) {
     const index = Number(row.dataset.object);
-    const label = row.querySelector('span');
+    const label = row.querySelector('.outliner-name');
     const input = document.createElement('input');
     input.type = 'text';
     input.spellcheck = false;
@@ -80,5 +306,154 @@ export class Outliner {
       if (event.code === 'Escape') finish(false);
     });
     input.addEventListener('blur', () => finish(true));
+  }
+
+  // --- adding objects ----------------------------------------------------
+
+  bindAdding(section) {
+    const { menu, form, addButton } = this;
+    const closeMenu = () => {
+      menu.hidden = true;
+      addButton.classList.remove('active');
+    };
+    addButton.addEventListener('click', () => {
+      this.closeForm();
+      menu.hidden = !menu.hidden;
+      addButton.classList.toggle('active', !menu.hidden);
+    });
+    for (const item of menu.querySelectorAll('[data-primitive]')) {
+      item.addEventListener('click', () => {
+        closeMenu();
+        const kind = item.dataset.primitive;
+        if (PRIMITIVES[kind].fields.length) this.openForm(kind);
+        else this.editor.addPrimitive(kind);
+      });
+    }
+    menu.querySelector('[data-group]').addEventListener('click', () => {
+      closeMenu();
+      this.editor.addGroup();
+    });
+    // Buttons must not take the keyboard focus; the form's fields may.
+    section.querySelector('.outliner-header').addEventListener('mousedown', (event) => event.preventDefault());
+    menu.addEventListener('mousedown', (event) => event.preventDefault());
+    // A press anywhere else closes the menu.
+    window.addEventListener('pointerdown', (event) => {
+      if (!menu.contains(event.target) && !addButton.contains(event.target)) closeMenu();
+    }, true);
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const options = this.formOptions();
+      this.closeForm();
+      this.editor.addPrimitive(form.dataset.kind, options);
+    });
+    // The wireframe in the scene follows the fields.
+    form.addEventListener('input', () => this.showPreview());
+    form.addEventListener('keydown', (event) => {
+      if (event.code === 'Escape') this.closeForm();
+      if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    form.querySelector('[data-cancel]').addEventListener('click', () => this.closeForm());
+    // The form is modal. While it is open the keyboard belongs to it: outside
+    // its fields only Enter and Esc do anything (after a field has been dragged
+    // nothing in the form has the focus), and the editor's shortcuts are off.
+    for (const type of ['keydown', 'keyup']) {
+      window.addEventListener(type, (event) => {
+        if (form.hidden) return;
+        // Inside the form a key goes on to the field, but no further.
+        if (form.contains(event.target)) {
+          if (type === 'keydown' && (event.ctrlKey || event.metaKey) && !CLIPBOARD_KEYS.has(event.code)) {
+            event.preventDefault();
+          }
+          return;
+        }
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        if (type !== 'keydown') return;
+        if (event.code === 'Enter' || event.code === 'NumpadEnter') form.requestSubmit();
+        else if (event.code === 'Escape') this.closeForm();
+      }, true);
+    }
+    // Keys typed in a field stay in the form.
+    form.addEventListener('keydown', (event) => event.stopPropagation());
+    form.addEventListener('keyup', (event) => event.stopPropagation());
+    // And so does the pointer: an invisible sheet over the rest of the window
+    // takes presses, drags and the wheel. The scene stays visible through it,
+    // for the preview's sake.
+    this.blocker = document.createElement('div');
+    this.blocker.className = 'modal-blocker';
+    this.blocker.hidden = true;
+    document.body.append(this.blocker);
+    for (const type of ['pointerdown', 'mousedown', 'wheel', 'contextmenu']) {
+      this.blocker.addEventListener(type, (event) => event.preventDefault(), { passive: false });
+    }
+  }
+
+  // The form's values as options for the primitive, kept within each field's limits.
+  formOptions() {
+    const options = {};
+    for (const field of PRIMITIVES[this.form.dataset.kind].fields) {
+      let value = parseFloat(this.form.elements[field.id].value.replace(',', '.'));
+      if (!Number.isFinite(value)) value = field.value;
+      value = Math.min(Math.max(value, field.min), field.max);
+      options[field.id] = field.whole ? Math.round(value) : value;
+    }
+    return options;
+  }
+
+  showPreview() {
+    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions());
+  }
+
+  // Shows the parameters of a primitive; submitting the form makes the object.
+  openForm(kind) {
+    const { form } = this;
+    const { title, fields } = PRIMITIVES[kind];
+    form.dataset.kind = kind;
+    form.querySelector('h3').textContent = title;
+    form.querySelector('.fields').replaceChildren(
+      ...fields.map((field) => {
+        const label = document.createElement('label');
+        const caption = document.createElement('span');
+        caption.textContent = field.label;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.name = field.id;
+        input.inputMode = field.whole ? 'numeric' : 'decimal';
+        input.spellcheck = false;
+        input.value = field.value;
+        input.title = `от ${field.min} до ${field.max} · зажмите и ведите вверх или вниз, чтобы менять`;
+        // Dragging the field up or down changes its value.
+        scrubbable(input, {
+          read: () => parseFloat(input.value.replace(',', '.')),
+          write: (value) => {
+            input.value = value;
+            this.showPreview();
+          },
+          whole: field.whole,
+          min: field.min,
+          max: field.max,
+        });
+        label.append(caption, input);
+        return label;
+      }),
+    );
+    form.hidden = false;
+    this.blocker.hidden = false;
+    this.showPreview();
+    const first = form.querySelector('input');
+    first.focus();
+    first.select();
+  }
+
+  closeForm() {
+    if (this.form.hidden) return;
+    this.form.hidden = true;
+    this.blocker.hidden = true;
+    this.editor.previewPrimitive(null);
+    document.activeElement?.blur(); // give the keyboard back to the editor shortcuts
   }
 }

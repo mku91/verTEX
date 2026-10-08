@@ -13,14 +13,17 @@ export const edgeKey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
 // Editing model: shared vertices, polygonal faces (loops of vertex indices)
 // and wires: loose edges between two vertices that belong to no face.
 // Every vertex belongs to one of the named objects; a face or a wire belongs
-// to the object of its vertices.
+// to the object of its vertices. Objects can be put into groups: entries of the
+// same list that have no vertices, only a name and what is inside them.
 // This is the source of truth; three.js geometry is derived from it in MeshView.
 export class EditableMesh {
   constructor() {
     this.vertices = []; // THREE.Vector3[]
     this.faces = []; // number[][], counter-clockwise when seen from outside
     this.wires = []; // [a, b][], edges drawn on their own
-    this.objects = []; // { id, name }[], in the order they are listed
+    // { id, name, parent, kind, hidden }[]; `parent` is a group's id or null,
+    // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree.
+    this.objects = [];
     this.vertexObject = []; // the object id of every vertex
     this.nextObjectId = 1;
   }
@@ -32,11 +35,11 @@ export class EditableMesh {
     return this.vertices.length - 1;
   }
 
-  // Creates an empty object and returns its id. A name that is taken gets a
-  // numbered suffix: "Куб", "Куб.001", ...
-  addObject(name) {
+  // Creates an empty object (or, with kind 'group', a group) and returns its
+  // id. A name that is taken gets a numbered suffix: "Куб", "Куб.001", ...
+  addObject(name, kind = 'mesh') {
     const id = this.nextObjectId++;
-    this.objects.push({ id, name: this.freeName(name) });
+    this.objects.push({ id, name: this.freeName(name), parent: null, kind });
     return id;
   }
 
@@ -54,7 +57,36 @@ export class EditableMesh {
   // Makes every vertex of object `gone` part of object `kept`.
   mergeObjects(kept, gone) {
     this.vertexObject = this.vertexObject.map((id) => (id === gone ? kept : id));
-    this.objects = this.objects.filter((object) => object.id !== gone);
+    this.dropObjects(new Set([gone]), kept);
+  }
+
+  // Takes objects off the list. Their children move up to `heir`, or, without
+  // one, to the nearest ancestor that stays.
+  dropObjects(gone, heir = null) {
+    const byId = new Map(this.objects.map((object) => [object.id, object]));
+    const survivor = (id) => {
+      while (id !== null && gone.has(id)) id = byId.get(id)?.parent ?? null;
+      return id;
+    };
+    for (const object of this.objects) {
+      if (gone.has(object.id) || !gone.has(object.parent)) continue;
+      object.parent = heir !== null && heir !== object.id ? heir : survivor(object.parent);
+    }
+    // The heir itself must not end up under what it absorbed.
+    const heirObject = byId.get(heir);
+    if (heirObject && gone.has(heirObject.parent)) heirObject.parent = survivor(heirObject.parent);
+    this.objects = this.objects.filter((object) => !gone.has(object.id));
+  }
+
+  // Whether `child` may be put into `parent` (object ids; null is the top
+  // level): only a group holds anything, and nothing goes under itself.
+  canParent(child, parent) {
+    const byId = new Map(this.objects.map((object) => [object.id, object]));
+    if (parent !== null && byId.get(parent)?.kind !== 'group') return false;
+    for (let id = parent; id !== null && id !== undefined; id = byId.get(id)?.parent ?? null) {
+      if (id === child) return false;
+    }
+    return true;
   }
 
   addFace(indices) {
@@ -98,6 +130,85 @@ export class EditableMesh {
         (contour[c].x - contour[a].x) * (contour[b].y - contour[a].y);
       return area >= 0 ? [face[a], face[b], face[c]] : [face[a], face[c], face[b]];
     });
+  }
+
+  // A cone standing on the grid, as a new object: a base of `sides` vertices,
+  // `size` wide, and an apex `size` above its middle. Returns the new vertices.
+  addCone(sides = 8, size = 1) {
+    const object = this.addObject('Конус');
+    const radius = size / 2;
+    const base = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2;
+      base.push(this.addVertex(radius * Math.cos(angle), 0, radius * Math.sin(angle), object));
+    }
+    const apex = this.addVertex(0, size, 0, object);
+    this.addFace([...base]); // in this order it looks down
+    base.forEach((vertex, i) => this.addFace([base[(i + 1) % sides], vertex, apex]));
+    return [...base, apex];
+  }
+
+  // A cylinder standing on the grid, as a new object: two rings of `sides`
+  // vertices, `size` wide and `height` apart. Returns the new vertices.
+  addCylinder(sides = 8, size = 1, height = 1) {
+    const object = this.addObject('Цилиндр');
+    const radius = size / 2;
+    const bottom = [];
+    const top = [];
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2;
+      const x = radius * Math.cos(angle);
+      const z = radius * Math.sin(angle);
+      bottom.push(this.addVertex(x, 0, z, object));
+      top.push(this.addVertex(x, height, z, object));
+    }
+    this.addFace([...bottom]); // in this order it looks down
+    this.addFace([...top].reverse()); // and this one up
+    for (let i = 0; i < sides; i++) {
+      const next = (i + 1) % sides;
+      this.addFace([bottom[next], bottom[i], top[i], top[next]]);
+    }
+    return [...bottom, ...top];
+  }
+
+  // A sphere standing on the grid, as a new object: `segments` vertices around
+  // and half as many rings from pole to pole, `size` across. Quads along the
+  // rings, triangles at the poles. Returns the new vertices.
+  addSphere(segments = 8, size = 1) {
+    const object = this.addObject('Сфера');
+    const radius = size / 2;
+    const rings = Math.max(2, Math.round(segments / 2));
+    const top = this.addVertex(0, size, 0, object);
+    const circles = []; // from the top one down
+    for (let j = 1; j < rings; j++) {
+      const polar = (j / rings) * Math.PI;
+      const circle = [];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        circle.push(this.addVertex(
+          radius * Math.sin(polar) * Math.cos(angle),
+          radius + radius * Math.cos(polar),
+          radius * Math.sin(polar) * Math.sin(angle),
+          object,
+        ));
+      }
+      circles.push(circle);
+    }
+    const bottom = this.addVertex(0, 0, 0, object);
+
+    const next = (i) => (i + 1) % segments;
+    const first = circles[0];
+    const last = circles[circles.length - 1];
+    for (let i = 0; i < segments; i++) {
+      this.addFace([top, first[next(i)], first[i]]);
+      for (let j = 0; j < circles.length - 1; j++) {
+        const upper = circles[j];
+        const lower = circles[j + 1];
+        this.addFace([upper[i], upper[next(i)], lower[next(i)], lower[i]]);
+      }
+      this.addFace([bottom, last[i], last[next(i)]]);
+    }
+    return [top, ...circles.flat(), bottom];
   }
 
   // Unit cube standing on the grid, as a new object. Returns indices of the new vertices.
@@ -439,13 +550,17 @@ export class EditableMesh {
     return [...copies.values()];
   }
 
-  // The objects as { id, name, vertices, faces } with index lists, in the
-  // order of `objects`. (Called "islands" by the callers: before objects had
-  // an identity of their own, they were the connected pieces of the mesh.)
+  // The objects and groups as { id, name, kind, parent, vertices, faces } with
+  // index lists (empty for a group), in the order of `objects`. (Called
+  // "islands" by the callers: before objects had an identity of their own,
+  // they were the connected pieces of the mesh.)
   islands() {
     this.adoptObjects();
     const byId = new Map(
-      this.objects.map(({ id, name }) => [id, { id, name, vertices: [], faces: [] }]),
+      this.objects.map(({ id, name, parent, kind, hidden }) => [
+        id,
+        { id, name, kind: kind ?? 'mesh', parent: parent ?? null, hidden: Boolean(hidden), vertices: [], faces: [] },
+      ]),
     );
     this.vertexObject.forEach((id, vertex) => byId.get(id).vertices.push(vertex));
     this.faces.forEach((face, i) => byId.get(this.vertexObject[face[0]]).faces.push(i));
@@ -455,15 +570,24 @@ export class EditableMesh {
   // Makes sure every vertex has a known object. Data that carries none (a
   // state saved before objects existed) gets one object per connected piece.
   adoptObjects() {
-    const known = new Set(this.objects.map((object) => object.id));
+    const known = new Set(this.objects.filter((object) => object.kind !== 'group').map((object) => object.id));
     const complete =
       this.vertexObject.length === this.vertices.length && this.vertexObject.every((id) => known.has(id));
-    if (complete) return;
-    this.objects = [];
-    this.vertexObject = new Array(this.vertices.length);
-    for (const piece of this.connectedPieces()) {
-      const id = this.addObject('Объект');
-      for (const vertex of piece) this.vertexObject[vertex] = id;
+    if (!complete) {
+      this.objects = [];
+      this.vertexObject = new Array(this.vertices.length);
+      for (const piece of this.connectedPieces()) {
+        const id = this.addObject('Объект');
+        for (const vertex of piece) this.vertexObject[vertex] = id;
+      }
+    }
+    // Only groups hold anything. An object nested in another object (a state
+    // saved when that was allowed) moves up to the nearest group, or to the top.
+    const byId = new Map(this.objects.map((object) => [object.id, object]));
+    for (const object of this.objects) {
+      let parent = object.parent ?? null;
+      while (parent !== null && byId.get(parent)?.kind !== 'group') parent = byId.get(parent)?.parent ?? null;
+      object.parent = parent;
     }
   }
 
@@ -524,10 +648,11 @@ export class EditableMesh {
     this.wires = this.wires
       .filter((wire) => wire.every((i) => remap.has(i)))
       .map((wire) => wire.map((i) => remap.get(i)));
-    // An object with no vertices left is gone.
+    // An object with no vertices left is gone; a group never had any and stays.
     this.vertexObject = this.vertexObject.filter((_, i) => remap.has(i));
     const alive = new Set(this.vertexObject);
-    this.objects = this.objects.filter((object) => alive.has(object.id));
+    const gone = this.objects.filter((object) => object.kind !== 'group' && !alive.has(object.id));
+    this.dropObjects(new Set(gone.map((object) => object.id)));
     return remap;
   }
 }
@@ -622,6 +747,7 @@ const POINT_VERTEX_SHADER = /* glsl */ `
     viewPosition.xyz -= normalize(viewPosition.xyz) * pull;
     gl_Position = projectionMatrix * viewPosition;
     gl_PointSize = size * scale;
+    if (scale == 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // a hidden vertex: off the screen
   }
 `;
 
@@ -714,6 +840,7 @@ export class MeshView {
     // over everything.
     this.sketchLine = edgeOverlay(COLOR_SELECTED);
     this.sketchLine.material.depthTest = false;
+    this.sketchLine.material.transparent = true; // drawn after the floor grid
     this.sketchLine.renderOrder = 3;
     this.sketchLine.visible = false;
     this.sketchPoints = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
@@ -722,9 +849,18 @@ export class MeshView {
     this.sketchPoints.onBeforeRender = this.points.onBeforeRender;
     this.sketchPoints.visible = false;
 
+    // Wireframe of an object that is about to be added.
+    this.previewLine = edgeOverlay(COLOR_SELECTED);
+    this.previewLine.material.linewidth = 2;
+    this.previewLine.material.depthTest = false;
+    this.previewLine.material.transparent = true; // drawn after the floor grid
+    this.previewLine.renderOrder = 3;
+    this.previewLine.visible = false;
+
     // Preview of a cut; drawn through the model so the whole outline is seen.
     this.cutLine = edgeOverlay(COLOR_CUT);
     this.cutLine.material.depthTest = false;
+    this.cutLine.material.transparent = true; // drawn after the floor grid
     this.cutLine.renderOrder = 2;
     this.cutLine.visible = false;
 
@@ -737,6 +873,7 @@ export class MeshView {
       this.cutLine,
       this.sketchLine,
       this.sketchPoints,
+      this.previewLine,
     ];
     for (const object of objects) {
       object.frustumCulled = false;
@@ -748,17 +885,21 @@ export class MeshView {
   // Call after topology changes (vertices or faces added/removed).
   rebuild() {
     const { vertices, faces } = this.mesh;
+    // Vertices of hidden objects, set by the owner before a rebuild: nothing
+    // of theirs is drawn or hit by picking rays.
+    const hidden = (this.hidden ??= new Set());
 
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
     this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
     this.faceTriangles.forEach((triangles, faceIndex) => {
+      if (hidden.has(faces[faceIndex][0])) return;
       for (const triangle of triangles) {
         this.triangleIndices.push(...triangle);
         this.triangleFaces.push(faceIndex);
       }
     });
-    this.edgeIndices = this.mesh.edges().flat();
+    this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
 
     this.setPositions(this.solid, this.triangleIndices.length);
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
@@ -815,6 +956,7 @@ export class MeshView {
     this.overlays.hoveredEdges.material.color.copy(COLOR_HOVERED);
     this.cutLine.material.color.copy(COLOR_CUT);
     this.sketchLine.material.color.copy(COLOR_SELECTED);
+    this.previewLine.material.color.copy(COLOR_SELECTED);
     this.tints.front.material.color.set(theme.faceFront);
     this.tints.back.material.color.set(theme.faceBack);
   }
@@ -844,6 +986,15 @@ export class MeshView {
       tint.visible = !this.focus && this.shading === 'orientation';
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
+  }
+
+  // Shows a wireframe given as [Vector3, Vector3] segments; an empty list hides it.
+  setPreview(segments) {
+    this.previewLine.visible = segments.length > 0;
+    if (!this.previewLine.visible) return;
+    const positions = segments.flatMap(([a, b]) => [...a.toArray(), ...b.toArray()]);
+    this.previewLine.geometry.dispose();
+    this.previewLine.geometry = new LineSegmentsGeometry().setPositions(positions);
   }
 
   // Shows the polygon tool's outline: its points so far, joined in order, and
@@ -957,7 +1108,7 @@ export class MeshView {
       let color = selection.has(i) ? COLOR_SELECTED : this.light ? COLOR_VERTEX_FOCUS : COLOR_VERTEX;
       if (i === hovered) color = this.light ? COLOR_HOVERED_FOCUS : COLOR_HOVERED;
       attribute.setXYZ(i, color.r, color.g, color.b);
-      scale.setX(i, selection.has(i) ? POINT_SELECTED_SCALE : 1);
+      scale.setX(i, this.hidden.has(i) ? 0 : selection.has(i) ? POINT_SELECTED_SCALE : 1);
     }
     attribute.needsUpdate = true;
     scale.needsUpdate = true;

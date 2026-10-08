@@ -5,6 +5,8 @@ import { theme, onThemeChange } from './theme.js';
 const GRID_SIZE = 16;
 
 // Scene, camera, navigation and on-demand rendering.
+const FLIGHT_TIME = 400; // ms, a smooth camera move
+
 export class Viewport {
   constructor(container) {
     this.container = container;
@@ -29,6 +31,11 @@ export class Viewport {
     this.camera.add(headlight);
 
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
+    this.flight = null; // a camera move in progress, see frame()
+    // Taking the camera by hand ends a flight.
+    this.orbit.addEventListener('start', () => {
+      this.flight = null;
+    });
     // LMB belongs to vertex editing; the camera lives on RMB and the wheel.
     this.orbit.mouseButtons.LEFT = null;
     // Dragging with the wheel pressed pans, like Shift+RMB; rolling it zooms.
@@ -70,6 +77,9 @@ export class Viewport {
       axis(new THREE.Vector3(-half, 0, 0), new THREE.Vector3(half, 0, 0), theme.axisX),
       axis(new THREE.Vector3(0, 0, -half), new THREE.Vector3(0, 0, half), theme.axisZ),
     ];
+    // The floor is transparent (see setFocus), so it is drawn in the late pass;
+    // there it must come first, under the lines that are drawn over the model.
+    for (const object of this.backdrop) object.renderOrder = -1;
     this.scene.add(...this.backdrop);
     this.setFocus(this.focus);
   }
@@ -113,16 +123,38 @@ export class Viewport {
     this.renderer.render(this.scene, this.camera);
   }
 
-  // Moves the camera so that the given points fill the view, keeping its direction.
-  frame(points) {
+  // Moves the camera so that the given points fill the view, keeping its
+  // direction. With `smooth` it flies there, easing in and out, instead of jumping.
+  frame(points, smooth = false) {
     if (points.length === 0) return;
     const sphere = new THREE.Box3().setFromPoints(points).getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 0.5);
     const distance = (radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2))) * 1.2;
     const direction = this.camera.position.clone().sub(this.orbit.target).normalize();
-    this.orbit.target.copy(sphere.center);
-    this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
-    this.orbit.update();
-    this.requestRender();
+    const target = sphere.center;
+    const position = target.clone().addScaledVector(direction, distance);
+    this.flight = null;
+    if (!smooth) {
+      this.orbit.target.copy(target);
+      this.camera.position.copy(position);
+      this.orbit.update();
+      this.requestRender();
+      return;
+    }
+    const from = { target: this.orbit.target.clone(), position: this.camera.position.clone() };
+    const flight = { started: performance.now() };
+    this.flight = flight;
+    const step = (now) => {
+      if (this.flight !== flight) return; // interrupted
+      const t = Math.min(Math.max((now - flight.started) / FLIGHT_TIME, 0), 1);
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+      this.orbit.target.lerpVectors(from.target, target, eased);
+      this.camera.position.lerpVectors(from.position, position, eased);
+      this.orbit.update();
+      this.requestRender();
+      if (t < 1) requestAnimationFrame(step);
+      else this.flight = null;
+    };
+    requestAnimationFrame(step);
   }
 }

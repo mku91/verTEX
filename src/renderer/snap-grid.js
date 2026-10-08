@@ -4,7 +4,6 @@ import { theme, axisColor } from './theme.js';
 const AXES = ['x', 'y', 'z'];
 // Dots along a single axis take that axis' colour.
 const dotColor = (lock) => (lock.length === 1 ? axisColor(lock) : theme.snapDot);
-const FINE_DIVISOR = 10; // fine mode splits every grid cell into this many
 const PLANE_CELLS = 64; // free mode: dots shown this many cells around the vertex
 const AXIS_CELLS = 256; // axis lock: dots shown this many cells along the axis
 const WORLD_ORIGIN = new THREE.Vector3();
@@ -54,6 +53,7 @@ export class SnapGrid {
     this.viewport = viewport;
     this.step = 0.25;
     this.fine = false; // precision modifier held
+    this.fineDivisor = 3; // fine mode splits every grid cell into this many
     this.raycaster = new THREE.Raycaster();
 
     this.dots = new THREE.Points(
@@ -83,7 +83,7 @@ export class SnapGrid {
 
   // Lattice step in effect: the base step, or a tenth of it in fine mode.
   get activeStep() {
-    return this.fine ? this.step / FINE_DIVISOR : this.step;
+    return this.fine ? this.step / this.fineDivisor : this.step;
   }
 
   // Starts a drag of a point at `start`.

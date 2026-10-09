@@ -147,6 +147,15 @@ body {
   cursor: default;
 }
 
+#top-actions button:disabled {
+  color: color-mix(in srgb, var(--text) 35%, transparent);
+  cursor: default;
+}
+
+#top-actions button:disabled:hover {
+  background: var(--bg);
+}
+
 #modes button:hover:enabled,
 #top-actions button:hover {
   background: var(--hover);
@@ -230,6 +239,13 @@ body {
 #toolbar button.active {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* A tool with nothing to work on. */
+#toolbar button:disabled {
+  background: none;
+  color: color-mix(in srgb, var(--text) 30%, transparent);
+  cursor: default;
 }
 
 #toolbar i {
@@ -1242,7 +1258,7 @@ body {
 }
 
 /* The cut tool's setting: which way it cuts. Slides in from below with the tool. */
-#cut-options {
+.tool-options {
   position: absolute;
   bottom: 12px;
   left: 50%;
@@ -1258,13 +1274,13 @@ body {
   transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
-#cut-options.shown {
+.tool-options.shown {
   opacity: 1;
   pointer-events: auto;
   transform: translate(-50%, 0);
 }
 
-#cut-options button {
+.tool-options button {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1276,20 +1292,44 @@ body {
   cursor: pointer;
 }
 
-#cut-options button + button {
+.tool-options button + button {
   border-left: 1px solid var(--border);
 }
 
-#cut-options button:hover {
+.tool-options button:hover {
   background: var(--hover);
 }
 
-#cut-options button.active {
+.tool-options button.active {
   background: var(--accent);
   color: var(--accent-text);
 }
 
-#cut-options i {
+/* A caption before the buttons, as in the place tool's. */
+.tool-options > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  color: var(--text-dim);
+}
+
+.tool-options > span + button {
+  border-left: 1px solid var(--border);
+}
+
+/* Its buttons name sides by axis: in the axis' colour until chosen. */
+#place-options button {
+  width: auto;
+  padding: 6px 10px;
+  font-weight: 600;
+}
+
+#place-options button.active {
+  color: var(--accent-text);
+}
+
+.tool-options i {
   width: 14px;
   font-size: 13px;
 }

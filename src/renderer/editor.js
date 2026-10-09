@@ -52,7 +52,16 @@ export const AXIS_LOCKS = {
 export const MODES = ['object', 'face', 'edge', 'vertex'];
 
 // Selection modes each modal operation works in; the first one is its default.
-export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'] };
+export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'], place: ['object'] };
+
+// The place tool: the sides of an object's bounds, along its own axes, that it can lie on.
+export const PLACE_SIDES = {
+  '-y': { axis: 'y', sign: -1 }, '+y': { axis: 'y', sign: 1 },
+  '-x': { axis: 'x', sign: -1 }, '+x': { axis: 'x', sign: 1 },
+  '-z': { axis: 'z', sign: -1 }, '+z': { axis: 'z', sign: 1 },
+};
+const PLACE_RING = 13; // px, the radius of the ring that follows the pointer
+const PLACE_NORMAL = 92; // px, the length of the normal that comes out of it
 
 const MIN_AXIS_SINE = 0.1; // below this angle to the view ray a locked axis is undraggable
 const PICK_RADIUS = 12; // px, vertices
@@ -111,6 +120,9 @@ export class Editor extends EventTarget {
     // The move and rotate gizmos stand along the axes of the object they move
     // (see setLocalAxes()) rather than the world's.
     this.localAxes = false;
+    // The place tool: what is being placed (see beginPlace()), and the side it lies on.
+    this.place = null;
+    this.placeSide = '-y';
     this.cutDirection = 'vertical'; // or 'horizontal': which way the cut tool cuts
     this.axisHold = null; // the lock to go back to when a held axis key is let go, see holdAxis()
     this.tool = 'select';
@@ -974,6 +986,7 @@ export class Editor extends EventTarget {
           event.stopImmediatePropagation();
           if (this.operation === 'cut') this.pressCut(event.clientX, event.clientY);
           else if (this.operation === 'extrude') this.pressExtrude(event.clientX, event.clientY);
+          else if (this.operation === 'place') this.pressPlace(event.clientX, event.clientY);
           else this.pressPolygon(event.clientX, event.clientY);
           return;
         }
@@ -1024,6 +1037,10 @@ export class Editor extends EventTarget {
         this.movePolygon(event.clientX, event.clientY);
         return;
       }
+      if (this.place) {
+        this.movePlace(event.clientX, event.clientY);
+        return;
+      }
       if (this.box) {
         // A missed release applies the box as it is.
         if (event.buttons & 1) this.stretchBox(event.clientX, event.clientY);
@@ -1070,12 +1087,15 @@ export class Editor extends EventTarget {
   // are what the pointer picks, and LMB drives the operation instead of dragging.
   setOperation(name) {
     if (name === this.operation) return;
+    // The place tool needs one object or group picked whole.
+    if (name === 'place' && this.pivotEntry() === null) return;
     this.cancelDrag();
     this.cancelBox();
     const wasIdle = this.operation === null;
     this.cancelCut();
     this.cancelExtrude();
     this.endPolygon();
+    this.endPlace();
 
     if (name) {
       if (wasIdle) this.modeBeforeOperation = this.mode;
@@ -1090,6 +1110,7 @@ export class Editor extends EventTarget {
       }
       if (name === 'cut' && keys.length === 1) this.beginCut(keys[0]);
       if (name === 'extrude' && keys.length > 0) this.beginExtrude(keys);
+      if (name === 'place') this.beginPlace();
       if (name === 'polygon') this.polygon = { axis: null, offset: 0, points: [], cursor: null, problem: null };
     } else {
       this.operation = null;
@@ -1140,6 +1161,206 @@ export class Editor extends EventTarget {
       this.cancelDrag() || this.cancelCut() || this.cancelExtrude() || this.clearPolygonOutline();
     if (!cancelled) this.setOperation(null);
     return true;
+  }
+
+
+  // --- placing on a surface --------------------------------------------------
+  //
+  // The place tool puts the object or group picked whole onto the surface of
+  // another object: a ring follows the pointer, lies down on the surface under
+  // it and shows the surface's normal; a click moves the object there and
+  // turns it so that one of its sides - `placeSide`, a side of its bounds
+  // along its own axes - lies against the surface. The side can be changed
+  // afterwards: the last placing is then done over.
+
+  // Builds the ring that follows the pointer (once).
+  setupPlaceMarker() {
+    const material = new THREE.LineBasicMaterial({ color: theme.box, depthTest: false, transparent: true });
+    const circle = [];
+    for (let k = 0; k < 48; k++) {
+      const angle = (k / 48) * Math.PI * 2;
+      circle.push(new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0));
+    }
+    const ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(circle), material);
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({ color: theme.box, opacity: 0.16, transparent: true, depthTest: false, side: THREE.DoubleSide }),
+    );
+    // (The normal of the surface, out of the ring's middle, is the view's
+    // dashed line, see animatePlace().)
+    this.placeMarker = new THREE.Group();
+    this.placeMarker.add(disc, ring);
+    for (const part of this.placeMarker.children) part.renderOrder = 9;
+    this.placeMarker.visible = false;
+    this.viewport.scene.add(this.placeMarker);
+  }
+
+  // The entry being placed, by the id it was taken with; null if it is gone.
+  placeEntry() {
+    const index = this.place ? this.mesh.objects.findIndex((object) => object.id === this.place.id) : -1;
+    return index === -1 ? null : index;
+  }
+
+  beginPlace() {
+    if (!this.placeMarker) this.setupPlaceMarker();
+    // `pixel` is the size of a screen pixel at the ring, `time` runs the normal's dashes.
+    this.place = { id: this.mesh.objects[this.pivotEntry()].id, hover: null, last: null, pixel: 0, time: 0 };
+  }
+
+  endPlace() {
+    if (!this.place) return;
+    this.place = null;
+    this.placeMarker.visible = false;
+    this.view.setPlacePreview([]);
+    this.viewport.requestRender();
+  }
+
+  // What the pointer is on: { point, normal } on the surface of an object
+  // other than the one being placed, or null.
+  placeTarget(clientX, clientY) {
+    const entry = this.placeEntry();
+    if (entry === null) return null;
+    const own = new Set(this.entriesUnder(entry));
+    const ray = this.pointerRay(clientX, clientY).clone();
+    const { islands, islandOfFace } = this.topology;
+    for (const hit of this.raycaster.intersectObject(this.view.solid, false)) {
+      const face = this.view.triangleFaces[hit.faceIndex];
+      const island = islandOfFace[face];
+      if (island === undefined || own.has(island) || islands[island].hidden) continue;
+      const normal = this.mesh.faceNormal(face);
+      if (normal.lengthSq() < 0.5) continue; // a face with no surface
+      if (normal.dot(ray.direction) > 0) normal.negate(); // seen from behind
+      // Right under the pointer: a surface has no grid of its own to go by.
+      return { point: hit.point.clone(), normal };
+    }
+    return null;
+  }
+
+  // The ring follows the pointer: on a surface it lies on it, with the
+  // surface's normal; over nothing it faces the viewer.
+  movePlace(clientX, clientY) {
+    const { camera, orbit } = this.viewport;
+    const hover = this.placeTarget(clientX, clientY);
+    this.place.hover = hover;
+    const marker = this.placeMarker;
+    if (hover) {
+      marker.position.copy(hover.point);
+      marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), hover.normal);
+    } else {
+      const ray = this.pointerRay(clientX, clientY);
+      marker.position.copy(ray.at(camera.position.distanceTo(orbit.target), new THREE.Vector3()));
+      marker.quaternion.copy(camera.quaternion);
+    }
+    // The same size on screen wherever it is.
+    const depth = marker.position.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
+    const height = this.viewport.renderer.domElement.clientHeight || 1;
+    const pixel = (2 * Math.max(depth, 1e-3) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / height;
+    this.place.pixel = pixel;
+    marker.scale.setScalar(PLACE_RING * pixel);
+    marker.visible = true;
+    this.animatePlace();
+  }
+
+  // Runs while the place tool is on: draws the normal of the surface under
+  // the ring as a dashed line whose dashes flow outwards, like the cut's.
+  animatePlace() {
+    if (this.placeFrame) return;
+    let last = performance.now();
+    const tick = (now) => {
+      this.placeFrame = null;
+      const place = this.place;
+      if (!place) return;
+      place.time += Math.min((now - last) / 1000, 0.1);
+      last = now;
+      const { hover, pixel } = place;
+      this.view.setPlacePreview(
+        hover ? [[hover.point, hover.point.clone().addScaledVector(hover.normal, PLACE_NORMAL * pixel)]] : [],
+        // The dashes start at the far end of the phase, so that they run away from the surface.
+        { dash: CUT_DASH * pixel, gap: CUT_GAP * pixel, phase: place.time * CUT_FLOW * pixel },
+      );
+      this.viewport.render();
+      // Nothing under the ring: nothing to animate until the pointer moves again.
+      if (hover) this.placeFrame = requestAnimationFrame(tick);
+    };
+    tick(last);
+  }
+
+  // LMB with the place tool: the object goes to where the ring is.
+  pressPlace(clientX, clientY) {
+    this.movePlace(clientX, clientY);
+    const { hover } = this.place;
+    if (!hover) return;
+    const before = this.snapshot();
+    this.putOnSurface(hover.point, hover.normal);
+    const id = this.history.id;
+    this.commit(before);
+    // What was done, to do it over with another side (see setPlaceSide()).
+    this.place.last = { point: hover.point.clone(), normal: hover.normal.clone(), committed: this.history.id !== id, id: this.history.id };
+    this.view.updatePositions();
+    this.emitChange();
+  }
+
+  // Whether the last thing done was a placing whose side can still be changed.
+  placed() {
+    return Boolean(this.place?.last) && this.history.id === this.place.last.id;
+  }
+
+  // Changes the side the placed object lies on; a placing just made is done over with it.
+  setPlaceSide(side) {
+    if (!(side in PLACE_SIDES) || side === this.placeSide || this.busy()) return;
+    this.placeSide = side;
+    if (this.placed()) {
+      const { last } = this.place;
+      // Back to before the placing (it was the last step), and again.
+      if (last.committed) this.restore(this.history.undo(this.snapshot()));
+      const before = this.snapshot();
+      this.putOnSurface(last.point, last.normal);
+      const id = this.history.id;
+      this.commit(before);
+      last.committed = this.history.id !== id;
+      last.id = this.history.id;
+      this.view.updatePositions();
+    }
+    this.emitChange();
+  }
+
+  // Moves and turns the entry being placed so that the middle of its
+  // `placeSide` is at `point` and that side faces into the surface, whose
+  // normal there is `normal`. The turn is the shortest one that does it.
+  putOnSurface(point, normal) {
+    const entry = this.placeEntry();
+    const object = this.mesh.objects[entry];
+    const { vertices } = this.contents([entry]);
+    if (vertices.size === 0) return;
+    const { axis, sign } = PLACE_SIDES[this.placeSide];
+    const own = quaternionOf(object.rotation);
+    const back = own.clone().invert();
+    // The middle of that side of the bounds, taken along the entry's own axes.
+    const box = new THREE.Box3().setFromPoints([...vertices].map((i) => this.mesh.vertices[i].clone().applyQuaternion(back)));
+    const contact = box.getCenter(new THREE.Vector3());
+    contact[axis] = sign > 0 ? box.max[axis] : box.min[axis];
+    contact.applyQuaternion(own);
+    const outward = new THREE.Vector3();
+    outward[axis] = sign;
+    outward.applyQuaternion(own);
+    const turn = new THREE.Quaternion().setFromUnitVectors(outward, normal.clone().negate());
+    const plain = turn.angleTo(new THREE.Quaternion()) < 1e-9; // no turn: a move, exact
+    const carried = (position) => {
+      position.sub(contact);
+      if (!plain) position.applyQuaternion(turn);
+      position.add(point);
+      // Free of the noise a turn leaves in the last digits.
+      if (!plain) position.set(+position.x.toFixed(9), +position.y.toFixed(9), +position.z.toFixed(9));
+      return position;
+    };
+    const moving = new Map([...vertices].map((i) => [i, this.mesh.vertices[i].clone()]));
+    for (const i of vertices) carried(this.mesh.vertices[i]);
+    for (const index of this.entriesUnder(entry)) {
+      const other = this.mesh.objects[index];
+      if (other.pivot) other.pivot = carried(new THREE.Vector3().fromArray(other.pivot)).toArray();
+      if (!plain) setRotation(other, rotationOf(turn.clone().multiply(quaternionOf(other.rotation))));
+    }
+    this.mirror.moves(moving);
   }
 
   // --- polygon -----------------------------------------------------------

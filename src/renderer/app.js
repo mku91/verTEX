@@ -39,6 +39,7 @@ const ACTIONS = {
   'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
+  'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
   'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
@@ -69,6 +70,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
 
+    { id: 'op.place', group: 'Режимы', label: 'Разместить', keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'KeyK', run: () => ACTIONS['toggle-cut']() },
     { id: 'op.extrude', group: 'Режимы', label: 'Экструд', keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
     { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
@@ -458,7 +460,7 @@ $('hotkeys-reset').addEventListener('click', () => {
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
   '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot',
-  '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '#focus-button': 'view.focus',
   '[data-shading="orientation"]': 'view.orientation',
@@ -552,7 +554,14 @@ for (const button of cutButtons) {
 }
 document.getElementById('cut-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-const OPERATION_NAMES = { cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
+// The place tool's setting, shown once something has been placed: the side it lies on.
+const placeButtons = [...document.querySelectorAll('#place-options [data-place]')];
+for (const button of placeButtons) {
+  button.addEventListener('click', () => editor.setPlaceSide(button.dataset.place));
+}
+document.getElementById('place-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
+const OPERATION_NAMES = { place: 'Размещение', cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
@@ -924,9 +933,13 @@ function refresh() {
   if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];
   $('operation-banner').classList.toggle('shown', editor.operation !== null);
   $('cut-options').classList.toggle('shown', editor.operation === 'cut');
+  $('place-options').classList.toggle('shown', editor.placed());
+  for (const button of placeButtons) button.classList.toggle('active', button.dataset.place === editor.placeSide);
+  // The place tool takes one object or group picked whole.
+  $('place-toggle').disabled = editor.operation !== 'place' && editor.pivotEntry() === null;
   for (const button of cutButtons) button.classList.toggle('active', button.dataset.cut === editor.cutDirection);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
-  for (const name of ['cut', 'extrude', 'pencil', 'polygon']) {
+  for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
 

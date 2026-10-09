@@ -110,6 +110,9 @@
       <button data-tool="pivot" title="Опорная точка (D)">
         <i class="fa-solid fa-crosshairs"></i>
       </button>
+      <button id="place-toggle" data-action="toggle-place" title="Разместить: поставить объект на поверхность другого, прижав выбранной стороной" aria-label="Разместить">
+        <i class="fa-solid fa-arrows-down-to-line"></i>
+      </button>
 
       <hr>
 
@@ -140,7 +143,16 @@
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
-      <div id="cut-options">
+      <div id="place-options" class="tool-options">
+        <span>Сторона</span>
+        <button data-place="-y" class="axis y" title="Низ объекта (по его оси Y)">−Y</button>
+        <button data-place="+y" class="axis y" title="Верх объекта">+Y</button>
+        <button data-place="-x" class="axis x" title="Сторона −X объекта">−X</button>
+        <button data-place="+x" class="axis x" title="Сторона +X объекта">+X</button>
+        <button data-place="-z" class="axis z" title="Сторона −Z объекта">−Z</button>
+        <button data-place="+z" class="axis z" title="Сторона +Z объекта">+Z</button>
+      </div>
+      <div id="cut-options" class="tool-options">
         <button data-cut="vertical" title="Вертикальный разрез">
           <i class="fa-solid fa-grip-lines-vertical"></i><span>Вертикальный</span>
         </button>

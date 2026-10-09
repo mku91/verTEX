@@ -1170,6 +1170,13 @@ export class MeshView {
     this.cutLine.renderOrder = 2;
     this.cutLine.visible = false;
 
+    // The normal of the surface under the place tool's ring: the same kind of line.
+    this.placeLine = edgeOverlay(COLOR_CUT);
+    this.placeLine.material.depthTest = false;
+    this.placeLine.material.transparent = true;
+    this.placeLine.renderOrder = 9;
+    this.placeLine.visible = false;
+
     const objects = [
       this.solid,
       ...Object.values(this.tints),
@@ -1177,6 +1184,7 @@ export class MeshView {
       this.points,
       ...Object.values(this.overlays),
       this.cutLine,
+      this.placeLine,
       this.sketchLine,
       this.sketchPoints,
       this.previewLine,
@@ -1278,6 +1286,7 @@ export class MeshView {
     this.overlays.selectedEdges.material.color.copy(COLOR_SELECTED);
     this.overlays.hoveredEdges.material.color.copy(COLOR_HOVERED);
     this.cutLine.material.color.copy(COLOR_CUT);
+    this.placeLine.material.color.copy(COLOR_CUT);
     this.sketchLine.material.color.copy(COLOR_SELECTED);
     this.previewLine.material.color.copy(COLOR_SELECTED);
     this.tints.front.material.color.set(theme.faceFront);
@@ -1359,9 +1368,14 @@ export class MeshView {
   // as dashes of the given length with gaps between them, all in world units.
   // `phase` shifts the pattern along the line; growing it makes the dashes run.
   // Each dash is a segment of its own, which gives it round ends.
-  setCutPreview(segments, { dash = 0.1, gap = 0.1, phase = 0 } = {}) {
-    this.cutLine.visible = segments.length > 0;
-    if (!this.cutLine.visible) return;
+  // The place tool's line: dashed and flowing like the cut's.
+  setPlacePreview(segments, dashes) {
+    this.setCutPreview(segments, dashes, this.placeLine);
+  }
+
+  setCutPreview(segments, { dash = 0.1, gap = 0.1, phase = 0 } = {}, line = this.cutLine) {
+    line.visible = segments.length > 0;
+    if (!line.visible) return;
 
     const period = dash + gap;
     const offset = phase % period;
@@ -1385,8 +1399,8 @@ export class MeshView {
         travelled += length;
       }
     }
-    this.cutLine.geometry.dispose();
-    this.cutLine.geometry = new LineSegmentsGeometry().setPositions(positions);
+    line.geometry.dispose();
+    line.geometry = new LineSegmentsGeometry().setPositions(positions);
   }
 
   // `highlight` lists face indices and [a, b] vertex pairs, see NO_HIGHLIGHT.

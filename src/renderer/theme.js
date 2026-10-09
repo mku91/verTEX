@@ -31,6 +31,7 @@ export const THEMES = {
     hovered: '#f8f8f2',
     hoveredFocus: '#f1fa8c',
     cut: '#ff79c6',
+    pivot: '#f1fa8c', // pivot point markers outside the pivot tool
     snapDot: '#f8f8f2',
     faceFront: '#8be9fd', // face orientation display: the side a face looks to
     faceBack: '#ff5555', // ...and its reverse
@@ -61,6 +62,7 @@ export const THEMES = {
     hovered: '#ffffff',
     hoveredFocus: '#ffd23f',
     cut: '#ffd23f',
+    pivot: '#f1fa8c',
     snapDot: '#ffffff',
     faceFront: '#5f96dc',
     faceBack: '#e0606a',

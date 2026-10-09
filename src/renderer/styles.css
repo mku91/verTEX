@@ -187,8 +187,61 @@ body {
 }
 
 #extrude-popup circle,
-#polygon-popup circle {
+#polygon-popup button {
   pointer-events: auto;
+}
+
+/* The polygon tool's plane picker: three round buttons in the axes' colours. */
+#polygon-popup {
+  position: absolute;
+  width: auto;
+  padding: 10px 14px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+#polygon-popup[hidden] {
+  display: none;
+}
+
+.plane-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.plane-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  color: #1a1b22;
+  font: 700 12px/1 inherit;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.plane-button.x { background: var(--axis-x); }
+.plane-button.y { background: var(--axis-y); }
+.plane-button.z { background: var(--axis-z); }
+
+.plane-button:hover {
+  transform: scale(1.15);
+}
+
+/* The chosen plane. */
+.plane-button.active {
+  border-color: var(--bg-raised);
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+#polygon-popup .caption {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .axis-gizmo svg {
@@ -605,12 +658,12 @@ body {
 
 /* An object with something selected in it, and a wholly selected one. */
 .outliner-row.active {
-  box-shadow: inset 2px 0 0 var(--selection);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .outliner-row.selected {
-  background: color-mix(in srgb, var(--selection) 28%, transparent);
-  box-shadow: inset 2px 0 0 var(--selection);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* While a row is dragged: where it would be nested. */
@@ -719,15 +772,59 @@ body {
   position: absolute;
   right: 10px;
   bottom: 10px;
-  width: 190px;
+  width: 238px;
   padding: 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
 }
 
+/* The caption, and the buttons that copy and paste the three numbers at once. */
+.properties-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
 #properties p {
-  margin: 0 0 6px;
+  flex: 1;
+  margin: 0;
+}
+
+.properties-header button {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.properties-header button svg {
+  fill: currentColor;
+}
+
+.properties-header button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.properties-header button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* A moment after the press: it worked, or there was nothing to paste. */
+.properties-header button.done {
+  color: var(--accent);
+}
+
+.properties-header button.failed {
+  color: var(--axis-x);
 }
 
 #properties label {
@@ -879,6 +976,71 @@ body {
   right: 150px;
 }
 
+/* Names the modal operation that is on; slides in from above when one starts. */
+#operation-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -18px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+#operation-banner.shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+#operation-close {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+#operation-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+#operation-close svg {
+  fill: currentColor;
+}
+
+#focus-button {
+  position: absolute;
+  top: 10px;
+  right: 186px;
+}
+
+#focus-button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+#focus-button svg {
+  display: block;
+  fill: currentColor;
+}
+
+#focus-button,
 #shading-button {
   display: block;
   width: 30px;
@@ -891,6 +1053,7 @@ body {
   cursor: pointer;
 }
 
+#focus-button:hover:not(.active),
 #shading-button:hover,
 #shading-button.active {
   background: var(--hover);

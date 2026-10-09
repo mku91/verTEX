@@ -76,11 +76,9 @@ export class Outliner {
     // Whole objects are selected only in object mode; elsewhere the object is just being worked on.
     const whole = this.editor.mode === 'object';
     const selected = new Set([...selection].map((vertex) => islandOfVertex[vertex]));
-    // A group is selected when picked itself or when all it holds is.
+    // A group is selected only when picked itself, not when what it holds is.
     islands.forEach((island, index) => {
-      if (island.kind !== 'group' || !whole) return;
-      const full = island.group.length > 0 && island.group.every((vertex) => selection.has(vertex));
-      if (picked.has(index) || full) selected.add(index);
+      if (island.kind === 'group' && whole && picked.has(index)) selected.add(index);
     });
     const signature = JSON.stringify([
       islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden]),
@@ -234,6 +232,7 @@ export class Outliner {
       menu.replaceChildren(
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
+        item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
       );
       row.classList.add('context');

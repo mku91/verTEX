@@ -37,6 +37,9 @@ const VIEWS = [
 // Bottom panel with three orthographic wireframe views of the editor's target object.
 // Vertices can be dragged within a view's plane, Shift+drag selects them with
 // a box, RMB pans and the wheel zooms.
+const PIVOT_RADIUS = 5; // px, the ring of the pivot mark shown by the pivot tool
+const PIVOT_INNER_RADIUS = 3.5; // and of those inside a group
+
 export class OrthoViews {
   constructor(container, editor) {
     this.container = container;
@@ -169,6 +172,14 @@ export class OrthoViews {
       const { x, y } = this.localPoint(view, event.clientX, event.clientY);
       return this.pick(view, x, y);
     };
+    // Whether the pointer is on the pivot point the pivot tool is editing.
+    const onPivot = (event) => {
+      const entry = editor.tool === 'pivot' ? editor.pivotEntry() : null;
+      if (entry === null || !this.shown) return false;
+      const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+      const p = this.project(view, editor.pivotPoint(entry));
+      return Math.hypot(p.x - x, p.y - y) <= PICK_RADIUS;
+    };
 
     canvas.addEventListener('pointerdown', (event) => {
       if (event.button === 1 || event.button === 2) {
@@ -179,6 +190,20 @@ export class OrthoViews {
       }
       if (event.button !== 0) return;
       view.emptyPress = null;
+      // The cut tool: the line follows the pointer here too, and a click cuts.
+      // (The face to cut across is chosen in the main view.)
+      if (editor.operation === 'cut') {
+        if (editor.cut) {
+          editor.moveCut(event.clientX, event.clientY, view.viewer);
+          editor.applyCut();
+        }
+        return;
+      }
+      // The pivot point comes before the vertices under it.
+      if (!event.shiftKey && onPivot(event) && editor.pressPivot(event.clientX, event.clientY, view.viewer)) {
+        canvas.setPointerCapture(event.pointerId);
+        return;
+      }
       const vertex = pickAt(event);
       if (event.shiftKey) {
         // Shift: a drag draws a selection box, even when it starts on a vertex.
@@ -218,13 +243,24 @@ export class OrthoViews {
         return;
       }
       editor.setFineSnap(event.ctrlKey);
+      if (editor.operation === 'cut') {
+        if (editor.cut) editor.moveCut(event.clientX, event.clientY, view.viewer);
+        canvas.style.cursor = editor.cut ? 'crosshair' : '';
+        return;
+      }
+      if (editor.pivotDrag) {
+        if (event.buttons & 1) editor.dragPivotTo(event.clientX, event.clientY);
+        else editor.endPivotDrag(); // the release was missed
+        canvas.style.cursor = editor.pivotDrag ? 'grabbing' : '';
+        return;
+      }
       // The release was missed (it can happen outside the window): finish the drag.
       if (editor.drag && !(event.buttons & 1)) editor.endDrag();
       if (editor.drag) {
         editor.dragTo(event.clientX, event.clientY);
       } else if (event.buttons === 0) {
         this.setHovered(pickAt(event));
-        canvas.style.cursor = this.hovered === null ? '' : 'grab';
+        canvas.style.cursor = this.hovered === null && !onPivot(event) ? '' : 'grab';
       }
     });
     canvas.addEventListener('pointerleave', () => {
@@ -234,6 +270,9 @@ export class OrthoViews {
       if (view.pan && event.button !== 0) {
         view.pan = null;
         canvas.style.cursor = '';
+      } else if (event.button === 0 && editor.pivotDrag) {
+        editor.endPivotDrag();
+        canvas.style.cursor = 'grab';
       } else if (event.button === 0 && view.box) {
         this.finishBox(view);
       } else if (event.button === 0 && view.emptyPress) {
@@ -475,6 +514,31 @@ export class OrthoViews {
       context.beginPath();
       context.arc(p.x, p.y, selection.has(index) ? 5 : 3.5, 0, Math.PI * 2); // selected ones are larger
       context.fill();
+    }
+
+    // With the pivot tool: the pivot point being edited and, smaller, those of
+    // what a group holds - the same mark as in the main view.
+    const entry = this.editor.tool === 'pivot' ? this.editor.pivotEntry() : null;
+    if (entry !== null) {
+      const mark = (index, radius) => {
+        const p = this.project(view, this.editor.pivotPoint(index));
+        context.beginPath();
+        context.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        // Four ticks sticking out of the ring.
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          context.moveTo(p.x + dx * radius, p.y + dy * radius);
+          context.lineTo(p.x + dx * radius * 1.8, p.y + dy * radius * 1.8);
+        }
+        context.stroke();
+        context.beginPath();
+        context.arc(p.x, p.y, radius * 0.35, 0, Math.PI * 2);
+        context.fill();
+      };
+      context.strokeStyle = context.fillStyle = theme.pivot;
+      context.lineWidth = 1.5;
+      for (const child of this.editor.pivotChildren(entry)) mark(child, PIVOT_INNER_RADIUS);
+      mark(entry, PIVOT_RADIUS);
+      context.lineWidth = 1;
     }
 
     if (box) {

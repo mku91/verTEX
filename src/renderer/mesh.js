@@ -22,7 +22,10 @@ export class EditableMesh {
     this.faces = []; // number[][], counter-clockwise when seen from outside
     this.wires = []; // [a, b][], edges drawn on their own
     // { id, name, parent, kind, hidden }[]; `parent` is a group's id or null,
-    // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree.
+    // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree,
+    // `pivot` an [x, y, z] the entry turns and scales about - absent until one
+    // is set, and then the middle of the entry's bounds stands in for it. The
+    // array is never changed in place, only replaced.
     this.objects = [];
     this.vertexObject = []; // the object id of every vertex
     this.nextObjectId = 1;
@@ -36,7 +39,7 @@ export class EditableMesh {
   }
 
   // Creates an empty object (or, with kind 'group', a group) and returns its
-  // id. A name that is taken gets a numbered suffix: "Куб", "Куб.001", ...
+  // id. A name that is taken gets a numbered suffix: "Cube", "Cube.001", ...
   addObject(name, kind = 'mesh') {
     const id = this.nextObjectId++;
     this.objects.push({ id, name: this.freeName(name), parent: null, kind });
@@ -97,7 +100,7 @@ export class EditableMesh {
   // its own (new vertices, shared with nothing). It is turned towards the
   // viewer, who looks in the direction `facing`. Returns the new vertices.
   addPolygon(points, facing) {
-    const object = this.addObject('Полигон');
+    const object = this.addObject('Polygon');
     const loop = points.map((point) => this.addVertex(point.x, point.y, point.z, object));
     const indices = [...loop];
     if (this.loopNormal(loop).dot(facing) > 0) loop.reverse();
@@ -135,7 +138,7 @@ export class EditableMesh {
   // A cone standing on the grid, as a new object: a base of `sides` vertices,
   // `size` wide, and an apex `size` above its middle. Returns the new vertices.
   addCone(sides = 8, size = 1) {
-    const object = this.addObject('Конус');
+    const object = this.addObject('Cone');
     const radius = size / 2;
     const base = [];
     for (let i = 0; i < sides; i++) {
@@ -151,7 +154,7 @@ export class EditableMesh {
   // A cylinder standing on the grid, as a new object: two rings of `sides`
   // vertices, `size` wide and `height` apart. Returns the new vertices.
   addCylinder(sides = 8, size = 1, height = 1) {
-    const object = this.addObject('Цилиндр');
+    const object = this.addObject('Cylinder');
     const radius = size / 2;
     const bottom = [];
     const top = [];
@@ -175,7 +178,7 @@ export class EditableMesh {
   // and half as many rings from pole to pole, `size` across. Quads along the
   // rings, triangles at the poles. Returns the new vertices.
   addSphere(segments = 8, size = 1) {
-    const object = this.addObject('Сфера');
+    const object = this.addObject('Sphere');
     const radius = size / 2;
     const rings = Math.max(2, Math.round(segments / 2));
     const top = this.addVertex(0, size, 0, object);
@@ -213,7 +216,7 @@ export class EditableMesh {
 
   // Unit cube standing on the grid, as a new object. Returns indices of the new vertices.
   addCube(size = 1) {
-    const object = this.addObject('Куб');
+    const object = this.addObject('Cube');
     const h = size / 2;
     const base = this.vertices.length;
     const corners = [
@@ -577,7 +580,7 @@ export class EditableMesh {
       this.objects = [];
       this.vertexObject = new Array(this.vertices.length);
       for (const piece of this.connectedPieces()) {
-        const id = this.addObject('Объект');
+        const id = this.addObject('Object');
         for (const vertex of piece) this.vertexObject[vertex] = id;
       }
     }

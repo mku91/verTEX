@@ -21,8 +21,9 @@ new Outliner(document.getElementById('outliner-section'), editor);
 const HINTS = {
   select: 'ЛКМ — тянуть элемент под курсором · Клик — выбрать · Shift+клик — добавить/убрать · Shift+тянуть — рамка · Tab — режим · 1–4 — фиксация оси · Ctrl — мелкая сетка · ПКМ — камера · Пробел+ПКМ — панорама',
   move: 'Тяните стрелки гизмо, чтобы переместить выделение',
-  rotate: 'Тяните кольца гизмо, чтобы повернуть выделение вокруг его центра',
-  scale: 'Тяните маркеры гизмо, чтобы масштабировать выделение от его центра',
+  rotate: 'Тяните кольца гизмо, чтобы повернуть выделение вокруг его центра; целый объект или группу — вокруг опорной точки',
+  scale: 'Тяните маркеры гизмо, чтобы масштабировать выделение от его центра; целый объект или группу — от опорной точки',
+  pivot: 'Опорная точка: выберите объект или группу и тяните стрелки гизмо или саму точку в нижних видах — двигается только точка, вокруг которой объект вращается и масштабируется · Точно — в полях X Y Z · Сброс — ПКМ по строке в списке',
   extrude: 'Экструд: кликните грань (режим «Грань») или ребро (режим «Ребро») и ведите мышью · Клик — зафиксировать и выйти · Esc или X — выйти',
   pencil: 'Карандаш: зажмите ЛКМ на вершине и тяните — из неё вырастет новая, соединённая ребром · Отпустите на другой вершине, чтобы соединить их; замкнутый контур станет гранью · Esc или P — выйти',
   cut: 'Разрез: кликните грань · ведите линию мышью · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Клик — разрезать объект и выйти · Esc или K — выйти без разреза',
@@ -38,6 +39,7 @@ const ACTIONS = {
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
+  'toggle-focus': () => setFocus(!editor.focus),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
@@ -53,6 +55,7 @@ const KEYS = {
   KeyW: () => editor.setTool('move'),
   KeyE: () => editor.setTool('rotate'),
   KeyS: () => editor.setTool('scale'),
+  KeyD: () => editor.setTool('pivot'),
   KeyK: () => ACTIONS['toggle-cut'](),
   KeyX: () => ACTIONS['toggle-extrude'](),
   KeyP: () => ACTIONS['toggle-pencil'](),
@@ -70,6 +73,7 @@ const KEYS = {
   KeyF: () => ACTIONS.frame(),
   KeyV: () => ACTIONS['toggle-views'](),
   KeyN: () => ACTIONS['toggle-orientation'](),
+  KeyC: () => ACTIONS['toggle-focus'](),
   Escape: () =>
     orthoViews.cancelBox() ||
     editor.cancelBox() ||
@@ -210,6 +214,69 @@ $('settings-dialog').addEventListener('mousedown', (event) => {
 // --- shading menu (the eye next to the axis gizmo) ----------------------
 
 const shadingItems = [...document.querySelectorAll('[data-shading]')];
+// --- copying and pasting the three coordinates as one vector -------------
+
+// "x, y, z" as text. The system clipboard is used when the window may; the
+// last copied vector is also kept here, so that pasting works regardless.
+let copiedVector = null;
+const flash = (button, state) => {
+  button.classList.add(state);
+  setTimeout(() => button.classList.remove(state), 700);
+};
+// Three numbers out of any text: "1, 2, 3", "(1; 2; 3)", "vec3(1 2 3)", ...
+function parseVector(text) {
+  // (A digit glued to letters, like the 3 of "vec3", is part of a name.)
+  const numbers = (text ?? '').match(/(?<![\w.])-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?(?!\w)/gi);
+  return numbers?.length === 3 ? numbers.map(Number) : null;
+}
+$('copy-vector').addEventListener('click', async () => {
+  const point = editor.panelPoint();
+  if (!point) return;
+  copiedVector = ['x', 'y', 'z'].map((axis) => +point[axis].toFixed(5)).join(', ');
+  try {
+    await navigator.clipboard.writeText(copiedVector);
+  } catch {
+    // No access to the system clipboard: the vector can still be pasted here.
+  }
+  flash($('copy-vector'), 'done');
+});
+$('paste-vector').addEventListener('click', async () => {
+  if (!editor.panelPoint()) return;
+  let text = copiedVector;
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    // No access to the system clipboard: what was copied here is used.
+  }
+  const vector = parseVector(text);
+  if (!vector) {
+    flash($('paste-vector'), 'failed');
+    return;
+  }
+  // All three coordinates are one undo step.
+  const before = editor.snapshot();
+  ['x', 'y', 'z'].forEach((axis, i) => editor.setSelectionCenter(axis, vector[i], false));
+  editor.commit(before);
+  flash($('paste-vector'), 'done');
+});
+for (const id of ['copy-vector', 'paste-vector']) {
+  $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+}
+
+// --- the banner of the modal operation that is on ------------------------
+
+const OPERATION_NAMES = { cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
+$('operation-close').addEventListener('click', () => editor.setOperation(null));
+$('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
+// The focus look: a switch of its own, remembered between runs.
+const FOCUS_KEY = 'vertex.focus';
+function setFocus(on) {
+  editor.setFocus(on);
+  localStorage.setItem(FOCUS_KEY, on ? '1' : '0');
+}
+editor.setFocus(localStorage.getItem(FOCUS_KEY) === '1');
+
 const SHADING_KEY = 'vertex.shading';
 function setShading(mode) {
   editor.setShading(mode);
@@ -301,7 +368,7 @@ for (const type of ['keydown', 'keyup']) {
 }
 
 // Buttons must not take focus, or Space would press the last clicked one.
-for (const id of ['toolbar', 'modes', 'top-actions', 'shading']) {
+for (const id of ['toolbar', 'modes', 'top-actions', 'shading', 'focus-button']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault());
 }
 for (const control of gridControls) {
@@ -313,7 +380,7 @@ window.vertex?.onMenu((action) => ACTIONS[action]?.());
 // For debugging a running window from outside (see the debugging port in
 // main.js): `vertexDebug.text()` returns the whole project as text, and
 // `vertexDebug.editor` is the editor itself.
-window.vertexDebug = { text: () => editor.toText(), editor };
+window.vertexDebug = { text: () => editor.toText(), views: orthoViews, editor };
 
 // The three-view panel; whether it is open is remembered between launches.
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
@@ -385,17 +452,22 @@ function refresh() {
     button.disabled = editor.operation !== null && !OPERATION_MODES[editor.operation].includes(button.dataset.mode);
   }
 
-  const center = editor.selectionCenter();
+  // The middle of the selection, or the pivot point with the pivot tool.
+  const point = editor.panelPoint();
   for (const input of coordInputs) {
-    input.disabled = selection.size === 0;
+    input.disabled = !point;
     if (document.activeElement === input) continue;
-    input.value = selection.size ? +center[input.dataset.axis].toFixed(5) : '';
+    input.value = point ? +point[input.dataset.axis].toFixed(5) : '';
   }
 
+  $('copy-vector').disabled = $('paste-vector').disabled = !point;
   $('properties').hidden = picked.size === 0; // only while something is selected
-  $('selection-count').textContent = picked.size
-    ? `Выбрано ${ELEMENT_NAMES[mode]}: ${picked.size}`
-    : 'Ничего не выбрано';
+  $('selection-count').textContent =
+    tool === 'pivot' && point
+      ? 'Опорная точка'
+      : picked.size
+        ? `Выбрано ${ELEMENT_NAMES[mode]}: ${picked.size}`
+        : 'Ничего не выбрано';
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;
@@ -408,6 +480,10 @@ function refresh() {
   $('stat-edges').textContent = edges.filter(([a]) => counted.has(a)).length;
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
+  $('focus-button').classList.toggle('active', editor.focus);
+  // The banner keeps its last name while it slides away.
+  if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];
+  $('operation-banner').classList.toggle('shown', editor.operation !== null);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   for (const name of ['cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
@@ -417,7 +493,7 @@ function refresh() {
     const { axis, offset, points, problem } = editor.polygon;
     const plane = { x: 'YZ', y: 'XZ', z: 'XY' }[axis];
     if (!axis) {
-      hint = 'Полигон: выберите плоскость на гизмо внизу (или клавишами 2/3/4) · Esc или G — выйти';
+      hint = 'Полигон: выберите плоскость кнопками X, Y, Z внизу (или клавишами 2/3/4) · Esc или G — выйти';
     } else if (problem) {
       hint = `Полигон не создан: ${problem} · Backspace — убрать последнюю точку · Esc — начать контур заново`;
     } else if (points.length === 0) {

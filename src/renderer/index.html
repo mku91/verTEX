@@ -78,6 +78,9 @@
       <button data-tool="scale" title="Масштаб (S)">
         <svg viewBox="0 0 24 24"><path d="M3 13h8v8H3zM13 3h8v8h-2.400V7.100l-5 5-1.700-1.700 5-5H13z"/></svg>
       </button>
+      <button data-tool="pivot" title="Опорная точка (D)">
+        <svg viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3z"/></svg>
+      </button>
 
       <hr>
 
@@ -96,7 +99,16 @@
 
     <div id="workspace">
     <main id="viewport">
+      <div id="operation-banner">
+        <span id="operation-name"></span>
+        <button id="operation-close" title="Выключить режим (Esc)">
+          <svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.600 5.600-1.400 1.400L12 13.400 6.400 19 5 17.600 10.600 12 5 6.400z"/></svg>
+        </button>
+      </div>
       <div id="axis-gizmo" title="Фиксация перемещения вершины: 1 — свободно, 2 — X, 3 — Y, 4 — Z"></div>
+      <button id="focus-button" data-action="toggle-focus" title="Фокус: тёмный фон, объект — белый каркас с точками вершин, выбор сквозь объект (C)">
+        <svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3zM15 3h6v6h-2V5h-4zM3 15h2v4h4v2H3zM19 15h2v6h-6v-2h4zM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>
+      </button>
       <div id="shading">
         <button id="shading-button" title="Вид объекта">
           <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
@@ -109,7 +121,15 @@
         </div>
       </div>
       <div id="properties" hidden>
-        <p id="selection-count"></p>
+        <div class="properties-header">
+          <p id="selection-count"></p>
+          <button id="copy-vector" title="Скопировать X, Y, Z одной строкой">
+            <svg viewBox="0 0 24 24"><path d="M8 3h11a2 2 0 0 1 2 2v12h-2V5H8zM5 7h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm0 2v10h10V9z"/></svg>
+          </button>
+          <button id="paste-vector" title="Вставить X, Y, Z из буфера обмена">
+            <svg viewBox="0 0 24 24"><path d="M9 2h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2V3a1 1 0 0 1 1-1zm1 2v2h4V4zM6 6v14h12V6h-2v2H8V6z"/></svg>
+          </button>
+        </div>
         <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="x"></label>
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="y"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="z"></label>

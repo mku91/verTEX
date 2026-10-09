@@ -21,10 +21,9 @@ const AXIS_VECTORS = {
 };
 const GIZMO_RADIUS = 20; // px, length of an axis in a view's corner gizmo
 const GIZMO_MARGIN = 34; // px from the view's top right corner to the gizmo's center
-const FLIP_ICON =
-  '<svg viewBox="0 0 24 24"><path d="M11 3h2v18h-2zM9 7v10l-6-5zm6 0l6 5-6 5z"/></svg>';
-const FIT_ICON =
-  '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3zm12 0h6v6h-2V5h-4zM3 15h2v4h4v2H3zm16 0h2v6h-6v-2h4zM9 9h6v6H9z"/></svg>';
+const MIRROR_LINE = '#bd93f9'; // a mirror plane seen edge-on
+const FLIP_ICON = '<i class="fa-solid fa-right-left"></i>';
+const FIT_ICON = '<i class="fa-solid fa-expand"></i>';
 
 // Each view looks along `direction`. `right` / `up` are the world axes that run
 // along the screen axes, with their signs. A view can be flipped to look from
@@ -215,6 +214,8 @@ export class OrthoViews {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
+      // The pivot tool works on the pivot point alone.
+      if (editor.tool === 'pivot') return;
       const element = elementAt(event);
       const vertex = vertexAt(event);
       if (event.shiftKey) {
@@ -284,8 +285,9 @@ export class OrthoViews {
       if (editor.drag) {
         editor.dragTo(event.clientX, event.clientY);
       } else if (event.buttons === 0) {
-        const element = elementAt(event);
-        this.setHovered(vertexAt(event), element);
+        const pivotOnly = editor.tool === 'pivot';
+        const element = pivotOnly ? null : elementAt(event);
+        this.setHovered(pivotOnly ? null : vertexAt(event), element);
         canvas.style.cursor = this.hovered === null && element === null && !onPivot(event) ? '' : 'grab';
       }
     });
@@ -619,6 +621,7 @@ export class OrthoViews {
       context.lineWidth = 1;
     }
 
+    this.drawMirrorPlanes(view);
     this.drawEdges(view);
 
     // The selected elements of the mode, and the one under the pointer.
@@ -679,12 +682,9 @@ export class OrthoViews {
     // The line of a cut being placed.
     const cut = this.editor.cut;
     if (cut?.segments.length) {
-      // Dashed and flowing, like in the main view.
+      // A plain solid line here; the dashes that flow are the main view's.
       context.strokeStyle = theme.cut;
-      context.lineWidth = 2.5;
-      context.lineCap = 'round';
-      context.setLineDash([7, 8]);
-      context.lineDashOffset = -cut.time * 40;
+      context.lineWidth = 2;
       context.beginPath();
       for (const [a, b] of cut.segments) {
         const p = this.project(view, a);
@@ -694,8 +694,6 @@ export class OrthoViews {
       }
       context.stroke();
       context.lineWidth = 1;
-      context.lineCap = 'butt';
-      context.setLineDash([]);
     }
 
     // Farthest first, so the vertex a click would grab is drawn on top.
@@ -750,6 +748,52 @@ export class OrthoViews {
       context.globalAlpha = 1;
       context.strokeRect(x, y, w, h);
     }
+  }
+
+  // The mirror planes seen edge-on in this view: dash-dot lines of one
+  // colour - the global ones, and those of the shown objects' own mirrors.
+  drawMirrorPlanes(view) {
+    const { context, width, height } = view;
+    const { editor } = this;
+    const planes = [...editor.mirror.globalAxes].map((axis) => ({ axis, value: 0 }));
+    const shown = [...new Set(this.shown.vertices.map((vertex) => editor.topology.islandOfVertex[vertex]))];
+    for (const index of shown) {
+      if (!editor.mesh.objects[index]?.mirror?.length) continue;
+      for (const plane of editor.mirror.planesFor(index)) planes.push(plane);
+    }
+    if (planes.length === 0) return;
+    context.save();
+    // Dash-dot, the way a drawing marks an axis of symmetry; with round caps
+    // a dash of no length comes out as a dot.
+    context.setLineDash([9, 5, 0, 5]);
+    context.lineCap = 'round';
+    context.lineWidth = 1.5;
+    const point = new THREE.Vector3();
+    for (const { axis, value } of planes) {
+      if (axis !== view.right && axis !== view.up) continue; // the plane of the view itself
+      point.set(0, 0, 0);
+      point[axis] = value;
+      const p = this.project(view, point);
+      context.beginPath();
+      if (axis === view.right) {
+        context.moveTo(p.x, 0);
+        context.lineTo(p.x, height);
+      } else {
+        context.moveTo(0, p.y);
+        context.lineTo(width, p.y);
+      }
+      // The grid's own line is often right under it (a mirror through the
+      // origin lies on an axis): that is wiped first, or the dashes drown in it.
+      context.save();
+      context.globalCompositeOperation = 'destination-out';
+      context.setLineDash([]);
+      context.lineWidth = 3;
+      context.stroke();
+      context.restore();
+      context.strokeStyle = MIRROR_LINE;
+      context.stroke();
+    }
+    context.restore();
   }
 
   // The wireframe, with a depth cue: the nearer a vertex is to the viewer of

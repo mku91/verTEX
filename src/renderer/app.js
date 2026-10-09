@@ -9,6 +9,8 @@ import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles } from './project.js';
+import { MirrorDisplay } from './mirror-display.js';
+import { Warnings } from './warnings.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -20,16 +22,6 @@ new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
 new Outliner(document.getElementById('outliner-section'), editor);
 
-const HINTS = {
-  select: 'ЛКМ — тянуть элемент под курсором · Клик — выбрать · Shift+клик — добавить/убрать · Shift+тянуть — рамка · Tab — режим · 1–4 — фиксация оси · Ctrl — мелкая сетка · ПКМ — камера · Пробел+ПКМ — панорама',
-  move: 'Тяните стрелки гизмо, чтобы переместить выделение',
-  rotate: 'Тяните кольца гизмо, чтобы повернуть выделение вокруг его центра; целый объект или группу — вокруг опорной точки',
-  scale: 'Тяните маркеры гизмо, чтобы масштабировать выделение от его центра; целый объект или группу — от опорной точки',
-  pivot: 'Опорная точка: выберите объект или группу и тяните стрелки гизмо или саму точку в нижних видах — двигается только точка, вокруг которой объект вращается и масштабируется · Точно — в полях X Y Z · Сброс — ПКМ по строке в списке',
-  extrude: 'Экструд: кликните грань (режим «Грань») или ребро (режим «Ребро») и ведите мышью · Клик — зафиксировать и выйти · Esc или {op.extrude} — выйти',
-  pencil: 'Карандаш: зажмите ЛКМ на вершине и тяните — из неё вырастет новая, соединённая ребром · Отпустите на другой вершине, чтобы соединить их; замкнутый контур станет гранью · Esc или {op.pencil} — выйти',
-  cut: 'Разрез: кликните грань · ведите линию мышью · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Клик — разрезать объект и выйти · Esc или {op.cut} — выйти без разреза',
-};
 
 const ACTIONS = {
   delete: () => editor.deleteSelection(),
@@ -70,7 +62,7 @@ const hotkeys = new Hotkeys(
     { id: 'file.save', group: 'Файл', label: 'Сохранить', keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
     { id: 'file.save-as', group: 'Файл', label: 'Сохранить как…', keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
 
-    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyQ', run: () => editor.setTool('select') },
+    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyV', run: () => editor.setTool('select') },
     { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
     { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyE', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
@@ -97,8 +89,8 @@ const hotkeys = new Hotkeys(
     { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Digit4', run: () => editor.setAxisLock('z') },
 
     { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
-    { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyV', run: () => ACTIONS['toggle-views']() },
-    { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyC', run: () => ACTIONS['toggle-focus']() },
+    { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
     { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
     { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
   ],
@@ -133,14 +125,31 @@ const FIXED_KEY_NOTES = [
   ['Ctrl (зажат)', 'Мелкая сетка'],
   ['Shift (зажат)', 'Добавить к выделению, рамка'],
   ['Alt (зажат)', 'Масштаб с одной стороны'],
+  ['Ctrl / Alt (зажаты)', 'Перетаскивание числового поля: шаг 0.1 / 0.01'],
+  ['X / C / Z (зажаты)', 'При перетаскивании: только по оси X / Y / Z'],
 ];
 
-// Genitive plural for "Выбрано ...: N".
-const ELEMENT_NAMES = { object: 'объектов', face: 'граней', edge: 'рёбер', vertex: 'вершин' };
 
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
 const modeButtons = [...document.querySelectorAll('#modes [data-mode]')]; // not the gizmos' own data-mode
-const coordInputs = [...document.querySelectorAll('[data-axis]')];
+
+// The highlight of the current mode is one block under the buttons, which
+// slides to the button of the mode (the styles animate it).
+const modeSlider = document.getElementById('mode-slider');
+function placeModeSlider() {
+  const button = modeButtons.find((item) => item.classList.contains('active'));
+  if (!button || button.offsetWidth === 0) return;
+  modeSlider.style.width = `${button.offsetWidth}px`;
+  modeSlider.style.transform = `translateX(${button.offsetLeft}px)`;
+  // The first time it is simply there; after that it travels.
+  if (!modeSlider.classList.contains('placed')) {
+    void modeSlider.offsetWidth;
+    modeSlider.classList.add('placed');
+  }
+}
+// The buttons change width when the font arrives or the window's scale changes.
+new ResizeObserver(placeModeSlider).observe(document.getElementById('modes'));
+const coordInputs = [...document.querySelectorAll('#properties [data-axis]')];
 const sizeInputs = [...document.querySelectorAll('[data-size]')];
 const $ = (id) => document.getElementById(id);
 
@@ -167,7 +176,7 @@ for (const input of sizeInputs) {
     write: (value) => editor.setObjectSize(axis, value, false),
     begin: () => { beforeScrub = editor.snapshot(); },
     end: () => editor.commit(beforeScrub),
-    min: 0.01,
+    min: 0,
   });
   // Arrow keys step the size by the grid step.
   input.addEventListener('keydown', (event) => {
@@ -175,7 +184,7 @@ for (const input of sizeInputs) {
     event.preventDefault();
     const step = editor.snapGrid.activeStep * (event.code === 'ArrowUp' ? 1 : -1);
     const value = +(parse() + step).toFixed(5);
-    if (!(value > 0)) return;
+    if (!(value >= 0)) return;
     editor.setObjectSize(axis, value);
     input.value = value;
   });
@@ -365,7 +374,7 @@ function showHotkeyList(note = '') {
     });
     const reset = document.createElement('button');
     reset.className = 'hotkey-reset';
-    reset.textContent = '↺';
+    reset.innerHTML = '<i class="fa-solid fa-rotate-left"></i>';
     reset.title = `Вернуть по умолчанию: ${comboLabel(binding.keys)}`;
     reset.disabled = !hotkeys.isCustom(binding.id);
     reset.addEventListener('click', () => {
@@ -435,7 +444,6 @@ function showHotkeys() {
     element.title = keys ? `${element.dataset.title} (${comboLabel(keys)})` : element.dataset.title;
   }
   showHotkeyList();
-  refresh(); // the hints name keys too
 }
 hotkeys.addEventListener('change', showHotkeys);
 
@@ -495,6 +503,9 @@ function vectorButtons(copyButton, pasteButton, read, write) {
     button.addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
   }
 }
+// With the pivot tool: the pivot point back to the middle of the object.
+$('center-pivot').addEventListener('click', () => editor.centerPivot());
+$('center-pivot').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 vectorButtons($('copy-vector'), $('paste-vector'),
   () => editor.panelPoint(), (axis, value) => editor.setSelectionCenter(axis, value, false));
 vectorButtons($('copy-size'), $('paste-size'),
@@ -502,9 +513,79 @@ vectorButtons($('copy-size'), $('paste-size'),
 
 // --- the banner of the modal operation that is on ------------------------
 
+// The cut tool's own setting, at the bottom of the view while the tool is on.
+const cutButtons = [...document.querySelectorAll('#cut-options [data-cut]')];
+for (const button of cutButtons) {
+  button.addEventListener('click', () => editor.setCutDirection(button.dataset.cut));
+}
+document.getElementById('cut-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
 const OPERATION_NAMES = { cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
+// --- the mirror (top bar) ------------------------------------------------------
+
+const mirrorDisplay = new MirrorDisplay(viewport, editor);
+const PARTS = { 0: 'выкл', 1: '2 части', 2: '4 части', 3: '8 частей' };
+function closeMirrorPopup() {
+  const open = !$('mirror-popup').hidden;
+  $('mirror-popup').hidden = true;
+  return open;
+}
+$('mirror-toggle').addEventListener('click', () => {
+  closeGridPopups();
+  $('mirror-popup').hidden = !$('mirror-popup').hidden;
+  showMirror();
+});
+$('mirror-control').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+window.addEventListener('pointerdown', (event) => {
+  if (!$('mirror-control').contains(event.target)) closeMirrorPopup();
+}, true);
+for (const group of document.querySelectorAll('.mirror-axes')) {
+  const scope = group.dataset.mirror;
+  for (const button of group.querySelectorAll('[data-mirror-axis]')) {
+    button.addEventListener('click', () => {
+      const axis = button.dataset.mirrorAxis;
+      if (scope === 'global') {
+        const axes = [...editor.mirror.globalAxes];
+        editor.setGlobalMirror(axes.includes(axis) ? axes.filter((a) => a !== axis) : [...axes, axis]);
+      } else {
+        const entry = editor.mirrorEntry();
+        if (entry === null) return;
+        const axes = editor.mesh.objects[entry].mirror ?? [];
+        editor.setLocalMirror(entry, axes.includes(axis) ? axes.filter((a) => a !== axis) : [...axes, axis]);
+      }
+    });
+  }
+}
+// The button and the popup follow the editor.
+function showMirror() {
+  const globalAxes = editor.mirror.globalAxes;
+  const entry = editor.mirrorEntry();
+  const object = entry === null ? null : editor.mesh.objects[entry];
+  const localAxes = object?.mirror ?? [];
+  for (const group of document.querySelectorAll('.mirror-axes')) {
+    const scope = group.dataset.mirror;
+    for (const button of group.querySelectorAll('[data-mirror-axis]')) {
+      const axis = button.dataset.mirrorAxis;
+      const on = scope === 'global' ? globalAxes.has(axis) : localAxes.includes(axis);
+      button.classList.toggle('active', on);
+      button.disabled = scope === 'local' && !object;
+    }
+  }
+  document.querySelector('[data-mirror-note="global"]').textContent = PARTS[globalAxes.size];
+  document.querySelector('[data-mirror-note="local"]').textContent = object
+    ? `«${object.name}»: ${PARTS[localAxes.length]}`
+    : 'редактируемый объект не один';
+  $('mirror-toggle').classList.toggle('active', editor.mirror.active()); // any mirror, anywhere
+  $('mirror-toggle').title = globalAxes.size
+    ? `Зеркало: глобальное по ${[...globalAxes].map((a) => a.toUpperCase()).join(', ')}`
+    : localAxes.length
+      ? `Зеркало: локальное у «${object.name}» по ${localAxes.map((a) => a.toUpperCase()).join(', ')}`
+      : 'Зеркало: выключено. Правки повторяются по другую сторону плоскости';
+  mirrorDisplay.update();
+}
 
 // Grid snapping: a switch in the top bar, remembered between runs.
 const SNAPPING_KEY = 'vertex.snapping';
@@ -552,6 +633,18 @@ window.addEventListener('pointerdown', (event) => {
   setShading(shadingItems.some((item) => item.dataset.shading === saved) ? saved : 'solid');
 }
 
+// Held while an element is pulled, these keep it to one axis (C is Y: it is
+// next to X and Z under the left hand).
+const HOLD_AXES = { KeyX: 'x', KeyC: 'y', KeyZ: 'z' };
+const heldAxisKeys = []; // the codes held now, the last one rules
+// A key still down when the pull ends: its repeats are not shortcuts.
+const spentAxisKeys = new Set();
+function dropAxisHold() {
+  for (const code of heldAxisKeys) spentAxisKeys.add(code);
+  heldAxisKeys.length = 0;
+  editor.holdAxis(null);
+}
+
 window.addEventListener('keydown', (event) => {
   // The settings dialog owns the keyboard while it is open.
   if (!$('settings-dialog').hidden) {
@@ -562,7 +655,7 @@ window.addEventListener('keydown', (event) => {
     closeShadingMenu();
     return;
   }
-  if (event.code === 'Escape' && closeGridPopups()) return;
+  if (event.code === 'Escape' && (closeGridPopups() || closeMirrorPopup())) return;
   if (event.target instanceof HTMLSelectElement) return;
   if (event.target instanceof HTMLInputElement) {
     if (event.code === 'Enter' || event.code === 'Escape') event.target.blur();
@@ -582,6 +675,19 @@ window.addEventListener('keydown', (event) => {
     editor.setMode(modes[(next + modes.length) % modes.length]);
     return;
   }
+  if (spentAxisKeys.has(event.code)) {
+    event.preventDefault();
+    return;
+  }
+  // While something is being pulled, X, C and Z are the axis it keeps to.
+  if (event.code in HOLD_AXES && !event.altKey && !event.metaKey && editor.pulling()) {
+    event.preventDefault();
+    if (!heldAxisKeys.includes(event.code)) {
+      heldAxisKeys.push(event.code);
+      editor.holdAxis(HOLD_AXES[event.code]);
+    }
+    return;
+  }
   // The user's shortcuts first, then the keys with a fixed meaning.
   if (hotkeys.handle(event)) return;
   const handler = FIXED_KEYS[comboOf(event)];
@@ -591,9 +697,23 @@ window.addEventListener('keydown', (event) => {
 });
 window.addEventListener('keyup', (event) => {
   if (event.code === 'Space') viewport.setPanMode(false);
+  // An axis key let go: the one still held takes over, or the movement is free again.
+  spentAxisKeys.delete(event.code);
+  const held = heldAxisKeys.indexOf(event.code);
+  if (held === -1) return;
+  heldAxisKeys.splice(held, 1);
+  const rest = heldAxisKeys[heldAxisKeys.length - 1];
+  if (!rest || !editor.holdAxis(HOLD_AXES[rest])) dropAxisHold();
 });
+// The pull is over: so is the hold. (After the release has been handled, so
+// that what was pulled stays where the axis kept it.)
+for (const type of ['pointerup', 'pointercancel']) {
+  window.addEventListener(type, () => setTimeout(() => { if (!editor.pulling()) dropAxisHold(); }), true);
+}
 // A key released while the window is unfocused never reports keyup.
 window.addEventListener('blur', () => {
+  dropAxisHold();
+  spentAxisKeys.clear();
   viewport.setPanMode(false);
   editor.setFineSnap(false);
 });
@@ -618,6 +738,14 @@ window.vertex?.onMenu((action) => ACTIONS[action]?.());
 // `vertexDebug.editor` is the editor itself.
 showHotkeys();
 
+// Warnings about the model: a card when one comes up, a block in the status bar after.
+const warnings = new Warnings(editor, {
+  toast: $('overlap-toast'),
+  button: $('warnings-button'),
+  errorButton: $('errors-button'),
+  list: $('warnings-list'),
+});
+
 // The project: its file and its unsaved changes, named in the window's title.
 const project = new Project(editor, window.vertex?.project);
 const showProject = () => {
@@ -626,7 +754,7 @@ const showProject = () => {
 project.addEventListener('change', showProject);
 showProject();
 
-window.vertexDebug = { text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
+window.vertexDebug = { warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
 
 // The three-view panel; whether it is open is remembered between launches.
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
@@ -697,6 +825,7 @@ function refresh() {
     // An operation switches off the modes it can't work in.
     button.disabled = editor.operation !== null && !OPERATION_MODES[editor.operation].includes(button.dataset.mode);
   }
+  placeModeSlider();
 
   // The middle of the selection, or the pivot point with the pivot tool.
   const point = editor.panelPoint();
@@ -707,6 +836,7 @@ function refresh() {
   }
 
   $('copy-vector').disabled = $('paste-vector').disabled = !point;
+  $('center-pivot').hidden = !(tool === 'pivot' && point);
   // The size panel: one object selected, in object mode.
   const size = editor.objectSize();
   $('dimensions').hidden = !size;
@@ -715,12 +845,7 @@ function refresh() {
     input.value = +size[input.dataset.size].toFixed(5);
   }
   $('properties').hidden = picked.size === 0; // only while something is selected
-  $('selection-count').textContent =
-    tool === 'pivot' && point
-      ? 'Опорная точка'
-      : picked.size
-        ? `Выбрано ${ELEMENT_NAMES[mode]}: ${picked.size}`
-        : 'Ничего не выбрано';
+  $('selection-count').textContent = tool === 'pivot' && point ? 'Опорная точка' : 'Позиция';
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;
@@ -734,6 +859,7 @@ function refresh() {
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('focus-button').classList.toggle('active', editor.focus);
+  showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('snap-toggle').title = editor.snapGrid.enabled
     ? 'Привязка к сетке включена: перемещение и масштаб идут по шагам сетки. Нажмите, чтобы отвязать'
@@ -743,35 +869,12 @@ function refresh() {
   // The banner keeps its last name while it slides away.
   if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];
   $('operation-banner').classList.toggle('shown', editor.operation !== null);
+  $('cut-options').classList.toggle('shown', editor.operation === 'cut');
+  for (const button of cutButtons) button.classList.toggle('active', button.dataset.cut === editor.cutDirection);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   for (const name of ['cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
-  let hint = HINTS[editor.operation ?? tool];
-  if (editor.polygon) {
-    const { axis, offset, points, problem } = editor.polygon;
-    const plane = { x: 'YZ', y: 'XZ', z: 'XY' }[axis];
-    if (!axis) {
-      hint = 'Полигон: выберите плоскость кнопками X, Y, Z внизу (или клавишами {axis.x}/{axis.y}/{axis.z}) · Esc или {op.polygon} — выйти';
-    } else if (problem) {
-      hint = `Полигон не создан: ${problem} · Backspace — убрать последнюю точку · Esc — начать контур заново`;
-    } else if (points.length === 0) {
-      hint = `Полигон: плоскость ${plane}, ${axis.toUpperCase()} = ${+offset.toFixed(5)} · Клик — первая точка · PgUp/PgDn — сдвинуть плоскость · Esc или {op.polygon} — выйти`;
-    } else {
-      hint = `Полигон: точек ${points.length} · Клик — следующая точка · клик по первой точке или Enter — замкнуть · Backspace — убрать последнюю · Esc — начать заново`;
-    }
-  }
-  if (editor.extrude) {
-    hint = `Экструд: ${+editor.extrude.distance.toFixed(5)} · Клик — зафиксировать · Ctrl — мелкий шаг · Esc — отмена`;
-  }
-  if (editor.cut) {
-    const { axis, value } = editor.cut;
-    hint = value === null
-      ? `По оси ${axis.toUpperCase()} грань не пересекает ни одна линия сетки — смените ось (2–4) или зажмите Ctrl · Esc — отмена`
-      : `Разрез: ${axis.toUpperCase()} = ${+value.toFixed(5)} · Клик — разрезать · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Esc — отмена`;
-  }
-  // {id} in a hint stands for the keys of that shortcut, as they are set now.
-  $('status-hint').textContent = (hint ?? '').replace(/\{([\w.-]+)\}/g, (_, id) => hotkeys.label(id));
 
   viewport.requestRender();
 }

@@ -84,6 +84,9 @@ export class EditableMesh {
     this.objects = [];
     this.vertexObject = []; // the object id of every vertex
     this.nextObjectId = 1;
+    // Which side of the centre a vertex stood on before it was scaled flat
+    // (vertex index -> { x?: 1 | -1, ... }): what lets it be scaled back out.
+    this.folds = new Map();
   }
 
   // Adds a vertex to the object with the given id.
@@ -404,6 +407,49 @@ export class EditableMesh {
     const sides = new Set(loop.map((vertex, i) => edgeKey(vertex, loop[(i + 1) % loop.length])));
     this.wires = this.wires.filter(([c, d]) => !sides.has(edgeKey(c, d)));
     return true;
+  }
+
+  // --- merging vertices -------------------------------------------------------
+
+  // Makes one vertex of each group of vertices (index lists; the first of a
+  // group is the one that stays). Faces and wires go over to it; a face left
+  // with fewer than three corners, or pinched, or the double of another, is
+  // dropped, and so is a wire that has become a point or an edge that is
+  // there already. Returns the old -> new vertex index map of what remains.
+  mergeVertices(groups) {
+    const into = new Map();
+    for (const [kept, ...others] of groups) {
+      for (const index of others) into.set(index, kept);
+      this.folds.delete(kept); // one vertex has no sides to unfold to
+    }
+    if (into.size === 0) return new Map(this.vertices.map((_, i) => [i, i]));
+    const resolve = (index) => into.get(index) ?? index;
+
+    const seenFaces = new Set();
+    this.faces = this.faces
+      .map((face) => {
+        const loop = face.map(resolve);
+        return loop.filter((vertex, k) => vertex !== loop[(k + 1) % loop.length]);
+      })
+      .filter((face) => {
+        if (face.length < 3 || new Set(face).size !== face.length) return false;
+        const key = [...face].sort((a, b) => a - b).join(',');
+        if (seenFaces.has(key)) return false;
+        seenFaces.add(key);
+        return true;
+      });
+    const edges = new Set();
+    for (const face of this.faces) {
+      face.forEach((a, k) => edges.add(edgeKey(a, face[(k + 1) % face.length])));
+    }
+    this.wires = this.wires
+      .map((wire) => wire.map(resolve))
+      .filter(([a, b]) => {
+        if (a === b || edges.has(edgeKey(a, b))) return false;
+        edges.add(edgeKey(a, b));
+        return true;
+      });
+    return this.removeVertices(new Set(into.keys()));
   }
 
   // --- making a face out of chosen vertices ---------------------------------
@@ -857,6 +903,7 @@ export class EditableMesh {
       .map((wire) => wire.map((i) => remap.get(i)));
     // An object with no vertices left is gone; a group never had any and stays.
     this.vertexObject = this.vertexObject.filter((_, i) => remap.has(i));
+    this.folds = new Map([...this.folds].filter(([i]) => remap.has(i)).map(([i, fold]) => [remap.get(i), fold]));
     const alive = new Set(this.vertexObject);
     const gone = this.objects.filter((object) => object.kind !== 'group' && !alive.has(object.id));
     this.dropObjects(new Set(gone.map((object) => object.id)));

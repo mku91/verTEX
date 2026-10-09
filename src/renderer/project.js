@@ -5,7 +5,8 @@
 // src/main/project-file.js) with these entries:
 //
 //   manifest.json    { format, version, app, saved } - what the file is
-//   model.json       the mesh and the scene tree, see modelOf()
+//   model.json       the mesh and the scene tree, see modelOf(); `mirror` is
+//                    the global mirror's axes, an object's `mirror` its own
 //   view.json        { camera: { position, target } }
 //   materials.json   [] - materials, none yet
 //   textures/        texture files, none yet
@@ -26,16 +27,20 @@ function modelOf(editor) {
     faces: mesh.faces.map((face) => [...face]),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot }) => ({
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror }) => ({
       id,
       name,
       kind: kind ?? 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(pivot ? { pivot: pivot.map(round) } : {}),
+      ...(mirror?.length ? { mirror: [...mirror] } : {}),
     })),
     vertexObject: [...mesh.vertexObject],
     nextObjectId: mesh.nextObjectId,
+    mirror: [...editor.mirror.globalAxes],
+    // Vertices scaled flat and the sides they came from, see Editor.scaleFlat().
+    folds: [...mesh.folds].map(([i, fold]) => [i, { ...fold }]),
   };
 }
 
@@ -82,10 +87,17 @@ export function readProject(files) {
   if (!model.vertices.every((v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite))) fail('вершины');
   if (!model.faces.every((f) => Array.isArray(f) && f.length >= 3 && f.every((i) => isIndex(i, count)))) fail('грани');
   if (!model.wires.every((w) => Array.isArray(w) && w.length === 2 && w.every((i) => isIndex(i, count)))) fail('рёбра');
+  const axes = (value) => value === undefined || (Array.isArray(value) && value.every((axis) => ['x', 'y', 'z'].includes(axis)));
+  if (!axes(model.mirror)) fail('зеркало');
+  if (model.folds !== undefined) {
+    const sound = Array.isArray(model.folds) && model.folds.every(([i, fold]) =>
+      isIndex(i, count) && fold && typeof fold === 'object' && Object.entries(fold).every(([axis, sign]) => 'xyz'.includes(axis) && [1, -1, 0].includes(sign)));
+    if (!sound) fail('свёрнутые вершины');
+  }
   const ids = new Set();
   for (const object of model.objects) {
     const sound =
-      object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' &&
+      object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
       (object.pivot === undefined || (Array.isArray(object.pivot) && object.pivot.length === 3 && object.pivot.every(Number.isFinite)));
     if (!sound) fail('объекты');
     ids.add(object.id);

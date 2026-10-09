@@ -1,11 +1,9 @@
 import { scrubbable } from './scrub.js';
 
-const OBJECT_ICON =
-  '<svg viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7zm0 2.3L5.8 7.7 12 11.2l6.2-3.5zM5 9.4v6.4l6 3.4v-6.4zm14 0l-6 3.4v6.4l6-3.4z"/></svg>';
-const GROUP_ICON =
-  '<svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-const EYE_ICON = '<svg viewBox="0 0 24 24"><path d="M12 5C7 5 2.7 8.1 1 12c1.7 3.9 6 7 11 7s9.3-3.1 11-7c-1.7-3.9-6-7-11-7zm0 11.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
-const EYE_OFF_ICON = '<svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5c0 .65-.13 1.26-.36 1.83l2.92 2.92A11.8 11.8 0 0 0 23 12c-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46A11.8 11.8 0 0 0 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65a3 3 0 0 0 3 3c.22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53a5 5 0 0 1-5-5c0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16a3 3 0 0 0-3-3l-.17.01z"/></svg>';
+const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
+const GROUP_ICON = '<i class="fa-solid fa-folder"></i>';
+const EYE_ICON = '<i class="fa-solid fa-eye"></i>';
+const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
 const INDENT = 14; // px per nesting level
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
 // Ctrl combinations that still work in the fields of the modal form.
@@ -108,7 +106,7 @@ export class Outliner {
       const arrow = document.createElement('span');
       arrow.className = 'outliner-arrow';
       if (island.children.length) {
-        arrow.textContent = folded ? '▸' : '▾';
+        arrow.innerHTML = `<i class="fa-solid fa-caret-${folded ? 'right' : 'down'}"></i>`;
         arrow.dataset.fold = island.id;
       }
       const name = document.createElement('span');
@@ -431,9 +429,9 @@ export class Outliner {
         input.inputMode = field.whole ? 'numeric' : 'decimal';
         input.spellcheck = false;
         input.value = field.value;
-        input.title = `от ${field.min} до ${field.max} · зажмите и ведите вверх или вниз, чтобы менять`;
-        // Dragging the field up or down changes its value.
-        scrubbable(input, {
+        input.title = `от ${field.min} до ${field.max} · чтобы менять, ведите вверх или вниз за точку справа`;
+        // Dragging the field's handle up or down changes its value.
+        const scrub = scrubbable(input, {
           read: () => parseFloat(input.value.replace(',', '.')),
           write: (value) => {
             input.value = value;
@@ -443,7 +441,7 @@ export class Outliner {
           min: field.min,
           max: field.max,
         });
-        label.append(caption, input);
+        label.append(caption, scrub);
         return label;
       }),
     );

@@ -1,3 +1,30 @@
+/* Icons are Font Awesome 7 Free: ../fonts/all.css (linked before this file)
+   has the classes, <i class="fa-solid fa-scissors"></i>. It looks for the
+   fonts in ../webfonts; they are next to it, so the faces are given again. */
+@font-face {
+  font-family: 'Font Awesome 7 Free';
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url('../fonts/fa-solid-900.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Font Awesome 7 Free';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../fonts/fa-regular-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Font Awesome 7 Brands';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('../fonts/fa-brands-400.woff2') format('woff2');
+}
+
 /* Colours of the default theme, for the first paint; theme.js sets the
    current theme's values on top of these. */
 :root {
@@ -82,11 +109,32 @@ body {
   padding: 4px 9px;
 }
 
-#top-actions svg {
+#top-actions i {
   display: block;
+  flex: none;
   width: 18px;
   height: 18px;
-  fill: currentColor;
+  font-size: 15px;
+  line-height: 18px;
+}
+
+/* Everything in the top bar is one height, whatever is inside: text, an
+   icon, or an icon with a number. */
+#modes,
+#top-actions,
+.grid-toggle,
+.grid-control > button {
+  box-sizing: border-box;
+  height: 26px;
+}
+
+#modes button,
+#top-actions button {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 #modes button + button,
@@ -104,10 +152,48 @@ body {
   background: var(--hover);
 }
 
-#modes button.active,
 #top-actions button.active {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* The current mode is marked by a block that slides under the buttons. */
+#modes {
+  position: relative;
+  background: var(--bg);
+}
+
+#mode-slider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--accent);
+}
+
+#mode-slider.placed {
+  transition: transform 0.2s cubic-bezier(0.3, 0.7, 0.2, 1), width 0.2s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+#modes button {
+  position: relative; /* above the slider */
+  background: none;
+  transition: color 0.2s;
+}
+
+#modes button.active {
+  color: var(--accent-text);
+}
+
+#modes button.active:hover:enabled {
+  background: none;
+}
+
+/* No dividing line across the slider's edges. */
+#modes button.active,
+#modes button.active + button {
+  border-left-color: transparent;
 }
 
 #toolbar {
@@ -146,11 +232,13 @@ body {
   color: var(--accent-text);
 }
 
-#toolbar svg {
+#toolbar i {
   display: block;
-  width: 100%;
-  height: 100%;
-  fill: currentColor;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  font-size: 17px;
+  line-height: 22px;
 }
 
 #toolbar hr {
@@ -422,11 +510,13 @@ body {
   color: var(--text);
 }
 
-.ortho-header svg {
+.ortho-header i {
   display: block;
-  width: 100%;
-  height: 100%;
-  fill: currentColor;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  line-height: 14px;
 }
 
 #viewport {
@@ -523,6 +613,13 @@ body {
   color: var(--text);
   font: 600 15px/1 inherit;
   cursor: pointer;
+}
+
+#add-object i {
+  display: block;
+  width: 100%;
+  font-size: 11px;
+  pointer-events: none;
 }
 
 #add-object:hover,
@@ -698,11 +795,27 @@ body {
   text-align: center;
 }
 
-.outliner-row svg {
+.outliner-row .outliner-arrow i {
+  width: 12px;
+  font-size: 10px;
+  pointer-events: none; /* the click is the arrow's */
+}
+
+.hotkey-reset i {
+  display: block;
+  width: 100%;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.outliner-row i {
+  display: block;
   flex: none;
   width: 14px;
   height: 14px;
-  fill: var(--text-dim);
+  font-size: 12px;
+  line-height: 14px;
+  color: var(--text-dim);
 }
 
 .outliner-name {
@@ -727,7 +840,7 @@ body {
 }
 
 .outliner-row.hidden .outliner-name,
-.outliner-row.hidden > svg {
+.outliner-row.hidden > i {
   opacity: 0.4;
 }
 
@@ -820,8 +933,17 @@ body {
   cursor: pointer;
 }
 
-.properties-header button svg {
-  fill: currentColor;
+.properties-header button[hidden] {
+  display: none;
+}
+
+.properties-header button i {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .properties-header button:hover:not(:disabled) {
@@ -883,6 +1005,44 @@ body {
   background: var(--hover);
 }
 
+/* The mirror: its button and the popup with the axis switches. */
+/* Right of the operation buttons; its popup hangs from its left edge. */
+#mirror-control {
+  position: relative;
+  margin-left: 12px;
+}
+
+#mirror-popup {
+  right: auto;
+  left: 0;
+  width: 220px;
+}
+
+/* Everything in it sits on the middle line, like its round buttons. */
+#mirror-popup .grid-popup-title {
+  text-align: center;
+}
+
+.mirror-axes {
+  margin: 4px 0 2px;
+}
+
+.mirror-axes .plane-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+
+.mirror-note {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.mirror-note + .grid-popup-title {
+  margin-top: 8px;
+}
+
 /* The snapping switch: lit while snapping is on. */
 .grid-toggle.active {
   border-color: var(--accent);
@@ -893,20 +1053,22 @@ body {
   color: var(--text-dim);
 }
 
-.grid-toggle svg {
+.grid-toggle i {
+  display: block;
+  flex: none;
   width: 16px;
   height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
+  font-size: 13px;
+  line-height: 16px;
 }
 
-.grid-control svg {
+.grid-control i {
+  display: block;
+  flex: none;
   width: 16px;
   height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
+  font-size: 13px;
+  line-height: 16px;
 }
 
 /* Drops down from its button: a slider and the value it sets. */
@@ -979,13 +1141,65 @@ body {
   outline: 0;
 }
 
-/* Number fields that are also dragged up and down, see scrub.js. */
-.scrubbable {
-  cursor: ns-resize;
+/* Number fields that are also dragged up and down, see scrub.js: the field
+   and, at its right end, the handle it is dragged by - a divider and a dot.
+   Only the handle has the arrows cursor; the rest is a text box. */
+.scrub-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
 }
 
-.scrubbable.scrubbing {
+.scrub-field .scrubbable {
+  padding-right: 24px;
+}
+
+.scrub-handle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 19px;
+  border-left: 1px solid var(--border);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.scrub-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.scrub-handle:hover::before,
+.scrub-field.scrubbing .scrub-handle::before {
+  background: var(--accent);
+}
+
+.scrub-field.scrubbing .scrubbable {
   border-color: var(--accent);
+}
+
+.scrub-field:has(input:disabled) .scrub-handle {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* In the add form the field is narrow and fixed. */
+#add-form .scrub-field {
+  flex: 0 0 78px;
+}
+
+#add-form .scrub-field input {
+  flex: 1;
+  width: 100%;
 }
 
 #dimensions input:disabled,
@@ -1014,6 +1228,59 @@ body {
   position: absolute;
   top: 10px;
   right: 150px;
+}
+
+/* The cut tool's setting: which way it cuts. Slides in from below with the tool. */
+#cut-options {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 18px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+#cut-options.shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+#cut-options button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+#cut-options button + button {
+  border-left: 1px solid var(--border);
+}
+
+#cut-options button:hover {
+  background: var(--hover);
+}
+
+#cut-options button.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+#cut-options i {
+  width: 14px;
+  font-size: 13px;
 }
 
 /* Names the modal operation that is on; slides in from above when one starts. */
@@ -1059,8 +1326,13 @@ body {
   color: var(--text);
 }
 
-#operation-close svg {
-  fill: currentColor;
+#operation-close i {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  font-size: 13px;
+  line-height: 14px;
 }
 
 #focus-button {
@@ -1075,9 +1347,13 @@ body {
   color: var(--accent-text);
 }
 
-#focus-button svg {
+#focus-button i {
   display: block;
-  fill: currentColor;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
+  line-height: 18px;
 }
 
 #focus-button,
@@ -1099,11 +1375,13 @@ body {
   background: var(--hover);
 }
 
-#shading-button svg {
+#shading-button i {
   display: block;
-  width: 100%;
-  height: 100%;
-  fill: currentColor;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
+  line-height: 18px;
 }
 
 #shading-menu {
@@ -1418,6 +1696,199 @@ body {
 
 .dialog button:hover {
   background: var(--hover);
+}
+
+/* A warning that has just come up: a card in the viewport's corner with a
+   bar on top that runs down - the time it stays. It takes no input away. */
+#overlap-toast {
+  position: absolute;
+  top: 206px;
+  right: 10px;
+  z-index: 3;
+  width: 250px;
+  overflow: hidden;
+  border: 1px solid #ffb86c;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 94%, transparent);
+  /* Away: off to the right and clear; it slides in and out. */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(24px);
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+
+#overlap-toast.shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.toast-timer {
+  height: 3px;
+  background: color-mix(in srgb, #ffb86c 25%, transparent);
+}
+
+.toast-timer i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffb86c;
+  transform-origin: left;
+}
+
+/* Pointing at the card holds the clock. */
+#overlap-toast:hover .toast-timer i {
+  animation-play-state: paused !important;
+}
+
+@keyframes toast-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+#overlap-toast p {
+  margin: 0;
+  padding: 9px 12px 8px;
+}
+
+.toast-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.toast-buttons button,
+#warnings-list button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.toast-buttons button:hover,
+#warnings-list button:hover {
+  background: var(--hover);
+}
+
+.toast-buttons [data-merge] {
+  border-color: #ffb86c;
+  background: #ffb86c;
+  color: #1a1b22;
+}
+
+.toast-buttons [data-merge]:hover {
+  background: color-mix(in srgb, #ffb86c 85%, white);
+}
+
+/* The errors and warnings buttons in the status bar: always there, filled
+   with their colour only while there is something behind them. */
+.issues-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  margin-right: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.issues-button:hover {
+  background: var(--hover);
+}
+
+.issues-button i {
+  display: block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  font-size: 11px;
+  line-height: 12px;
+}
+
+.issues-button.active {
+  color: #1a1b22;
+  font-weight: 600;
+}
+
+#warnings-button.active {
+  border-color: #ffb86c;
+  background: #ffb86c;
+}
+
+#errors-button.active {
+  border-color: #ff5555;
+  background: #ff5555;
+}
+
+#warnings-list {
+  position: fixed;
+  bottom: 30px;
+  left: 8px;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 520px;
+  max-height: 50vh;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid #ffb86c;
+  border-radius: 6px;
+  background: var(--bg-raised);
+}
+
+#warnings-list.errors {
+  border-color: #ff5555;
+}
+
+.warning-none {
+  color: var(--text-dim);
+}
+
+/* The list rises from the status bar when opened and sinks back when closed
+   (it is `hidden` then, but kept laid out so that it can be seen leaving). */
+#warnings-list {
+  transition: opacity 0.16s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.15), visibility 0s;
+}
+
+#warnings-list[hidden] {
+  display: flex;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: opacity 0.16s ease, transform 0.2s ease, visibility 0s 0.2s;
+}
+
+.warnings-head,
+.warning-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.warnings-head span {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.warning-row span {
+  flex: 1;
+  padding-right: 10px;
+  white-space: nowrap;
 }
 
 #statusbar {

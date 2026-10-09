@@ -3,6 +3,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { EditableMesh, MeshView, edgeKey } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
+import { Mirror } from './mirror.js';
 import { theme, onThemeChange } from './theme.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -106,6 +107,8 @@ export class Editor extends EventTarget {
     // The polygon tool's state: its work plane and the outline drawn so far.
     this.polygon = null;
     this.axisLock = 'free';
+    this.cutDirection = 'vertical'; // or 'horizontal': which way the cut tool cuts
+    this.axisHold = null; // the lock to go back to when a held axis key is let go, see holdAxis()
     this.tool = 'select';
     this.raycaster = new THREE.Raycaster();
     this.snapGrid = new SnapGrid(viewport);
@@ -113,6 +116,7 @@ export class Editor extends EventTarget {
 
     this.mesh = new EditableMesh();
     this.mesh.addCube();
+    this.mirror = new Mirror(this); // mirror modeling, see mirror.js
     this.view = new MeshView(this.mesh);
     viewport.scene.add(this.view.group);
     // The vertex dots are hidden by the surface through a depth map of it.
@@ -196,9 +200,11 @@ export class Editor extends EventTarget {
       this.pivotStart = this.pivot.position.clone();
       this.pivot.updateMatrix();
       this.dragStartInverse = this.pivot.matrix.clone().invert();
-      this.dragStartPositions = new Map(
-        [...this.selection].map((i) => [i, this.mesh.vertices[i].clone()]),
-      );
+      // Scaling takes along the vertices folded onto the selected ones (a
+      // face scaled flat is picked by one of its edges or corners), so that
+      // they unfold together.
+      const moved = this.gizmo.mode === 'scale' ? this.withFoldedTwins([...this.selection]) : [...this.selection];
+      this.dragStartPositions = new Map(moved.map((i) => [i, this.mesh.vertices[i].clone()]));
       this.dragStartPivots = this.pivotsInMotion();
       // The pivot tool moves the point alone: the entry it belongs to.
       this.pivotEdited = this.tool === 'pivot' ? this.pivotEntry() : null;
@@ -251,7 +257,12 @@ export class Editor extends EventTarget {
     const scaling = this.gizmo.mode === 'scale';
     const center = scaling ? this.scaleCenter() : null;
     if (this.gizmo.mode === 'translate') this.snapPivot();
-    if (scaling && this.snapGrid.enabled) this.snapScale(center);
+    if (scaling) {
+      // No turning inside out: a scale drag stops at zero.
+      const { scale } = this.pivot;
+      for (const axis of ['x', 'y', 'z']) scale[axis] = Math.max(0, scale[axis]);
+      if (this.snapGrid.enabled) this.snapScale(center);
+    }
     if (this.pivotEdited !== null) {
       this.mesh.objects[this.pivotEdited].pivot = this.pivot.position.toArray();
       this.emitChange();
@@ -274,8 +285,65 @@ export class Editor extends EventTarget {
     for (const [object, start] of this.dragStartPivots) {
       object.pivot = start.clone().applyMatrix4(delta).toArray();
     }
+    if (scaling) this.scaleFlat(center);
+    this.mirror.moves(this.dragStartPositions);
     this.view.updatePositions();
     this.emitChange();
+  }
+
+  // --- scaling through zero and back --------------------------------------------
+
+  // Scaled flat along an axis, a selection keeps no size there to scale: the
+  // scale handle then sets its size outright, and each vertex goes back to
+  // the side of the centre it was folded from (see mesh.folds). Along the
+  // axes of the handle that the drag has just flattened, that side is noted.
+  scaleFlat(center) {
+    const handle = (this.gizmo.axis ?? '').toLowerCase();
+    const axes = handle.length === 3 ? ['x', 'y', 'z'] : [...handle];
+    const { scale } = this.pivot;
+    const size = this.scaleBox.getSize(new THREE.Vector3());
+    const reference = Math.max(size.x, size.y, size.z, 0.5) / 2; // one handle's pull adds this much to each side
+    for (const axis of axes) {
+      if (size[axis] > 1e-9) {
+        // Flattened by this drag: every vertex remembers its side.
+        if (Math.abs(scale[axis]) < 1e-9) {
+          for (const [i, start] of this.dragStartPositions) this.noteFold(i, axis, Math.sign(start[axis] - center[axis]));
+        }
+        continue;
+      }
+      let half = reference * Math.max(0, scale[axis] - 1);
+      if (this.snapGrid.enabled) half = Math.round(half / this.snapGrid.activeStep) * this.snapGrid.activeStep;
+      this.unfold([...this.dragStartPositions.keys()], axis, center[axis], half);
+    }
+  }
+
+  // The indices plus every vertex of the same object standing in the same
+  // place as one of them that remembers a side to unfold to.
+  withFoldedTwins(indices) {
+    const { vertices, vertexObject, folds } = this.mesh;
+    const chosen = new Set(indices);
+    const placeOf = (i) => vertexObject[i] + ':' + vertices[i].toArray().map((n) => Math.round(n * 1e4)).join(';');
+    const places = new Set(indices.map(placeOf));
+    vertices.forEach((_, i) => {
+      if (!chosen.has(i) && folds.has(i) && places.has(placeOf(i))) chosen.add(i);
+    });
+    return [...chosen];
+  }
+
+  noteFold(index, axis, sign) {
+    const { folds } = this.mesh;
+    if (!folds.has(index)) folds.set(index, {});
+    folds.get(index)[axis] = sign === 0 ? folds.get(index)[axis] ?? 0 : sign;
+  }
+
+  // Puts the vertices `half` away from `centre` along `axis`, each on the
+  // side it was folded from. Nothing happens without sides to go to.
+  unfold(indices, axis, centre, half) {
+    const { folds, vertices } = this.mesh;
+    const sides = new Set(indices.map((i) => folds.get(i)?.[axis]).filter((sign) => sign));
+    if (sides.size < 2) return false;
+    for (const i of indices) vertices[i][axis] = centre + (folds.get(i)?.[axis] ?? 0) * half;
+    return true;
   }
 
   // Sets up the snap grid for the move gizmo handle being dragged ('X', 'XY',
@@ -325,14 +393,12 @@ export class Editor extends EventTarget {
     }
     const snapped = (axis) => {
       const half = reach[axis];
-      if (Math.abs(half) < 1e-9) return 1; // flat along this axis: nothing to scale
+      if (Math.abs(half) < 1e-9) return scale[axis]; // flat along this axis: scaleFlat() takes it
       const side = Math.sign(half);
       let target = Math.round((center[axis] + half * scale[axis]) / step) * step - center[axis];
-      if (target * side < 1e-9) {
-        // Never collapse or flip: stop at the nearest grid line beyond the center.
-        const next = (side > 0 ? Math.ceil(center[axis] / step) : Math.floor(center[axis] / step)) * step - center[axis];
-        target = Math.abs(next) < 1e-9 ? step * side : next;
-      }
+      // Down to nothing is allowed - the selection goes flat, a face shrinks
+      // to a point - but never through to the other side.
+      if (target * side < 1e-9) target = 0;
       return target / half;
     };
 
@@ -440,6 +506,8 @@ export class Editor extends EventTarget {
   // The point slides in the view's plane, on the grid; an axis lock keeps it on that axis.
   dragPivotTo(clientX, clientY) {
     const drag = this.pivotDrag;
+    drag.lastX = clientX;
+    drag.lastY = clientY;
     const axis = AXIS_LOCKS[this.axisLock];
     if (!drag.before) {
       if (Math.hypot(clientX - drag.x, clientY - drag.y) <= CLICK_TOLERANCE) return;
@@ -490,6 +558,28 @@ export class Editor extends EventTarget {
     this.placeGizmo();
     this.emitChange();
     return true;
+  }
+
+  // Puts the pivot point of the entry being edited in the middle of its
+  // bounds. Normally that is the pivot nobody has set, which also follows the
+  // object as it changes shape; an object with a mirror of its own keeps a
+  // set pivot (its mirror planes go through it), moved to the middle.
+  centerPivot() {
+    const index = this.pivotEntry();
+    if (index === null || this.busy()) return;
+    const object = this.mesh.objects[index];
+    const { vertices } = this.contents([index]);
+    if (vertices.size === 0) return;
+    const middle = new THREE.Box3()
+      .setFromPoints([...vertices].map((i) => this.mesh.vertices[i]))
+      .getCenter(new THREE.Vector3());
+    const pinned = Boolean(object.mirror?.length);
+    if (pinned ? JSON.stringify(object.pivot) === JSON.stringify(middle.toArray()) : !object.pivot) return;
+    this.history.push(this.snapshot());
+    if (pinned) object.pivot = middle.toArray();
+    else delete object.pivot;
+    this.placeGizmo();
+    this.emitChange();
   }
 
   // Drops the pivot point set for an entry: it is the middle of the bounds again.
@@ -543,6 +633,89 @@ export class Editor extends EventTarget {
     this.pivotMarker.scale.set(size, size, 1);
   }
 
+  // --- vertices in one place ----------------------------------------------------
+
+  // The places where two or more vertices of one object stand together, as
+  // { object (its id), name, indices, point }.
+  overlaps() {
+    const { vertices, vertexObject, objects } = this.mesh;
+    const places = new Map();
+    vertices.forEach((p, i) => {
+      const key = `${vertexObject[i]}:${Math.round(p.x * 1e4)}|${Math.round(p.y * 1e4)}|${Math.round(p.z * 1e4)}`;
+      if (!places.has(key)) places.set(key, []);
+      places.get(key).push(i);
+    });
+    const names = new Map(objects.map((object) => [object.id, object.name]));
+    return [...places.values()]
+      .filter((indices) => indices.length > 1)
+      .map((indices) => ({
+        object: vertexObject[indices[0]],
+        name: names.get(vertexObject[indices[0]]) ?? '',
+        indices,
+        point: vertices[indices[0]].clone(),
+      }));
+  }
+
+  // Makes one vertex of each of the given groups (index lists), see
+  // EditableMesh.mergeVertices(). One undo step.
+  mergeOverlaps(groups) {
+    if (groups.length === 0 || this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    const before = this.snapshot();
+    const remap = this.mesh.mergeVertices(groups);
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.selection = kept(this.selection);
+    this.target = kept(this.target);
+    this.edited(before);
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
+  // --- mirror modeling (see mirror.js) ----------------------------------------
+
+  // The axes of the global mirror: planes through the origin, every object.
+  setGlobalMirror(axes) {
+    const next = ['x', 'y', 'z'].filter((axis) => axes.includes(axis));
+    const now = ['x', 'y', 'z'].filter((axis) => this.mirror.globalAxes.has(axis));
+    if (next.join() === now.join() || this.busy()) return;
+    this.history.push(this.snapshot());
+    this.mirror.globalAxes = new Set(next);
+    this.emitChange();
+  }
+
+  // The object whose local mirror the settings show: in object mode the one
+  // object that is the whole selection, otherwise the one object being
+  // edited (the target of the three views). Null when it is not one object.
+  mirrorEntry() {
+    const chosen = this.sizeEntry();
+    if (chosen !== null) return chosen;
+    const { islands, islandOfVertex } = this.topology;
+    const owners = new Set([...this.target].map((vertex) => islandOfVertex[vertex]));
+    if (owners.size !== 1) return null;
+    const [index] = owners;
+    return islands[index]?.kind === 'group' ? null : index;
+  }
+
+  // An object's own mirror planes, through its pivot point. Turning one on
+  // fixes the pivot where it is, so that the plane stays put while the
+  // object changes shape.
+  setLocalMirror(index, axes) {
+    const object = this.mesh.objects[index];
+    if (!object || object.kind === 'group' || this.busy()) return;
+    const next = ['x', 'y', 'z'].filter((axis) => axes.includes(axis));
+    if (next.join() === (object.mirror ?? []).join()) return;
+    this.history.push(this.snapshot());
+    if (next.length) {
+      object.mirror = next;
+      if (!object.pivot) object.pivot = this.pivotPoint(index).toArray();
+    } else {
+      delete object.mirror;
+    }
+    this.placeGizmo();
+    this.emitChange();
+  }
+
   // --- an object's size ------------------------------------------------------
 
   // The object whose size is shown and set: in object mode, the one object
@@ -568,17 +741,27 @@ export class Editor extends EventTarget {
   // to stretch. `record` as in setSelectionCenter().
   setObjectSize(axis, value, record = true) {
     const entry = this.sizeEntry();
-    if (entry === null || !Number.isFinite(value) || value <= 0 || this.busy()) return;
+    if (entry === null || !Number.isFinite(value) || value < 0 || this.busy()) return;
     const { vertices } = this.topology.islands[entry];
     const size = this.objectSize()[axis];
-    if (size < 1e-9) return;
-    const before = record ? this.snapshot() : null;
     const center = this.pivotPoint(entry)[axis];
-    const factor = value / size;
-    for (const i of vertices) {
-      const vertex = this.mesh.vertices[i];
-      vertex[axis] = center + (vertex[axis] - center) * factor;
+    const flat = size < 1e-9;
+    // Flat along the axis: the vertices go back out to the sides they were
+    // folded from, if they were (see scaleFlat()).
+    if (flat && !vertices.some((i) => this.mesh.folds.get(i)?.[axis])) return;
+    const before = record ? this.snapshot() : null;
+    const moving = new Map(vertices.map((i) => [i, this.mesh.vertices[i].clone()]));
+    if (flat) {
+      this.unfold(vertices, axis, center, value / 2);
+    } else {
+      if (value < 1e-9) for (const i of vertices) this.noteFold(i, axis, Math.sign(this.mesh.vertices[i][axis] - center));
+      const factor = value / size;
+      for (const i of vertices) {
+        const vertex = this.mesh.vertices[i];
+        vertex[axis] = center + (vertex[axis] - center) * factor;
+      }
     }
+    this.mirror.moves(moving);
     if (before) this.commit(before);
     this.view.updatePositions();
     this.placeGizmo();
@@ -623,6 +806,9 @@ export class Editor extends EventTarget {
         }
         // A gizmo handle under the cursor takes the press; otherwise the element does.
         if (this.overGizmo()) return;
+        // The pivot tool works on the pivot point alone: nothing of the model
+        // is grabbed, selected or deselected while it is in hand.
+        if (this.tool === 'pivot') return;
         const key = this.pickElement(event.clientX, event.clientY);
         if (event.shiftKey) {
           // Shift: a drag draws a selection box, even when it starts on an element.
@@ -676,7 +862,8 @@ export class Editor extends EventTarget {
       if (this.drag) this.dragTo(event.clientX, event.clientY);
       else if (event.buttons === 0) {
         // The gizmo's own hover handler has already run for this event.
-        this.setHovered(this.overGizmo() ? null : this.pickElement(event.clientX, event.clientY));
+        const idle = this.overGizmo() || this.tool === 'pivot'; // see pointerdown
+        this.setHovered(idle ? null : this.pickElement(event.clientX, event.clientY));
       }
     });
     dom.addEventListener('pointerleave', () => {
@@ -887,10 +1074,10 @@ export class Editor extends EventTarget {
     center.divideScalar(polygon.points.length);
     const facing = center.sub(this.viewport.camera.position).normalize();
     const vertices = this.mesh.addPolygon(polygon.points, facing);
-    this.history.push(before);
 
     this.endPolygon();
     this.selection = new Set(vertices);
+    this.edited(before);
     this.rebuildView(); // face mode: selects the new face
     this.modeBeforeOperation = 'face'; // stay in face mode after the tool
     this.setOperation(null);
@@ -1062,8 +1249,9 @@ export class Editor extends EventTarget {
       this.cancelExtrude();
       return;
     }
-    this.history.push(this.extrude.before);
+    const { before } = this.extrude;
     this.extrude = null;
+    this.edited(before);
     this.setOperation(null); // one extrusion per activation
   }
 
@@ -1099,7 +1287,9 @@ export class Editor extends EventTarget {
     const island = this.topology.islands[this.topology.islandOfFace[face]];
     // `value` is where the cut will be made; `shown` is where its line is drawn
     // right now, on its way there. `segments` is that line, `time` runs its dashes.
-    this.cut = { face, faces: island.faces, axis: null, value: null, shown: null, segments: [], time: 0 };
+    // `right` is the screen's right in the view the pointer is in, see cutAxis().
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.viewport.camera.quaternion);
+    this.cut = { face, faces: island.faces, axis: null, value: null, shown: null, segments: [], time: 0, right };
     const center = new THREE.Vector3();
     for (const i of this.mesh.faces[face]) center.add(this.mesh.vertices[i]);
     this.placeCut(center.divideScalar(this.mesh.faces[face].length));
@@ -1118,8 +1308,12 @@ export class Editor extends EventTarget {
     });
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal.normalize(), points[0]);
     const ray = viewer.ray(clientX, clientY);
+    // The screen's right in this view, at the face: where a pointer a little to the right looks.
+    const beside = viewer.ray(clientX + 40, clientY);
+    const depth = Math.max(ray.origin.distanceTo(this.cut.point), 1);
+    this.cut.right = beside.at(depth, new THREE.Vector3()).sub(ray.at(depth, new THREE.Vector3())).normalize();
     let hit = null;
-    this.cut.reach = null; // the axes the pointer can move the line along; null = any
+    this.cut.reach = null; // the axes this flat view sees the face edge-on along; null = none
     if (Math.abs(plane.normal.dot(ray.direction)) > MIN_AXIS_SINE) {
       hit = ray.intersectPlane(plane, new THREE.Vector3());
     } else if (viewer.planeAxes) {
@@ -1132,34 +1326,48 @@ export class Editor extends EventTarget {
     if (hit) this.placeCut(hit);
   }
 
+  // Which way the cut goes is the user's choice: 'vertical' or 'horizontal'.
+  setCutDirection(direction) {
+    if (direction === this.cutDirection) return;
+    this.cutDirection = direction;
+    if (this.cut) this.placeCut(this.cut.point);
+    this.emitChange();
+  }
+
+  // The axis the cutting plane is perpendicular to, for a face with the given
+  // corners. Of the two axes the face lies along: on a wall the horizontal cut
+  // is the one at a height (across Y) and the vertical one is the other; on a
+  // floor, where nothing is vertical, the vertical cut is the one whose line
+  // looks vertical in the view the pointer is in.
+  cutAxis(points) {
+    const normal = new THREE.Vector3();
+    points.forEach((a, i) => {
+      const b = points[(i + 1) % points.length];
+      normal.x += (a.y - b.y) * (a.z + b.z);
+      normal.y += (a.z - b.z) * (a.x + b.x);
+      normal.z += (a.x - b.x) * (a.y + b.y);
+    });
+    const [first, second] = ['x', 'y', 'z'].sort((a, b) => Math.abs(normal[a]) - Math.abs(normal[b]));
+    let vertical;
+    let horizontal;
+    if (first === 'y' || second === 'y') {
+      horizontal = 'y';
+      vertical = first === 'y' ? second : first;
+    } else {
+      const right = this.cut.right;
+      vertical = Math.abs(right[first]) >= Math.abs(right[second]) ? first : second;
+      horizontal = vertical === first ? second : first;
+    }
+    return this.cutDirection === 'vertical' ? vertical : horizontal;
+  }
+
   // Puts the cutting plane through `point` (a point in the face's plane),
-  // snapped to the grid. The plane is perpendicular to the locked axis, or,
-  // with no axis locked, to the face's edge nearest to the point, so that the
-  // cut runs across that edge.
+  // snapped to the grid, across the axis of the chosen direction.
   placeCut(point) {
     const cut = this.cut;
-    cut.point = point.clone(); // to re-place the line when the axis or the step changes
+    cut.point = point.clone(); // to re-place the line when the direction or the step changes
     const points = this.mesh.faces[cut.face].map((i) => this.mesh.vertices[i]);
-
-    let axis = this.axisLock;
-    if (axis === 'free') {
-      let nearest = Infinity;
-      const edge = new THREE.Line3();
-      const closest = new THREE.Vector3();
-      points.forEach((a, i) => {
-        edge.set(a, points[(i + 1) % points.length]);
-        const distance = edge.closestPointToPoint(point, true, closest).distanceTo(point);
-        if (distance >= nearest) return;
-        const along = edge.delta(new THREE.Vector3());
-        const dominant = ['x', 'y', 'z'].reduce((best, candidate) =>
-          Math.abs(along[candidate]) > Math.abs(along[best]) ? candidate : best);
-        // An axis the pointer has no say on (see moveCut) is not offered.
-        if (cut.reach && !cut.reach.includes(dominant)) return;
-        nearest = distance;
-        axis = dominant;
-      });
-      if (axis === 'free') return; // no edge of the face runs along an axis of this view
-    }
+    const axis = this.cutAxis(points);
 
     // Grid positions strictly inside the face's extent along the axis.
     const step = this.snapGrid.activeStep;
@@ -1217,8 +1425,8 @@ export class Editor extends EventTarget {
     const before = this.snapshot();
     const result = this.mesh.planeCut(faces, axis, value);
     if (!result.changed) return;
-    this.history.push(before);
     this.selection = new Set(result.vertices);
+    this.edited(before);
     this.rebuildView(); // also ends the cut
     this.setOperation(null); // one cut per activation
   }
@@ -1340,6 +1548,8 @@ export class Editor extends EventTarget {
     vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();
+    // The twins follow. (Not for the pencil: its new vertex has none yet.)
+    if (drag.parent === undefined) this.mirror.moves(drag.moving);
     this.snapGrid.focus(lead);
     this.view.updatePositions();
     this.emitChange();
@@ -1372,6 +1582,8 @@ export class Editor extends EventTarget {
     }
     // Whole objects carry their pivot points along.
     drag.pivots = this.selection.has(drag.index) ? this.pivotsInMotion() : new Map();
+    // Everything the drag moves, where it started: what the mirror goes by.
+    drag.moving = new Map([[drag.index, drag.start.clone()], ...drag.others]);
     // A whole object or group goes by its pivot point: that is what lands on the grid.
     const entry = this.selection.has(drag.index) ? this.pivotEntry() : null;
     drag.anchor = entry === null ? null : this.pivotPoint(entry);
@@ -1763,6 +1975,25 @@ export class Editor extends EventTarget {
 
   // The face the pointer ray hits first.
   pickFace(clientX, clientY) {
+    // A face scaled flat has no surface to hit: it is picked by its corners,
+    // and comes first - a ray through them would only find what is behind.
+    const screen = this.screenProjector(clientX, clientY);
+    const { hiddenVertices } = this.topology;
+    let best = null;
+    let bestDistance = PICK_RADIUS;
+    this.mesh.faces.forEach((face, index) => {
+      if (this.mesh.faceNormal(index).lengthSq() > 0.5) return;
+      for (const i of face) {
+        if (hiddenVertices.has(i) || this.isOccluded(this.mesh.vertices[i])) continue;
+        const p = screen.project(this.mesh.vertices[i]);
+        const distance = p ? Math.hypot(p.x - screen.x, p.y - screen.y) : Infinity;
+        if (distance < bestDistance) {
+          best = index;
+          bestDistance = distance;
+        }
+      }
+    });
+    if (best !== null) return best;
     this.pointerRay(clientX, clientY);
     const [hit] = this.raycaster.intersectObject(this.view.solid, false);
     return hit ? this.view.triangleFaces[hit.faceIndex] : null;
@@ -1851,13 +2082,36 @@ export class Editor extends EventTarget {
     }
     if (!(mode in AXIS_LOCKS) || mode === this.axisLock) return;
     this.axisLock = mode;
-    if (this.cut) this.placeCut(this.cut.point); // the lock is the cut's axis
     // Switching mid-drag re-applies the whole drag under the new constraint.
     if (this.drag?.start) {
       this.constrainDrag();
       this.dragTo(this.drag.lastX, this.drag.lastY);
+    } else if (this.pivotDrag?.before) {
+      this.dragPivotTo(this.pivotDrag.lastX, this.pivotDrag.lastY);
     }
     this.emitChange();
+  }
+
+  // An element, or the pivot point, is being pulled by the pointer.
+  pulling() {
+    return Boolean(this.drag || this.pivotDrag) && !this.extrude && !this.polygon;
+  }
+
+  // An axis held for a while: holdAxis('x' | 'y' | 'z') locks the movement to
+  // it, holdAxis(null) puts back the lock there was before. It is taken only
+  // while something is being pulled; returns whether it was.
+  holdAxis(axis) {
+    if (axis === null) {
+      if (this.axisHold === null) return false;
+      const back = this.axisHold;
+      this.axisHold = null;
+      this.setAxisLock(back);
+      return true;
+    }
+    if (!this.pulling()) return false;
+    if (this.axisHold === null) this.axisHold = this.axisLock;
+    this.setAxisLock(axis);
+    return true;
   }
 
   // Fine snapping (a tenth of the grid step) while the precision modifier is held.
@@ -1987,13 +2241,14 @@ export class Editor extends EventTarget {
     const { islands } = this.topology;
     if (!islands[index] || this.busy()) return;
     if (this.operation) this.setOperation(null);
-    this.history.push(this.snapshot());
+    const before = this.snapshot();
     const { vertices, groups } = this.contents([index]);
     const remap = this.mesh.removeVertices(vertices);
     this.mesh.dropObjects(groups);
     const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
     this.target = kept(this.target);
     this.selection = kept(this.selection);
+    this.edited(before);
     this.rebuildView();
     this.selectionChanged();
   }
@@ -2043,10 +2298,10 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, mirror } = mesh.objects[index];
         const top = roots.has(index);
         return {
-          id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null,
+          id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -2074,6 +2329,7 @@ export class Editor extends EventTarget {
       const object = mesh.objects[mesh.objects.length - 1];
       if (source.hidden) object.hidden = true;
       if (source.pivot) object.pivot = [...source.pivot];
+      if (source.mirror) object.mirror = [...source.mirror];
       made.set(source.id, object);
     }
     for (const source of clip.objects) {
@@ -2088,9 +2344,9 @@ export class Editor extends EventTarget {
     });
     for (const face of clip.faces) mesh.addFace(face.map((vertex) => base + vertex));
     for (const wire of clip.wires) mesh.wires.push(wire.map((vertex) => base + vertex));
-    this.history.push(before);
 
     this.selection = new Set(clip.vertices.map((_, k) => base + k));
+    this.edited(before);
     this.rebuildView();
     // The copies themselves are what is picked, groups included.
     const roots = clip.objects.filter((source) => source.parent === null).map((source) => made.get(source.id));
@@ -2163,8 +2419,9 @@ export class Editor extends EventTarget {
   flipFaces() {
     const faces = this.facesToFlip();
     if (faces.length === 0 || this.busy()) return;
-    this.history.push(this.snapshot());
+    const before = this.snapshot();
     for (const index of faces) this.mesh.faces[index].reverse();
+    this.edited(before);
     this.rebuildView();
     this.placeGizmo();
     this.emitChange();
@@ -2183,7 +2440,7 @@ export class Editor extends EventTarget {
     const before = this.snapshot();
     const facing = this.viewport.camera.getWorldDirection(new THREE.Vector3());
     if (!this.mesh.fill([...this.selection], facing)) return;
-    this.history.push(before);
+    this.edited(before);
     this.rebuildView();
     this.placeGizmo();
     this.emitChange();
@@ -2193,7 +2450,7 @@ export class Editor extends EventTarget {
   // take only the faces themselves and the vertices left unused.
   deleteSelection() {
     if (this.picked.size === 0 || this.busy()) return;
-    this.history.push(this.snapshot());
+    const before = this.snapshot();
     let remap;
     if (this.mode === 'face') {
       remap = this.mesh.removeFaces(this.picked);
@@ -2222,6 +2479,7 @@ export class Editor extends EventTarget {
     // What is left of the edited object stays the target.
     this.target = new Set([...this.target].filter((i) => remap.has(i)).map((i) => remap.get(i)));
     this.selection.clear();
+    this.edited(before);
     this.rebuildView();
     this.placeGizmo();
     this.emitChange();
@@ -2242,17 +2500,20 @@ export class Editor extends EventTarget {
     mesh.vertices = model.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
     mesh.faces = model.faces.map((face) => [...face]);
     mesh.wires = model.wires.map((wire) => [...wire]);
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, mirror }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(pivot ? { pivot: [...pivot] } : {}),
+      ...(mirror?.length ? { mirror: [...mirror] } : {}),
     }));
+    this.mirror.globalAxes = new Set(model.mirror ?? []);
     mesh.vertexObject = [...model.vertexObject];
     const highest = mesh.objects.reduce((most, object) => Math.max(most, object.id), 0);
     mesh.nextObjectId = Math.max(model.nextObjectId ?? 0, highest + 1);
+    mesh.folds = new Map((model.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
 
     this.history = new History();
     this.clipboard = null;
@@ -2336,11 +2597,13 @@ export class Editor extends EventTarget {
     if (this.selection.size === 0 || !Number.isFinite(value) || this.busy()) return;
     const before = record ? this.snapshot() : null;
     const offset = value - this.selectionCenter()[axis];
+    const moving = new Map([...this.selection].map((i) => [i, this.mesh.vertices[i].clone()]));
     for (const i of this.selection) this.mesh.vertices[i][axis] += offset;
     for (const [object, point] of this.pivotsInMotion()) {
       point[axis] += offset;
       object.pivot = point.toArray();
     }
+    this.mirror.moves(moving);
     if (before) this.commit(before);
     this.view.updatePositions();
     this.placeGizmo();
@@ -2381,8 +2644,10 @@ export class Editor extends EventTarget {
       objects: this.mesh.objects.map((object) => ({ ...object })),
       vertexObject: [...this.mesh.vertexObject],
       nextObjectId: this.mesh.nextObjectId,
+      folds: [...this.mesh.folds].map(([i, fold]) => [i, { ...fold }]),
       selection: [...this.selection],
       target: [...this.target],
+      mirror: [...this.mirror.globalAxes],
     };
   }
 
@@ -2394,8 +2659,26 @@ export class Editor extends EventTarget {
     this.mesh.objects = (state.objects ?? []).map((object) => ({ ...object }));
     this.mesh.vertexObject = [...(state.vertexObject ?? [])];
     this.mesh.nextObjectId = Math.max(this.mesh.nextObjectId, state.nextObjectId ?? 1);
+    this.mirror.globalAxes = new Set(state.mirror ?? []);
+    this.mesh.folds = new Map((state.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
     this.selection = new Set(state.selection);
     this.target = new Set(state.target);
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
+  // The end of an edit: `before` (the snapshot from before it) becomes the
+  // undo step, and the mirror, if one is on, repeats the edit on the other
+  // side - which may add and remove vertices, so the selection is carried
+  // over and the view rebuilt.
+  edited(before) {
+    this.history.push(before);
+    const remap = this.mirror.reconcile(before);
+    if (!remap) return;
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.selection = kept(this.selection);
+    this.target = kept(this.target);
     this.rebuildView();
     this.placeGizmo();
     this.emitChange();
@@ -2412,7 +2695,7 @@ export class Editor extends EventTarget {
       faces.length !== before.faces.length ||
       wires.length !== before.wires.length ||
       vertices.some((vertex, i) => !vertex.equals(before.vertices[i]));
-    if (changed) this.history.push(before);
+    if (changed) this.edited(before);
   }
 
   // --- debugging ---------------------------------------------------------

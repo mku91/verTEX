@@ -61,7 +61,7 @@ function buildMenu() {
     {
       label: 'Вид',
       submenu: [
-        { label: 'Три вида', accelerator: 'V', registerAccelerator: false, click: send('toggle-views') },
+        { label: 'Три вида', accelerator: 'B', registerAccelerator: false, click: send('toggle-views') },
         { label: 'Показать выделение', accelerator: 'F', registerAccelerator: false, click: send('frame') },
         { type: 'separator' },
         { label: 'Перезагрузить', role: 'reload' },

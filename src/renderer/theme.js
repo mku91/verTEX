@@ -31,7 +31,7 @@ export const THEMES = {
     vertexFocus: '#c9cbd6',
     hovered: '#f8f8f2',
     hoveredFocus: '#f1fa8c',
-    cut: '#ff79c6',
+    cut: '#50fa7b',
     pivot: '#f1fa8c', // pivot point markers outside the pivot tool
     around: '#44475a', // the rest of the group, in the three views
     snapDot: '#f8f8f2',
@@ -64,7 +64,7 @@ export const THEMES = {
     vertexFocus: '#c4c9d2',
     hovered: '#ffffff',
     hoveredFocus: '#ffd23f',
-    cut: '#ffd23f',
+    cut: '#50fa7b',
     pivot: '#f1fa8c',
     around: '#3a3f4b',
     snapDot: '#ffffff',

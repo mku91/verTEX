@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const path = require('node:path');
+const { registerProjectIo } = require('./project-io.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
@@ -20,9 +21,12 @@ function createWindow() {
     },
   });
   win.once('ready-to-show', () => win.show());
+  guardWindow(win); // unsaved changes are asked about before it closes
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   return win;
 }
+
+const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow });
 
 // Menu items talk to the renderer through a single 'menu' channel.
 const send = (action) => (_item, win) => win?.webContents.send('menu', action);
@@ -32,7 +36,13 @@ function buildMenu() {
     {
       label: 'Файл',
       submenu: [
-        { label: 'Новая сцена', accelerator: 'CmdOrCtrl+N', click: send('new') },
+        // The shortcuts are shown here but handled in the renderer, where the
+        // user can rebind them (Settings -> Hotkeys).
+        { label: 'Новый проект', accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: send('project-new') },
+        { label: 'Открыть…', accelerator: 'CmdOrCtrl+O', registerAccelerator: false, click: send('project-open') },
+        { type: 'separator' },
+        { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
+        { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
         { type: 'separator' },
         { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
         { type: 'separator' },

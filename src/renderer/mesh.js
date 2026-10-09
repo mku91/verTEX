@@ -930,31 +930,62 @@ function chainSegments(segments) {
 
 // Vertex markers: round dots of a fixed size on screen.
 //
-// A dot is a flat sprite at the depth of its vertex, so the faces and edges
-// that meet at the vertex and come towards the camera would cut into it. To
-// stay whole, each dot is pulled towards the eye along its own line of sight
-// (which leaves it in place on screen) by POINT_DEPTH_BIAS times its radius,
-// measured in world units at its depth. Vertices on the far side of the object
-// are still hidden; only a wall thinner than that pull lets one show through.
+// A dot is a flat sprite at the depth of its vertex, so the ordinary depth
+// test would let the faces that meet at the vertex and come towards the camera
+// cut into it. Instead a dot is drawn whole or not at all: the surface is
+// rendered on its own into a depth map first (see MeshView.prepareDepth), and
+// the vertex shader looks its vertex up there - a vertex with something in
+// front of it gets no dot. This holds at any distance from the camera.
 const POINT_SIZE = 8; // px
 const POINT_SELECTED_SCALE = 1.5; // a selected vertex is this much larger
-const POINT_DEPTH_BIAS = 3;
 
 const POINT_VERTEX_SHADER = /* glsl */ `
   uniform float size; // px, in device pixels
-  uniform float pixelWorld; // world size of a CSS pixel at unit distance
+  uniform sampler2D depthMap; // the surface's depth, as the camera sees it
+  uniform vec2 texel; // one pixel of the map
+  uniform float cameraNear;
+  uniform float cameraFar;
+  uniform float occlusion; // 1: the surface hides the dots behind it; 0: nothing does
   attribute vec3 color;
   attribute float scale; // per-vertex size factor
   varying vec3 vColor;
 
+  // How far from the camera the surface is at a point of the map; negative
+  // where there is no surface.
+  float surfaceDistance(vec2 uv) {
+    float depth = texture2D(depthMap, uv).x;
+    if (depth >= 0.9999999) return -1.0;
+    float ndc = depth * 2.0 - 1.0;
+    return 2.0 * cameraNear * cameraFar / (cameraFar + cameraNear - ndc * (cameraFar - cameraNear));
+  }
+
   void main() {
     vColor = color;
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-    float pull = ${POINT_DEPTH_BIAS.toFixed(1)} * ${(POINT_SIZE / 2).toFixed(1)} * scale * pixelWorld * -viewPosition.z;
-    viewPosition.xyz -= normalize(viewPosition.xyz) * pull;
     gl_Position = projectionMatrix * viewPosition;
     gl_PointSize = size * scale;
-    if (scale == 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // a hidden vertex: off the screen
+    bool hidden = scale == 0.0; // of a hidden object
+
+    if (!hidden && occlusion > 0.5) {
+      vec2 uv = gl_Position.xy / gl_Position.w * 0.5 + 0.5;
+      float own = -viewPosition.z;
+      // The vertex is hidden when the surface in front of it is nearer than
+      // it is - in the pixel it falls into or in the four around it, so that a
+      // vertex just behind an outline does not flicker in and out as it
+      // crosses pixels. The vertex's own faces are no nearer than the vertex:
+      // the depth pass pushes the surface back by a couple of pixels' worth of
+      // its slope (polygon offset), which covers the faces that come towards
+      // the camera from a vertex, however steeply.
+      float slack = own * 0.0005; // what the depth map can't tell apart
+      for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+          if (x != 0 && y != 0) continue;
+          float surface = surfaceDistance(uv + vec2(float(x), float(y)) * texel);
+          if (surface >= 0.0 && surface < own - slack) hidden = true;
+        }
+      }
+    }
+    if (hidden) gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // off the screen
   }
 `;
 
@@ -971,10 +1002,18 @@ const POINT_FRAGMENT_SHADER = /* glsl */ `
 
 function pointsMaterial() {
   return new THREE.ShaderMaterial({
-    uniforms: { size: { value: POINT_SIZE }, pixelWorld: { value: 0.001 } },
+    uniforms: {
+      size: { value: POINT_SIZE },
+      depthMap: { value: null },
+      texel: { value: new THREE.Vector2(1, 1) },
+      cameraNear: { value: 0.1 },
+      cameraFar: { value: 1000 },
+      occlusion: { value: 0 },
+    },
     vertexShader: POINT_VERTEX_SHADER,
     fragmentShader: POINT_FRAGMENT_SHADER,
     transparent: true, // smooth rim; also puts the dots after every opaque object
+    depthTest: false, // a dot is hidden as a whole, by its shader
     depthWrite: false,
   });
 }
@@ -1010,12 +1049,24 @@ export class MeshView {
     this.points = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
     // Drawn last: over the edges, the face highlights and the cut line.
     this.points.renderOrder = 5;
-    this.points.onBeforeRender = (renderer, _scene, camera) => {
-      const { uniforms } = this.points.material;
-      uniforms.size.value = POINT_SIZE * renderer.getPixelRatio();
-      uniforms.pixelWorld.value =
-        (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / renderer.domElement.clientHeight;
+    this.points.onBeforeRender = (renderer) => {
+      this.points.material.uniforms.size.value = POINT_SIZE * renderer.getPixelRatio();
     };
+    // The surface alone, for the depth map the dots are tested against. It
+    // shares the surface's geometry and is pushed back the same way.
+    this.depthMesh = new THREE.Mesh(
+      this.solid.geometry,
+      new THREE.MeshBasicMaterial({
+        colorWrite: false,
+        side: THREE.DoubleSide,
+        // Pushed back by two pixels' worth of each face's slope, see the dots' shader.
+        polygonOffset: true,
+        polygonOffsetFactor: 2,
+        polygonOffsetUnits: 2,
+      }),
+    );
+    this.depthScene = new THREE.Scene();
+    this.depthScene.add(this.depthMesh);
 
     // 'orientation' shading: the surface drawn once more, front sides in one
     // colour and back sides in another. They share the surface's geometry and
@@ -1087,6 +1138,23 @@ export class MeshView {
       this.group.add(object);
     }
     this.rebuild();
+  }
+
+  // Gets the depth pass ready for a frame: `target` is the render target its
+  // scene (depthScene) is about to be drawn into with `camera`. Returns false
+  // when the pass is not needed - no dots are shown, or the surface is not
+  // (a wireframe hides nothing).
+  prepareDepth(camera, target) {
+    const { uniforms } = this.points.material;
+    const needed = this.points.visible && this.solid.visible;
+    uniforms.occlusion.value = needed ? 1 : 0;
+    if (!needed) return false;
+    this.depthMesh.geometry = this.solid.geometry; // replaced at every rebuild
+    uniforms.depthMap.value = target.depthTexture;
+    uniforms.texel.value.set(1 / target.width, 1 / target.height);
+    uniforms.cameraNear.value = camera.near;
+    uniforms.cameraFar.value = camera.far;
+    return true;
   }
 
   // Call after topology changes (vertices or faces added/removed).

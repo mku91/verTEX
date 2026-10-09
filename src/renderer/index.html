@@ -29,7 +29,7 @@
         <button id="cut-toggle" data-action="toggle-cut" title="Разрез: разрез объекта по линии на грани (K)" aria-label="Разрез">
           <svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z"/></svg>
         </button>
-        <button id="extrude-toggle" data-action="toggle-extrude" title="Экструд: выдавить грани или рёбра (X)" aria-label="Экструд">
+        <button id="extrude-toggle" data-action="toggle-extrude" title="Экструд: выдавить грани или рёбра (Ctrl+E)" aria-label="Экструд">
           <svg viewBox="0 0 24 24"><path d="M12 2l5 5h-3.5v5h-3V7H7zM4 14h16v6H4zm2 2v2h12v-2z"/></svg>
         </button>
         <button id="polygon-toggle" data-action="toggle-polygon" title="Полигон: нарисовать плоский полигон по точкам сетки (G)" aria-label="Полигон">
@@ -87,8 +87,11 @@
 
       <hr>
 
-      <button data-action="make-face" title="Создать грань через выделенные вершины или рёбра; из двух вершин — ребро (J)">
+      <button data-action="make-face" title="Создать грань через выделенные вершины или рёбра; из двух вершин — ребро (Ctrl+D)">
         <svg viewBox="0 0 24 24"><path d="M12 4.500 19.500 10l-2.800 9H7.300L4.500 10z" opacity="0.45"/><path d="M12 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM20 8.200a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM4 8.200a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM7 17.500a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM17 17.500a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>
+      </button>
+      <button data-action="flip-faces" title="Инвертировать грань: поменять местами лицевую и обратную стороны выделенных граней или всех граней выбранных объектов (Ctrl+I)">
+        <svg viewBox="0 0 24 24"><path d="M11 3h2v18h-2zM9 6v12L3 15V9zM15 6l6 3v6l-6 3zm2 3.200v5.600l2-1V10.200z"/></svg>
       </button>
       <button data-action="delete" title="Удалить выделенные вершины (Delete)">
         <svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 12H7zm3.500 2v8h1.500v-8zm3.500 0v8h1.500v-8z"/></svg>
@@ -201,25 +204,46 @@
   </div>
 
   <div id="settings-dialog" hidden>
-    <div class="dialog">
-      <h2>Настройки</h2>
-      <label>
-        <span>Тема</span>
-        <select id="theme"></select>
-      </label>
-      <h3>Управление</h3>
-      <label title="На сколько меняется расстояние до объекта за один щелчок колеса">
-        <span>Сила зума колесом</span>
-        <input type="range" id="zoom-strength" min="3" max="30" step="1">
-        <output id="zoom-strength-value"></output>
-      </label>
-      <label title="Как долго камера доезжает после поворота колеса; 0 — мгновенно">
-        <span>Плавность зума</span>
-        <input type="range" id="zoom-smoothness" min="0" max="10" step="1">
-        <output id="zoom-smoothness-value"></output>
-      </label>
-      <div class="dialog-buttons">
-        <button id="settings-close">Закрыть</button>
+    <div class="dialog settings">
+      <div class="settings-head">
+        <h2>Настройки</h2>
+        <button id="settings-close" title="Закрыть (Esc)">Закрыть</button>
+      </div>
+      <div class="settings-body">
+        <nav id="settings-nav">
+          <div class="settings-group">Интерфейс</div>
+          <button data-page="appearance" class="active">Оформление</button>
+          <div class="settings-group">Редактор</div>
+          <button data-page="controls">Управление</button>
+          <button data-page="hotkeys">Хоткеи</button>
+        </nav>
+        <div class="settings-pages">
+          <section data-page="appearance">
+            <label>
+              <span>Тема</span>
+              <select id="theme"></select>
+            </label>
+          </section>
+          <section data-page="controls" hidden>
+            <label title="На сколько меняется расстояние до объекта за один щелчок колеса">
+              <span>Сила зума колесом</span>
+              <input type="range" id="zoom-strength" min="3" max="30" step="1">
+              <output id="zoom-strength-value"></output>
+            </label>
+            <label title="Как долго камера доезжает после поворота колеса; 0 — мгновенно">
+              <span>Плавность зума</span>
+              <input type="range" id="zoom-smoothness" min="0" max="10" step="1">
+              <output id="zoom-smoothness-value"></output>
+            </label>
+          </section>
+          <section data-page="hotkeys" hidden>
+            <div class="hotkeys-head">
+              <span id="hotkey-note"></span>
+              <button id="hotkeys-reset" title="Вернуть все клавиши по умолчанию">Сбросить все</button>
+            </div>
+            <div id="hotkey-list"></div>
+          </section>
+        </div>
       </div>
     </div>
   </div>

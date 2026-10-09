@@ -33,6 +33,18 @@ export class Viewport {
     headlight.position.set(-1, 2, 3);
     this.camera.add(headlight);
 
+    // A pass drawn before the frame into a depth map of its own, for whoever
+    // needs to know what the surface hides: { scene, prepare(camera, target) },
+    // where prepare() says whether the pass is wanted this frame.
+    this.depthPass = null;
+    // (A float depth map: the usual 24 bits run out at a distance and make
+    // a thin wall and the vertices behind it one and the same.)
+    this.depthTarget = new THREE.WebGLRenderTarget(1, 1, {
+      depthTexture: new THREE.DepthTexture(1, 1, THREE.FloatType),
+    });
+    this.depthTarget.depthTexture.minFilter = THREE.NearestFilter;
+    this.depthTarget.depthTexture.magFilter = THREE.NearestFilter;
+
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
     this.flight = null; // a camera move in progress, see frame()
     // Taking the camera by hand ends a flight.
@@ -146,6 +158,8 @@ export class Viewport {
     const height = this.container.clientHeight;
     if (width === 0 || height === 0) return;
     this.renderer.setSize(width, height);
+    const buffer = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.depthTarget.setSize(buffer.x, buffer.y);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.render();
@@ -166,6 +180,16 @@ export class Viewport {
 
   render() {
     this.renderQueued = false;
+    // The camera's matrices are brought up to date by the main pass, which
+    // comes after the depth pass - so the depth pass does it first, or it
+    // would see the camera where it was a frame ago while the camera turns.
+    this.camera.updateMatrixWorld();
+    if (this.depthPass?.prepare(this.camera, this.depthTarget)) {
+      this.renderer.setRenderTarget(this.depthTarget);
+      this.renderer.clear();
+      this.renderer.render(this.depthPass.scene, this.camera);
+      this.renderer.setRenderTarget(null);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 

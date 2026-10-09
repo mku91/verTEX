@@ -10,6 +10,7 @@
   --accent: #bd93f9;
   --accent-text: #282a36;
   --selection: #ff79c6;
+  --box: #50fa7b;
   --axis-x: #ff5555;
   --axis-y: #50fa7b;
   --axis-z: #8be9fd;
@@ -438,8 +439,8 @@ body {
 
 .selection-box {
   position: absolute;
-  border: 1px solid var(--selection);
-  background: color-mix(in srgb, var(--selection) 12%, transparent);
+  border: 1px solid var(--box);
+  background: color-mix(in srgb, var(--box) 12%, transparent);
   pointer-events: none;
 }
 
@@ -1177,6 +1178,176 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-raised);
+}
+
+/* The settings: sections on the left, the chosen one's properties on the right. */
+.dialog.settings {
+  gap: 0;
+  width: min(760px, calc(100vw - 40px));
+  height: min(520px, calc(100vh - 40px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+#settings-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  width: 190px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.settings-group {
+  padding: 8px 8px 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+#settings-nav button {
+  padding: 5px 8px 5px 18px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+}
+
+#settings-nav button:hover {
+  background: var(--hover);
+}
+
+#settings-nav button.active {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.settings-pages {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.settings-pages section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+}
+
+.settings-pages section[hidden] {
+  display: none;
+}
+
+.settings-pages label > span {
+  width: 200px;
+}
+
+#settings-nav,
+.settings-pages {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* The hotkeys page. */
+.hotkeys-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+}
+
+#hotkey-note {
+  flex: 1;
+  color: var(--axis-x);
+}
+
+#hotkey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#hotkey-list h3 {
+  margin: 12px 0 4px;
+}
+
+#hotkey-list h3:first-child {
+  margin-top: 0;
+}
+
+.hotkey-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 2px 8px;
+  border-radius: 4px;
+}
+
+.hotkey-row:hover {
+  background: color-mix(in srgb, var(--hover) 60%, transparent);
+}
+
+.hotkey-row > span:first-child {
+  flex: 1;
+}
+
+.dialog .hotkey-keys {
+  flex: none;
+  width: 150px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.hotkey-row.fixed .hotkey-keys {
+  margin-right: 34px;
+  border-style: dashed;
+  color: var(--text-dim);
+}
+
+.dialog .hotkey-keys.capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dialog .hotkey-keys.unset {
+  color: var(--text-dim);
+}
+
+.dialog .hotkey-reset {
+  flex: none;
+  width: 26px;
+  padding: 3px 0;
+}
+
+.dialog .hotkey-reset:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .dialog h2 {

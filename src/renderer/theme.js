@@ -18,6 +18,7 @@ export const THEMES = {
     axisY: '#50fa7b',
     axisZ: '#8be9fd',
     selected: '#ff79c6',
+    box: '#50fa7b', // the selection box
     // Views
     viewBg: '#282a36',
     viewBgFocus: '#15161c', // modal operations (cut, extrude, pencil)
@@ -51,6 +52,7 @@ export const THEMES = {
     axisY: '#7fc46a',
     axisZ: '#5f96dc',
     selected: '#1fd6c4',
+    box: '#50fa7b',
     viewBg: '#24272e',
     viewBgFocus: '#0e0f12',
     grid: '#30343e',
@@ -85,6 +87,7 @@ const CSS_VARIABLES = {
   '--accent': 'accent',
   '--accent-text': 'accentText',
   '--selection': 'selected',
+  '--box': 'box',
   '--axis-x': 'axisX',
   '--axis-y': 'axisY',
   '--axis-z': 'axisZ',

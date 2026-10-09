@@ -7,6 +7,8 @@ import { PolygonPopup } from './polygon-popup.js';
 import { Outliner } from './outliner.js';
 import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
+import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
+import { Project, projectFiles } from './project.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -24,14 +26,15 @@ const HINTS = {
   rotate: 'Тяните кольца гизмо, чтобы повернуть выделение вокруг его центра; целый объект или группу — вокруг опорной точки',
   scale: 'Тяните маркеры гизмо, чтобы масштабировать выделение от его центра; целый объект или группу — от опорной точки',
   pivot: 'Опорная точка: выберите объект или группу и тяните стрелки гизмо или саму точку в нижних видах — двигается только точка, вокруг которой объект вращается и масштабируется · Точно — в полях X Y Z · Сброс — ПКМ по строке в списке',
-  extrude: 'Экструд: кликните грань (режим «Грань») или ребро (режим «Ребро») и ведите мышью · Клик — зафиксировать и выйти · Esc или X — выйти',
-  pencil: 'Карандаш: зажмите ЛКМ на вершине и тяните — из неё вырастет новая, соединённая ребром · Отпустите на другой вершине, чтобы соединить их; замкнутый контур станет гранью · Esc или P — выйти',
-  cut: 'Разрез: кликните грань · ведите линию мышью · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Клик — разрезать объект и выйти · Esc или K — выйти без разреза',
+  extrude: 'Экструд: кликните грань (режим «Грань») или ребро (режим «Ребро») и ведите мышью · Клик — зафиксировать и выйти · Esc или {op.extrude} — выйти',
+  pencil: 'Карандаш: зажмите ЛКМ на вершине и тяните — из неё вырастет новая, соединённая ребром · Отпустите на другой вершине, чтобы соединить их; замкнутый контур станет гранью · Esc или {op.pencil} — выйти',
+  cut: 'Разрез: кликните грань · ведите линию мышью · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Клик — разрезать объект и выйти · Esc или {op.cut} — выйти без разреза',
 };
 
 const ACTIONS = {
   delete: () => editor.deleteSelection(),
   'make-face': () => editor.makeFace(),
+  'flip-faces': () => editor.flipFaces(),
   frame: () => {
     editor.frame();
     orthoViews.frame();
@@ -46,45 +49,91 @@ const ACTIONS = {
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
   'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
-  new: () => editor.newScene(),
+  // The File menu: the project and its file.
+  'project-new': () => project.newProject(),
+  'project-open': () => project.open(),
+  'project-save': () => project.save(),
+  'project-save-as': () => project.saveAs(),
+  'project-close': () => project.close(), // the window wants to close
+  new: () => project.newProject(), // the menu of a program not yet restarted
   undo: () => editor.undo(),
   redo: () => editor.redo(),
 };
 
 // Physical key codes, so shortcuts work regardless of keyboard layout.
-const KEYS = {
-  KeyQ: () => editor.setTool('select'),
-  KeyW: () => editor.setTool('move'),
-  KeyE: () => editor.setTool('rotate'),
-  KeyS: () => editor.setTool('scale'),
-  KeyD: () => editor.setTool('pivot'),
-  KeyK: () => ACTIONS['toggle-cut'](),
-  KeyX: () => ACTIONS['toggle-extrude'](),
-  KeyP: () => ACTIONS['toggle-pencil'](),
-  KeyG: () => ACTIONS['toggle-polygon'](),
+// The shortcuts the user can rebind (Settings -> Hotkeys): what each is
+// called, its group there, its default keys and what it does.
+const hotkeys = new Hotkeys(
+  [
+    { id: 'file.new', group: 'Файл', label: 'Новый проект', keys: 'Ctrl+KeyN', run: () => ACTIONS['project-new']() },
+    { id: 'file.open', group: 'Файл', label: 'Открыть…', keys: 'Ctrl+KeyO', run: () => ACTIONS['project-open']() },
+    { id: 'file.save', group: 'Файл', label: 'Сохранить', keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
+    { id: 'file.save-as', group: 'Файл', label: 'Сохранить как…', keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
+
+    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyQ', run: () => editor.setTool('select') },
+    { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
+    { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyE', run: () => editor.setTool('rotate') },
+    { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
+    { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
+
+    { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'KeyK', run: () => ACTIONS['toggle-cut']() },
+    { id: 'op.extrude', group: 'Режимы', label: 'Экструд', keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
+    { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
+    { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
+
+    { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
+    { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
+    { id: 'edit.flip-faces', group: 'Правка', label: 'Инвертировать грань', keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
+    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => editor.deleteSelection() },
+    // Copying and pasting leave the keys to the system where they have nothing to do.
+    { id: 'edit.copy', group: 'Правка', label: 'Копировать объекты', keys: 'Ctrl+KeyC', run: () => editor.copyObjects() },
+    { id: 'edit.paste', group: 'Правка', label: 'Вставить объекты', keys: 'Ctrl+KeyV', run: () => editor.pasteObjects() },
+    { id: 'edit.undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+KeyZ', run: () => editor.undo() },
+    { id: 'edit.redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+KeyY', run: () => editor.redo() },
+
+    { id: 'axis.free', group: 'Фиксация оси', label: 'Свободно', keys: 'Digit1', run: () => editor.setAxisLock('free') },
+    { id: 'axis.x', group: 'Фиксация оси', label: 'Ось X', keys: 'Digit2', run: () => editor.setAxisLock('x') },
+    { id: 'axis.y', group: 'Фиксация оси', label: 'Ось Y', keys: 'Digit3', run: () => editor.setAxisLock('y') },
+    { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Digit4', run: () => editor.setAxisLock('z') },
+
+    { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
+    { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyV', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyC', run: () => ACTIONS['toggle-focus']() },
+    { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
+    { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
+  ],
+  // The fixed keys below can't be given to anything else.
+  ['Escape', 'Tab', 'Shift+Tab', 'Space', 'Enter', 'NumpadEnter', 'Backspace', 'PageUp', 'PageDown', 'Ctrl+Shift+KeyZ'],
+);
+
+// Keys with a fixed meaning; they are listed in the settings, not rebound.
+const FIXED_KEYS = {
   // The polygon tool's own keys; they do nothing outside it.
   Enter: () => editor.closePolygon(),
+  NumpadEnter: () => editor.closePolygon(),
   Backspace: () => editor.undoPolygonPoint(),
   PageUp: () => editor.shiftPolygonPlane(1),
   PageDown: () => editor.shiftPolygonPlane(-1),
-  Digit1: () => editor.setAxisLock('free'),
-  Digit2: () => editor.setAxisLock('x'),
-  Digit3: () => editor.setAxisLock('y'),
-  Digit4: () => editor.setAxisLock('z'),
-  KeyA: () => editor.selectAll(),
-  KeyF: () => ACTIONS.frame(),
-  KeyV: () => ACTIONS['toggle-views'](),
-  KeyN: () => ACTIONS['toggle-orientation'](),
-  KeyJ: () => editor.makeFace(),
-  KeyC: () => ACTIONS['toggle-focus'](),
   Escape: () =>
     orthoViews.cancelBox() ||
     editor.cancelBox() ||
     editor.escapeOperation() ||
     editor.cancelDrag() ||
     editor.clearSelection(),
-  Delete: () => editor.deleteSelection(),
+  'Ctrl+Shift+KeyZ': () => editor.redo(),
 };
+const FIXED_KEY_NOTES = [
+  ['Esc', 'Отменить действие, выйти из режима, снять выделение'],
+  ['Tab / Shift+Tab', 'Следующий / предыдущий режим выделения'],
+  ['Пробел + ПКМ', 'Панорама камеры'],
+  ['Enter', 'Полигон: замкнуть контур'],
+  ['Backspace', 'Полигон: убрать последнюю точку'],
+  ['PgUp / PgDn', 'Полигон: сдвинуть плоскость'],
+  ['Ctrl+Shift+Z', 'Повторить'],
+  ['Ctrl (зажат)', 'Мелкая сетка'],
+  ['Shift (зажат)', 'Добавить к выделению, рамка'],
+  ['Alt (зажат)', 'Масштаб с одной стороны'],
+];
 
 // Genitive plural for "Выбрано ...: N".
 const ELEMENT_NAMES = { object: 'объектов', face: 'граней', edge: 'рёбер', vertex: 'вершин' };
@@ -236,7 +285,18 @@ window.addEventListener('pointerdown', (event) => {
 
 function openSettings() {
   $('settings-dialog').hidden = false;
-  $('theme').focus();
+}
+// The sections on the left; one page of properties on the right at a time.
+function showSettingsPage(page) {
+  for (const button of document.querySelectorAll('#settings-nav [data-page]')) {
+    button.classList.toggle('active', button.dataset.page === page);
+  }
+  for (const section of document.querySelectorAll('.settings-pages [data-page]')) {
+    section.hidden = section.dataset.page !== page;
+  }
+}
+for (const button of document.querySelectorAll('#settings-nav [data-page]')) {
+  button.addEventListener('click', () => showSettingsPage(button.dataset.page));
 }
 function closeSettings() {
   $('settings-dialog').hidden = true;
@@ -273,6 +333,111 @@ for (const { id, key, property, label } of ZOOM_SETTINGS) {
 $('settings-dialog').addEventListener('mousedown', (event) => {
   if (event.target === $('settings-dialog')) closeSettings(); // a click on the backdrop
 });
+
+// Hotkeys: every shortcut with the keys it answers to. A click on the keys
+// waits for a new combination; Esc leaves them as they are.
+let capturingHotkey = null; // the id of the binding waiting for its keys
+function showHotkeyList(note = '') {
+  const list = $('hotkey-list');
+  list.replaceChildren();
+  const heading = (text) => {
+    const element = document.createElement('h3');
+    element.textContent = text;
+    list.append(element);
+  };
+  let group = null;
+  for (const binding of hotkeys.bindings) {
+    if (binding.group !== group) heading((group = binding.group));
+    const row = document.createElement('div');
+    row.className = 'hotkey-row';
+    const label = document.createElement('span');
+    label.textContent = binding.label;
+    const keys = document.createElement('button');
+    keys.className = 'hotkey-keys';
+    keys.dataset.hotkey = binding.id;
+    keys.textContent = capturingHotkey === binding.id ? 'Нажмите клавиши…' : hotkeys.label(binding.id);
+    keys.classList.toggle('capturing', capturingHotkey === binding.id);
+    keys.classList.toggle('unset', !hotkeys.keysOf(binding.id));
+    keys.title = 'Нажмите, затем нажмите новое сочетание клавиш · Esc — оставить как есть';
+    keys.addEventListener('click', () => {
+      capturingHotkey = capturingHotkey === binding.id ? null : binding.id;
+      showHotkeyList();
+    });
+    const reset = document.createElement('button');
+    reset.className = 'hotkey-reset';
+    reset.textContent = '↺';
+    reset.title = `Вернуть по умолчанию: ${comboLabel(binding.keys)}`;
+    reset.disabled = !hotkeys.isCustom(binding.id);
+    reset.addEventListener('click', () => {
+      capturingHotkey = null;
+      hotkeys.reset(binding.id);
+    });
+    row.append(label, keys, reset);
+    list.append(row);
+  }
+  heading('Не настраиваются');
+  for (const [keys, meaning] of FIXED_KEY_NOTES) {
+    const row = document.createElement('div');
+    row.className = 'hotkey-row fixed';
+    const label = document.createElement('span');
+    label.textContent = meaning;
+    const key = document.createElement('span');
+    key.className = 'hotkey-keys';
+    key.textContent = keys;
+    row.append(label, key);
+    list.append(row);
+  }
+  $('hotkey-note').textContent = note;
+}
+// The combination pressed while a binding waits for its keys.
+window.addEventListener('keydown', (event) => {
+  if (!capturingHotkey || $('settings-dialog').hidden) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const id = capturingHotkey;
+  if (event.code === 'Escape') {
+    capturingHotkey = null;
+    showHotkeyList();
+    return;
+  }
+  const combo = comboOf(event);
+  if (!combo) return; // a modifier on its own: the combination is still coming
+  capturingHotkey = null;
+  const loser = hotkeys.set(id, combo);
+  if (loser === false) {
+    showHotkeyList(`${comboLabel(combo)} — фиксированная клавиша, её нельзя назначить`);
+  } else if (loser) {
+    showHotkeyList(`${comboLabel(combo)} было у действия «${loser.label}» — оно осталось без клавиши`);
+  }
+}, true);
+$('hotkeys-reset').addEventListener('click', () => {
+  capturingHotkey = null;
+  hotkeys.resetAll();
+});
+
+// Buttons name their keys in their tooltips; the keys there follow the settings.
+const HOTKEY_TITLES = {
+  '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
+  '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot',
+  '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
+  '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
+  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '#focus-button': 'view.focus',
+  '[data-shading="orientation"]': 'view.orientation',
+};
+for (const selector of Object.keys(HOTKEY_TITLES)) {
+  const element = document.querySelector(selector);
+  element.dataset.title = element.title.replace(/\s*\([^()]*\)$/, ''); // without the key it was written with
+}
+function showHotkeys() {
+  for (const [selector, id] of Object.entries(HOTKEY_TITLES)) {
+    const element = document.querySelector(selector);
+    const keys = hotkeys.keysOf(id);
+    element.title = keys ? `${element.dataset.title} (${comboLabel(keys)})` : element.dataset.title;
+  }
+  showHotkeyList();
+  refresh(); // the hints name keys too
+}
+hotkeys.addEventListener('change', showHotkeys);
 
 // --- shading menu (the eye next to the axis gizmo) ----------------------
 
@@ -390,7 +555,7 @@ window.addEventListener('pointerdown', (event) => {
 window.addEventListener('keydown', (event) => {
   // The settings dialog owns the keyboard while it is open.
   if (!$('settings-dialog').hidden) {
-    if (event.code === 'Escape') closeSettings();
+    if (event.code === 'Escape' && !capturingHotkey) closeSettings();
     return;
   }
   if (event.code === 'Escape' && !$('shading-menu').hidden) {
@@ -417,22 +582,9 @@ window.addEventListener('keydown', (event) => {
     editor.setMode(modes[(next + modes.length) % modes.length]);
     return;
   }
-  if ((event.ctrlKey || event.metaKey) && !event.altKey) {
-    // Ctrl+Z undoes; Ctrl+Y and Ctrl+Shift+Z redo.
-    if (event.code === 'KeyZ' || event.code === 'KeyY') {
-      event.preventDefault();
-      if (event.code === 'KeyY' || event.shiftKey) editor.redo();
-      else editor.undo();
-    }
-    // Ctrl+C and Ctrl+V copy and paste objects (object mode).
-    if (event.code === 'KeyC' && !event.shiftKey && editor.copyObjects()) event.preventDefault();
-    if (event.code === 'KeyV' && !event.shiftKey && editor.pasteObjects()) event.preventDefault();
-    // Ctrl+, opens the settings; the menu item shows the same shortcut.
-    if (event.code === 'Comma') openSettings();
-    return;
-  }
-  if (event.altKey) return;
-  const handler = KEYS[event.code];
+  // The user's shortcuts first, then the keys with a fixed meaning.
+  if (hotkeys.handle(event)) return;
+  const handler = FIXED_KEYS[comboOf(event)];
   if (!handler) return;
   event.preventDefault();
   handler();
@@ -464,7 +616,17 @@ window.vertex?.onMenu((action) => ACTIONS[action]?.());
 // For debugging a running window from outside (see the debugging port in
 // main.js): `vertexDebug.text()` returns the whole project as text, and
 // `vertexDebug.editor` is the editor itself.
-window.vertexDebug = { text: () => editor.toText(), views: orthoViews, editor };
+showHotkeys();
+
+// The project: its file and its unsaved changes, named in the window's title.
+const project = new Project(editor, window.vertex?.project);
+const showProject = () => {
+  document.title = `${project.dirty ? '● ' : ''}${project.name} — verTEX`;
+};
+project.addEventListener('change', showProject);
+showProject();
+
+window.vertexDebug = { text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
 
 // The three-view panel; whether it is open is remembered between launches.
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
@@ -577,6 +739,7 @@ function refresh() {
     ? 'Привязка к сетке включена: перемещение и масштаб идут по шагам сетки. Нажмите, чтобы отвязать'
     : 'Привязка к сетке выключена: перемещение и масштаб свободные. Нажмите, чтобы привязать';
   document.querySelector('[data-action="make-face"]').disabled = !editor.canMakeFace();
+  document.querySelector('[data-action="flip-faces"]').disabled = editor.facesToFlip().length === 0;
   // The banner keeps its last name while it slides away.
   if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];
   $('operation-banner').classList.toggle('shown', editor.operation !== null);
@@ -589,11 +752,11 @@ function refresh() {
     const { axis, offset, points, problem } = editor.polygon;
     const plane = { x: 'YZ', y: 'XZ', z: 'XY' }[axis];
     if (!axis) {
-      hint = 'Полигон: выберите плоскость кнопками X, Y, Z внизу (или клавишами 2/3/4) · Esc или G — выйти';
+      hint = 'Полигон: выберите плоскость кнопками X, Y, Z внизу (или клавишами {axis.x}/{axis.y}/{axis.z}) · Esc или {op.polygon} — выйти';
     } else if (problem) {
       hint = `Полигон не создан: ${problem} · Backspace — убрать последнюю точку · Esc — начать контур заново`;
     } else if (points.length === 0) {
-      hint = `Полигон: плоскость ${plane}, ${axis.toUpperCase()} = ${+offset.toFixed(5)} · Клик — первая точка · PgUp/PgDn — сдвинуть плоскость · Esc или G — выйти`;
+      hint = `Полигон: плоскость ${plane}, ${axis.toUpperCase()} = ${+offset.toFixed(5)} · Клик — первая точка · PgUp/PgDn — сдвинуть плоскость · Esc или {op.polygon} — выйти`;
     } else {
       hint = `Полигон: точек ${points.length} · Клик — следующая точка · клик по первой точке или Enter — замкнуть · Backspace — убрать последнюю · Esc — начать заново`;
     }
@@ -607,7 +770,8 @@ function refresh() {
       ? `По оси ${axis.toUpperCase()} грань не пересекает ни одна линия сетки — смените ось (2–4) или зажмите Ctrl · Esc — отмена`
       : `Разрез: ${axis.toUpperCase()} = ${+value.toFixed(5)} · Клик — разрезать · 2–4 — ось, 1 — авто · Ctrl — мелкий шаг · Esc — отмена`;
   }
-  $('status-hint').textContent = hint;
+  // {id} in a hint stands for the keys of that shortcut, as they are set now.
+  $('status-hint').textContent = (hint ?? '').replace(/\{([\w.-]+)\}/g, (_, id) => hotkeys.label(id));
 
   viewport.requestRender();
 }

@@ -744,7 +744,7 @@ export class OrthoViews {
       const y = Math.round(Math.min(box.y0, box.y1)) + 0.5;
       const w = Math.round(Math.abs(box.x1 - box.x0));
       const h = Math.round(Math.abs(box.y1 - box.y0));
-      context.fillStyle = context.strokeStyle = theme.selected;
+      context.fillStyle = context.strokeStyle = theme.box;
       context.globalAlpha = 0.12;
       context.fillRect(x, y, w, h);
       context.globalAlpha = 1;

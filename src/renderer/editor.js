@@ -115,6 +115,11 @@ export class Editor extends EventTarget {
     this.mesh.addCube();
     this.view = new MeshView(this.mesh);
     viewport.scene.add(this.view.group);
+    // The vertex dots are hidden by the surface through a depth map of it.
+    viewport.depthPass = {
+      scene: this.view.depthScene,
+      prepare: (camera, target) => this.view.prepareDepth(camera, target),
+    };
     this.updateTopology();
     this.target = new Set(this.mesh.vertices.keys());
 
@@ -2143,6 +2148,28 @@ export class Editor extends EventTarget {
     this.setTool('move');
   }
 
+  // The faces flipFaces() would turn over: the selected ones in face mode, all
+  // those of the selected objects in object mode.
+  facesToFlip() {
+    if (this.operation) return [];
+    if (this.mode === 'face') return [...this.picked];
+    if (this.mode === 'object') {
+      return [...new Set([...this.picked].flatMap((key) => this.topology.islands[key].groupFaces))];
+    }
+    return [];
+  }
+
+  // Turns those faces over: what was a face's front becomes its back. Nothing moves.
+  flipFaces() {
+    const faces = this.facesToFlip();
+    if (faces.length === 0 || this.busy()) return;
+    this.history.push(this.snapshot());
+    for (const index of faces) this.mesh.faces[index].reverse();
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
   // Whether makeFace() has something to work on: in vertex or edge mode, at
   // least two vertices selected (the ends of the selected edges count).
   canMakeFace() {
@@ -2198,6 +2225,70 @@ export class Editor extends EventTarget {
     this.rebuildView();
     this.placeGizmo();
     this.emitChange();
+  }
+
+  // --- projects --------------------------------------------------------------
+
+  // Replaces the scene with a project's (see project.js for the data): the
+  // mesh and the scene tree, and the camera if the project has one. The
+  // history starts anew - there is nothing to undo back to. Returns false if
+  // a drag in progress is in the way.
+  loadProject({ model, view }) {
+    if (this.busy()) return false;
+    this.setOperation(null);
+    this.cancelDrag();
+    this.cancelBox();
+    const { mesh } = this;
+    mesh.vertices = model.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+    mesh.faces = model.faces.map((face) => [...face]);
+    mesh.wires = model.wires.map((wire) => [...wire]);
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot }) => ({
+      id,
+      name,
+      kind: kind === 'group' ? 'group' : 'mesh',
+      parent: parent ?? null,
+      ...(hidden ? { hidden: true } : {}),
+      ...(pivot ? { pivot: [...pivot] } : {}),
+    }));
+    mesh.vertexObject = [...model.vertexObject];
+    const highest = mesh.objects.reduce((most, object) => Math.max(most, object.id), 0);
+    mesh.nextObjectId = Math.max(model.nextObjectId ?? 0, highest + 1);
+
+    this.history = new History();
+    this.clipboard = null;
+    this.picked.clear();
+    this.selection = new Set();
+    this.target = new Set();
+    this.rebuildView();
+    // The first object is the one being edited, as after a start.
+    const first = this.topology.islands.find((island) => island.kind !== 'group' && !island.hidden);
+    this.target = new Set(first?.vertices ?? []);
+    if (view) {
+      const { camera, orbit } = this.viewport;
+      camera.position.fromArray(view.camera.position);
+      orbit.target.fromArray(view.camera.target);
+      orbit.update();
+    }
+    this.placeGizmo();
+    this.emitChange();
+    return true;
+  }
+
+  // A fresh project: the starting cube and an empty history.
+  newProject() {
+    const draft = new EditableMesh();
+    draft.addCube();
+    return this.loadProject({
+      model: {
+        vertices: draft.vertices.map((vertex) => vertex.toArray()),
+        faces: draft.faces,
+        wires: [],
+        objects: draft.objects,
+        vertexObject: draft.vertexObject,
+        nextObjectId: draft.nextObjectId,
+      },
+      view: { camera: { position: [3.5, 3, 4.5], target: [0, 0.5, 0] } },
+    });
   }
 
   newScene() {

@@ -90,14 +90,17 @@ export class Outliner {
     this.shown = signature;
 
     const rows = [];
-    const addRow = (index, depth) => {
+    // `within`: a group above this row is selected, and the row with it.
+    const addRow = (index, depth, within = false) => {
       const island = islands[index];
       const folded = this.folded.has(island.id);
       const row = document.createElement('div');
       row.className = 'outliner-row';
       row.dataset.object = index;
       row.style.paddingLeft = `${6 + depth * INDENT}px`;
-      if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
+      const picked = whole && selected.has(index);
+      if (within) row.classList.add('implied'); // selected through its group: marked faintly
+      else if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
 
       const arrow = document.createElement('span');
       arrow.className = 'outliner-arrow';
@@ -125,7 +128,8 @@ export class Outliner {
       eye.innerHTML = island.hiddenOwn ? EYE_OFF_ICON : EYE_ICON;
       row.append(eye);
       rows.push(row);
-      if (!folded) for (const child of island.children) addRow(child, depth + 1);
+      const carries = within || (picked && island.kind === 'group');
+      if (!folded) for (const child of island.children) addRow(child, depth + 1, carries);
     };
     islands.forEach((island, index) => {
       if (island.parentIndex === null) addRow(index, 0);

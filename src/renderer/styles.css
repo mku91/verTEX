@@ -666,6 +666,12 @@ body {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Selected through its group, not by itself: the same colour, barely there. */
+.outliner-row.implied {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 /* While a row is dragged: where it would be nested. */
 .outliner-row.drop-target {
   outline: 1px solid var(--accent);

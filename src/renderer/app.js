@@ -36,6 +36,7 @@ const ACTIONS = {
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
   'toggle-snapping': () => setSnapping(!editor.snapGrid.enabled),
+  'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
@@ -64,7 +65,7 @@ const hotkeys = new Hotkeys(
 
     { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyV', run: () => editor.setTool('select') },
     { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
-    { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyE', run: () => editor.setTool('rotate') },
+    { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
 
@@ -90,6 +91,7 @@ const hotkeys = new Hotkeys(
 
     { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
     { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
     { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
     { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
@@ -151,6 +153,7 @@ function placeModeSlider() {
 new ResizeObserver(placeModeSlider).observe(document.getElementById('modes'));
 const coordInputs = [...document.querySelectorAll('#properties [data-axis]')];
 const sizeInputs = [...document.querySelectorAll('[data-size]')];
+const rotationInputs = [...document.querySelectorAll('[data-rotation]')];
 const $ = (id) => document.getElementById(id);
 
 for (const button of toolButtons) {
@@ -186,6 +189,33 @@ for (const input of sizeInputs) {
     const value = +(parse() + step).toFixed(5);
     if (!(value >= 0)) return;
     editor.setObjectSize(axis, value);
+    input.value = value;
+  });
+}
+
+// The rotation panel: how the object or group has been turned, in degrees; a
+// new angle turns it about its pivot point.
+for (const input of rotationInputs) {
+  const axis = input.dataset.rotation;
+  const parse = () => parseFloat(input.value.replace(',', '.'));
+  input.addEventListener('change', () => {
+    editor.setObjectRotation(axis, parse());
+    refresh();
+  });
+  let beforeScrub = null;
+  scrubbable(input, {
+    read: parse,
+    write: (value) => editor.setObjectRotation(axis, value, false),
+    begin: () => { beforeScrub = editor.snapshot(); },
+    end: () => editor.commit(beforeScrub),
+  });
+  // Arrow keys turn by 15 degrees.
+  input.addEventListener('keydown', (event) => {
+    if (event.code !== 'ArrowUp' && event.code !== 'ArrowDown') return;
+    event.preventDefault();
+    const value = +(parse() + (event.code === 'ArrowUp' ? 15 : -15)).toFixed(4);
+    if (!Number.isFinite(value)) return;
+    editor.setObjectRotation(axis, value);
     input.value = value;
   });
 }
@@ -508,6 +538,8 @@ $('center-pivot').addEventListener('click', () => editor.centerPivot());
 $('center-pivot').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 vectorButtons($('copy-vector'), $('paste-vector'),
   () => editor.panelPoint(), (axis, value) => editor.setSelectionCenter(axis, value, false));
+vectorButtons($('copy-rotation'), $('paste-rotation'),
+  () => editor.objectRotation(), (axis, value) => editor.setObjectRotation(axis, value, false));
 vectorButtons($('copy-size'), $('paste-size'),
   () => editor.objectSize(), (axis, value) => editor.setObjectSize(axis, value, false));
 
@@ -595,6 +627,15 @@ function setSnapping(on) {
 }
 editor.setSnapping(localStorage.getItem(SNAPPING_KEY) !== '0');
 $('snap-toggle').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
+// Local axes for the move and rotate gizmos: a switch in the top bar, remembered too.
+const LOCAL_AXES_KEY = 'vertex.localAxes';
+function setLocalAxes(on) {
+  editor.setLocalAxes(on);
+  localStorage.setItem(LOCAL_AXES_KEY, editor.localAxes ? '1' : '0');
+}
+editor.setLocalAxes(localStorage.getItem(LOCAL_AXES_KEY) === '1');
+$('local-toggle').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
 // The focus look: a switch of its own, remembered between runs.
 const FOCUS_KEY = 'vertex.focus';
@@ -845,6 +886,13 @@ function refresh() {
     input.value = +size[input.dataset.size].toFixed(5);
   }
   $('properties').hidden = picked.size === 0; // only while something is selected
+  // The rotation panel: an object or a group picked whole, in object mode.
+  const rotation = editor.objectRotation();
+  $('rotation').hidden = !rotation;
+  for (const input of rotationInputs) {
+    if (!rotation || document.activeElement === input) continue;
+    input.value = +rotation[input.dataset.rotation].toFixed(4);
+  }
   $('selection-count').textContent = tool === 'pivot' && point ? 'Опорная точка' : 'Позиция';
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
@@ -861,6 +909,12 @@ function refresh() {
   $('focus-button').classList.toggle('active', editor.focus);
   showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
+  $('local-toggle').classList.toggle('active', editor.localAxes);
+  // A planet for the world's axes, a pin for the object's own.
+  $('local-toggle').firstElementChild.className = `fa-solid ${editor.localAxes ? 'fa-location-dot' : 'fa-globe'}`;
+  $('local-toggle').title = editor.localAxes
+    ? `Локальные оси включены: перемещение и вращение идут вдоль осей самого объекта (${hotkeys.label('view.local')}). Нажмите, чтобы вернуть мировые`
+    : `Локальные оси выключены: перемещение и вращение идут вдоль осей мира (${hotkeys.label('view.local')}). Нажмите, чтобы включить`;
   $('snap-toggle').title = editor.snapGrid.enabled
     ? 'Привязка к сетке включена: перемещение и масштаб идут по шагам сетки. Нажмите, чтобы отвязать'
     : 'Привязка к сетке выключена: перемещение и масштаб свободные. Нажмите, чтобы привязать';

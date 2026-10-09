@@ -62,6 +62,9 @@
           <div class="mirror-note" data-mirror-note="local"></div>
         </div>
         </div>
+      <button id="local-toggle" class="grid-toggle" data-action="toggle-local">
+        <i class="fa-solid fa-globe"></i>
+      </button>
       <div id="grid-controls">
         <button id="snap-toggle" class="grid-toggle" data-action="toggle-snapping">
           <i class="fa-solid fa-magnet"></i>
@@ -98,7 +101,7 @@
       <button data-tool="move" title="Перемещение (W)">
         <i class="fa-solid fa-up-down-left-right"></i>
       </button>
-      <button data-tool="rotate" title="Вращение (E)">
+      <button data-tool="rotate" title="Вращение (R)">
         <i class="fa-solid fa-rotate"></i>
       </button>
       <button data-tool="scale" title="Масштаб (S)">
@@ -191,6 +194,20 @@
         <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="x"></label>
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="y"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-axis="z"></label>
+      </div>
+      <div id="rotation" hidden>
+        <div class="properties-header">
+          <p>Вращение</p>
+          <button id="copy-rotation" title="Скопировать углы X, Y, Z одной строкой">
+            <i class="fa-regular fa-copy"></i>
+          </button>
+          <button id="paste-rotation" title="Вставить углы X, Y, Z из буфера обмена">
+            <i class="fa-regular fa-paste"></i>
+          </button>
+        </div>
+        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="x" title="Угол в градусах"></label>
+        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
+        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
       </div>
       </div>
       <div id="overlap-toast">

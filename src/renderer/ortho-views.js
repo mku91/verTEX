@@ -927,6 +927,8 @@ export class OrthoViews {
   drawSnapDots(view) {
     const grid = this.editor.snapGrid;
     if (!grid.dots.visible || grid.active * view.scale < MIN_GRID_SPACING) return;
+    // A lattice turned along an object's own axes is no flat grid seen from here.
+    if (grid.turn) return;
 
     const { context } = view;
     const range = (axis) => this.visibleRange(view, axis).map((value) => grid.index(value, axis));

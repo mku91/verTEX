@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mirrorRotation, setRotation } from './frames.js';
 
 // Mirror modeling: every edit is repeated on the other side of a plane (or of
 // several), as if the pointer had a twin there.
@@ -462,14 +463,19 @@ export class Mirror {
           if (object.hidden) made.hidden = true;
           changed = true;
         }
-        // Its pivot point: this object's, mirrored the way the piece is.
-        if (object.pivot) {
+        // Its pivot point and its turn: this object's, mirrored the way the piece is.
+        if (object.pivot || object.rotation) {
           const centre = piece.reduce((sum, i) => sum.add(mesh.vertices[i]), new THREE.Vector3()).divideScalar(piece.length);
           const across = planes.filter(({ axis, value }) => Math.sign(centre[axis] - value) === -signs[axis]);
-          const pivot = mirrorPoint(new THREE.Vector3().fromArray(object.pivot), across).toArray();
           const other = mesh.objects.find((candidate) => candidate.id === target);
-          if (other && JSON.stringify(other.pivot) !== JSON.stringify(pivot)) {
+          const pivot = object.pivot ? mirrorPoint(new THREE.Vector3().fromArray(object.pivot), across).toArray() : null;
+          if (other && pivot && JSON.stringify(other.pivot) !== JSON.stringify(pivot)) {
             other.pivot = pivot;
+            changed = true;
+          }
+          const rotation = mirrorRotation(object.rotation, across.map(({ axis }) => axis));
+          if (other && JSON.stringify(other.rotation ?? null) !== JSON.stringify(rotation)) {
+            setRotation(other, rotation);
             changed = true;
           }
         }

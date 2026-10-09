@@ -78,6 +78,7 @@ export class EditableMesh {
     this.wires = []; // [a, b][], edges drawn on their own
     // { id, name, parent, kind, hidden }[]; `parent` is a group's id or null,
     // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree,
+    // `rotation` how the entry has been turned as a whole, see frames.js;
     // `pivot` an [x, y, z] the entry turns and scales about - absent until one
     // is set, and then the middle of the entry's bounds stands in for it. The
     // array is never changed in place, only replaced.

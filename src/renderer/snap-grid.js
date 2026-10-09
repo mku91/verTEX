@@ -50,6 +50,10 @@ const DOT_FRAGMENT_SHADER = /* glsl */ `
 // World-space lattice that dragged vertices snap to, and the dots that show
 // which lattice points the current drag can reach.
 //
+// A drag along the axes of a turned object has a lattice turned the same way
+// (`turn` of begin()): everything below is then worked out in the coordinates
+// of those axes, and the dots are turned into place as a whole.
+//
 // A lattice point gets a dot for every axis the drag can move along, in that
 // axis' colour (the gizmo's), and the dots add up like lights: along one axis
 // they are of its colour, in a plane of the mix of two, in a free drag of all three.
@@ -61,6 +65,8 @@ export class SnapGrid {
     this.fineDivisor = 3; // fine mode splits every grid cell into this many
     this.enabled = true; // the user's switch: off, drags go free of the lattice
     this.idle = false; // the current drag is one of those
+    this.turn = null; // the current drag's lattice is turned by this, see begin()
+    this.back = null;
     this.raycaster = new THREE.Raycaster();
 
     this.dots = new THREE.Points(
@@ -100,11 +106,21 @@ export class SnapGrid {
   // absolute grid positions; `start` itself snaps the travel to whole steps.
   // `required`: this drag is on the lattice whatever the user's switch says
   // (a tool that works by the grid's points).
-  begin(start, lock, plane, origin = WORLD_ORIGIN, required = false) {
+  // `turn`: a quaternion - the lattice, and the axes of `lock`, are turned by it.
+  begin(start, lock, plane, origin = WORLD_ORIGIN, required = false, turn = null) {
     this.idle = !this.enabled && !required;
     if (this.idle) {
       this.dots.visible = false;
       return;
+    }
+    this.turn = turn?.clone() ?? null;
+    this.back = turn?.clone().invert() ?? null;
+    this.dots.quaternion.copy(turn ?? new THREE.Quaternion());
+    const world = start; // for the depth below
+    start = this.inward(start.clone());
+    origin = this.inward(origin.clone());
+    if (plane && turn) {
+      plane = new THREE.Plane().setFromNormalAndCoplanarPoint(plane.normal.clone().applyQuaternion(this.back), start);
     }
     this.start = start.clone();
     this.origin = origin.clone();
@@ -125,7 +141,7 @@ export class SnapGrid {
 
     // The falloff radius is fixed on screen: a share of the view height at the point's depth.
     const { camera } = this.viewport;
-    const depth = start.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
+    const depth = world.clone().sub(camera.position).dot(camera.getWorldDirection(new THREE.Vector3()));
     const viewHeight = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const { uniforms } = this.dots.material;
     // The window follows the point with a lag of up to half its size, so the
@@ -134,8 +150,18 @@ export class SnapGrid {
     uniforms.radius.value = Math.min(FALLOFF_RADIUS * viewHeight, uniforms.reach.value);
 
     this.buildDots(start);
-    this.focus(start);
+    this.focus(world);
     this.dots.visible = true;
+  }
+
+  // A point of the world taken into the lattice's own coordinates (in place),
+  // and back. Without a turn they are the world's.
+  inward(point) {
+    return this.back ? point.applyQuaternion(this.back) : point;
+  }
+
+  outward(point) {
+    return this.turn ? point.applyQuaternion(this.turn) : point;
   }
 
   // Lattice index of a coordinate, and back.
@@ -197,6 +223,7 @@ export class SnapGrid {
   // Centers the dot falloff on the dragged point.
   focus(position) {
     if (this.idle) return;
+    position = this.inward(position.clone());
     this.dots.material.uniforms.focus.value.copy(position);
     // The point drifted halfway to the window's edge: move the window to it.
     const limit = (this.cells / 2) * this.active;
@@ -214,13 +241,15 @@ export class SnapGrid {
     const round = (axis) => {
       position[axis] = this.coordinate(this.index(position[axis], axis), axis);
     };
+    this.inward(position);
     if (this.axes) {
       this.axes.forEach(round);
-      return;
+    } else {
+      round(this.a);
+      round(this.b);
+      this.solveLayer(position);
     }
-    round(this.a);
-    round(this.b);
-    this.solveLayer(position);
+    this.outward(position);
   }
 
   // Sets the dominant-axis coordinate to the lattice value closest to the drag plane.
@@ -238,6 +267,8 @@ export class SnapGrid {
     const hit = new THREE.Vector3();
     for (const corner of VIEW_CORNERS) {
       this.raycaster.setFromCamera(corner, this.viewport.camera);
+      this.inward(this.raycaster.ray.origin);
+      this.inward(this.raycaster.ray.direction);
       if (!this.raycaster.ray.intersectPlane(this.plane, hit)) continue;
       min = Math.min(min, hit[axis]);
       max = Math.max(max, hit[axis]);

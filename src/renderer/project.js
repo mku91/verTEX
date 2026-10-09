@@ -12,9 +12,19 @@
 //   textures/        texture files, none yet
 //
 // A newer program may add entries and fields; this one reads what it knows.
+//
+// Since version 2 the model is stored the way such files usually are: every
+// entry of the scene tree has a transform - `position` and `rotation` (Euler
+// degrees, order XYZ) relative to the group it is in - and the vertices of an
+// object are in that object's own frame. (Version 1 had the vertices and the
+// pivot points in world coordinates, and no rotation.) The editor itself
+// works in world coordinates: modelOf() and worldModel() go between the two.
+
+import * as THREE from 'three';
+import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
 
 const FORMAT = 'vertex-project';
-const VERSION = 1;
+const VERSION = 2;
 const UNTITLED = 'Без названия';
 
 const round = (value) => +value.toFixed(6);
@@ -22,20 +32,36 @@ const round = (value) => +value.toFixed(6);
 // The scene as plain data.
 function modelOf(editor) {
   const { mesh } = editor;
+  // Every entry's frame in the world: where its pivot point is, how it is turned.
+  const frames = new Map(mesh.objects.map((object, index) => [
+    object.id,
+    { origin: editor.pivotPoint(index), quaternion: quaternionOf(object.rotation), turned: Boolean(object.rotation) },
+  ]));
+  const triple = (vector) => [round(vector.x), round(vector.y), round(vector.z)];
   return {
-    vertices: mesh.vertices.map((vertex) => [round(vertex.x), round(vertex.y), round(vertex.z)]),
+    // In the frame of the object each belongs to.
+    vertices: mesh.vertices.map((vertex, i) => triple(toLocal(vertex, frames.get(mesh.vertexObject[i])))),
     faces: mesh.faces.map((face) => [...face]),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror }) => ({
-      id,
-      name,
-      kind: kind ?? 'mesh',
-      parent: parent ?? null,
-      ...(hidden ? { hidden: true } : {}),
-      ...(pivot ? { pivot: pivot.map(round) } : {}),
-      ...(mirror?.length ? { mirror: [...mirror] } : {}),
-    })),
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror }) => {
+      const frame = frames.get(id);
+      const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
+      // Inside a group that is not turned the angles are the entry's own, as they were set.
+      const turn = outer?.turned ? rotationOf(outer.quaternion.clone().invert().multiply(frame.quaternion)) : rotation ?? null;
+      return {
+        id,
+        name,
+        kind: kind ?? 'mesh',
+        parent: parent ?? null,
+        ...(hidden ? { hidden: true } : {}),
+        position: triple(outer ? toLocal(frame.origin, outer) : frame.origin),
+        ...(turn ? { rotation: turn.map(round) } : {}),
+        // No pivot point of its own: the position is the middle of its bounds, and follows them.
+        ...(pivot ? {} : { autoOrigin: true }),
+        ...(mirror?.length ? { mirror: [...mirror] } : {}),
+      };
+    }),
     vertexObject: [...mesh.vertexObject],
     nextObjectId: mesh.nextObjectId,
     mirror: [...editor.mirror.globalAxes],
@@ -54,6 +80,50 @@ export function projectFiles(editor) {
     'view.json': json({ camera: { position: camera.position.toArray().map(round), target: orbit.target.toArray().map(round) } }),
     'materials.json': json([]),
     'textures/': '',
+  };
+}
+
+// A version 2 model, as the editor wants it: vertices and pivot points in
+// world coordinates, `rotation` the entry's turn in the world.
+function worldModel(model) {
+  const byId = new Map(model.objects.map((object) => [object.id, object]));
+  const frames = new Map();
+  const frameOf = (object, above = new Set()) => {
+    if (frames.has(object.id)) return frames.get(object.id);
+    if (above.has(object.id)) throw new Error('модель повреждена: группа вложена сама в себя');
+    above.add(object.id);
+    const own = { origin: new THREE.Vector3(...object.position), quaternion: quaternionOf(object.rotation) };
+    const parent = object.parent === null || object.parent === undefined ? null : byId.get(object.parent);
+    const outer = parent ? frameOf(parent, above) : null;
+    const frame = outer
+      ? {
+          origin: toWorld(own.origin, outer),
+          quaternion: outer.quaternion.clone().multiply(own.quaternion),
+          // As in modelOf(): the angles are kept as they are unless a group above turns them.
+          rotation: outer.rotation ? rotationOf(outer.quaternion.clone().multiply(own.quaternion)) : object.rotation ?? null,
+        }
+      : { ...own, rotation: object.rotation ?? null };
+    frames.set(object.id, frame);
+    return frame;
+  };
+  for (const object of model.objects) frameOf(object);
+  // What is not turned lands where it was saved, to the digit; what is turned, as near as it can.
+  const digits = (frame) => (frame.rotation ? 9 : 6);
+  const triple = (vector, frame) => vector.toArray().map((value) => +value.toFixed(digits(frame)) || 0);
+  return {
+    ...model,
+    vertices: model.vertices.map((vertex, i) => {
+      const frame = frames.get(model.vertexObject[i]);
+      return triple(toWorld(new THREE.Vector3(...vertex), frame), frame);
+    }),
+    objects: model.objects.map(({ position, rotation, autoOrigin, ...object }) => {
+      const frame = frames.get(object.id);
+      return {
+        ...object,
+        ...(autoOrigin ? {} : { pivot: triple(frame.origin, frame) }),
+        ...(frame.rotation ? { rotation: frame.rotation } : {}),
+      };
+    }),
   };
 }
 
@@ -95,10 +165,14 @@ export function readProject(files) {
     if (!sound) fail('свёрнутые вершины');
   }
   const ids = new Set();
+  const local = manifest.version >= 2; // vertices and transforms in the entries' own frames
+  const triple = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
   for (const object of model.objects) {
     const sound =
       object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
-      (object.pivot === undefined || (Array.isArray(object.pivot) && object.pivot.length === 3 && object.pivot.every(Number.isFinite)));
+      (local
+        ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))
+        : object.pivot === undefined || triple(object.pivot));
     if (!sound) fail('объекты');
     ids.add(object.id);
   }
@@ -115,7 +189,7 @@ export function readProject(files) {
   } catch {
     // The view is a convenience: without it the camera stays where it is.
   }
-  return { model, view };
+  return { model: local ? worldModel(model) : model, view };
 }
 
 // The project the editor is working on: its file, whether it has unsaved

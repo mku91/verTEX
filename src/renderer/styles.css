@@ -891,8 +891,8 @@ body {
 /* The floating panels in the viewport's corner, one above the other. */
 #float-panels {
   position: absolute;
-  right: 10px;
   bottom: 10px;
+  left: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -900,6 +900,7 @@ body {
 }
 
 #dimensions,
+#rotation,
 #properties {
   padding: 8px 10px 10px;
   border: 1px solid var(--border);
@@ -916,6 +917,7 @@ body {
 }
 
 #dimensions p,
+#rotation p,
 #properties p {
   flex: 1;
   margin: 0;
@@ -966,6 +968,7 @@ body {
 }
 
 #dimensions label,
+#rotation label,
 #properties label {
   display: flex;
   align-items: center;
@@ -1010,6 +1013,11 @@ body {
 #mirror-control {
   position: relative;
   margin-left: 12px;
+}
+
+/* Next to it, the local axes switch. */
+#local-toggle {
+  margin-left: 6px;
 }
 
 #mirror-popup {
@@ -1120,6 +1128,7 @@ body {
 .axis.z { color: var(--axis-z); }
 
 #dimensions input,
+#rotation input,
 #properties input,
 #outliner input,
 #add-form input {
@@ -1134,6 +1143,7 @@ body {
 }
 
 #dimensions input:focus,
+#rotation input:focus,
 #properties input:focus,
 #outliner input:focus,
 #add-form input:focus {
@@ -1203,6 +1213,7 @@ body {
 }
 
 #dimensions input:disabled,
+#rotation input:disabled,
 #properties input:disabled {
   opacity: 0.4;
 }

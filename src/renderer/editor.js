@@ -4,6 +4,7 @@ import { EditableMesh, MeshView, edgeKey } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
+import { quaternionOf, rotationOf, setRotation } from './frames.js';
 import { theme, onThemeChange } from './theme.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -107,6 +108,9 @@ export class Editor extends EventTarget {
     // The polygon tool's state: its work plane and the outline drawn so far.
     this.polygon = null;
     this.axisLock = 'free';
+    // The move and rotate gizmos stand along the axes of the object they move
+    // (see setLocalAxes()) rather than the world's.
+    this.localAxes = false;
     this.cutDirection = 'vertical'; // or 'horizontal': which way the cut tool cuts
     this.axisHold = null; // the lock to go back to when a held axis key is let go, see holdAxis()
     this.tool = 'select';
@@ -206,10 +210,32 @@ export class Editor extends EventTarget {
       const moved = this.gizmo.mode === 'scale' ? this.withFoldedTwins([...this.selection]) : [...this.selection];
       this.dragStartPositions = new Map(moved.map((i) => [i, this.mesh.vertices[i].clone()]));
       this.dragStartPivots = this.pivotsInMotion();
+      this.dragStartRotations = this.gizmo.mode === 'rotate' ? this.rotationsInMotion() : new Map();
+      // Scaling along the axes of a turned object, see placeGizmo(): its turn, or null.
+      // The scale is worked out in the coordinates of those axes: where the
+      // vertices and the gizmo were, there (`scaleStarts`, `scaleOrigin`).
+      this.scaleTurn =
+        this.gizmo.mode === 'scale' && this.pivot.quaternion.angleTo(new THREE.Quaternion()) > 1e-9
+          ? this.pivot.quaternion.clone()
+          : null;
+      // The turn the gizmo stands in as the drag starts, and - for a move
+      // along turned axes - the same again, or null.
+      this.pivotStartTurn = this.pivot.quaternion.clone();
+      this.moveTurn =
+        this.gizmo.mode === 'translate' && this.pivotStartTurn.angleTo(new THREE.Quaternion()) > 1e-9
+          ? this.pivotStartTurn
+          : null;
+      this.scaleStarts = this.dragStartPositions;
+      this.scaleOrigin = this.pivotStart;
+      if (this.scaleTurn) {
+        const back = this.scaleTurn.clone().invert();
+        this.scaleStarts = new Map(moved.map((i) => [i, this.mesh.vertices[i].clone().applyQuaternion(back)]));
+        this.scaleOrigin = this.pivotStart.clone().applyQuaternion(back);
+      }
       // The pivot tool moves the point alone: the entry it belongs to.
       this.pivotEdited = this.tool === 'pivot' ? this.pivotEntry() : null;
       if (this.gizmo.mode === 'translate') this.beginGizmoSnap();
-      if (this.gizmo.mode === 'scale') this.scaleBox = this.selectionBox();
+      if (this.gizmo.mode === 'scale') this.scaleBox = this.selectionBox(this.scaleTurn);
     });
     this.gizmo.addEventListener('objectChange', () => this.applyGizmo());
     // Alt held while scaling: one-sided, see scaleCenter(). Pressing or
@@ -241,11 +267,13 @@ export class Editor extends EventTarget {
   // The point a scale drag holds still. Normally the gizmo's own place; with
   // Alt held, the side of the selection opposite to the handle being pulled,
   // along each axis of that handle - so only the pulled side moves.
+  // (Like the rest of a scale drag, in the coordinates of the axes it goes along.)
   scaleCenter() {
-    const center = this.pivotStart.clone();
+    const center = this.scaleOrigin.clone();
     const handle = (this.gizmo.axis ?? '').toLowerCase();
     if (!this.altHeld || handle.length === 3) return center; // the middle handle scales all round
-    const grabbed = this.gizmo.pointStart; // where the handle was taken, from the gizmo's place
+    const grabbed = this.gizmo.pointStart.clone(); // where the handle was taken, from the gizmo's place
+    if (this.scaleTurn) grabbed.applyQuaternion(this.scaleTurn.clone().invert());
     for (const axis of handle) {
       center[axis] = grabbed[axis] >= 0 ? this.scaleBox.min[axis] : this.scaleBox.max[axis];
     }
@@ -255,7 +283,8 @@ export class Editor extends EventTarget {
   // Applies the gizmo's drag, as it stands, to what is being dragged.
   applyGizmo() {
     const scaling = this.gizmo.mode === 'scale';
-    const center = scaling ? this.scaleCenter() : null;
+    const own = scaling ? this.scaleTurn : null; // the turn of the axes the scale goes along, see placeGizmo()
+    const center = scaling ? this.scaleCenter() : null; // in the coordinates of those axes
     if (this.gizmo.mode === 'translate') this.snapPivot();
     if (scaling) {
       // No turning inside out: a scale drag stops at zero.
@@ -272,18 +301,27 @@ export class Editor extends EventTarget {
     this.pivot.updateMatrix();
     let delta = this.pivot.matrix.clone().multiply(this.dragStartInverse);
     if (scaling) {
-      // About the centre of this drag, which need not be the gizmo's place.
+      // About the centre of this drag, which need not be the gizmo's place;
+      // for a turned object, out of the world into its axes and back.
       const { scale } = this.pivot;
-      delta = new THREE.Matrix4()
-        .makeTranslation(center.x, center.y, center.z)
+      const turn = new THREE.Matrix4().makeRotationFromQuaternion(own ?? new THREE.Quaternion());
+      delta = turn.clone()
+        .multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
         .multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z))
-        .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+        .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z))
+        .multiply(turn.clone().invert());
     }
     for (const [i, start] of this.dragStartPositions) {
       this.mesh.vertices[i].copy(start).applyMatrix4(delta);
     }
     for (const [object, start] of this.dragStartPivots) {
       object.pivot = start.clone().applyMatrix4(delta).toArray();
+    }
+    // Whole objects being turned: so are their frames, by what the gizmo has
+    // turned since the drag began.
+    const turned = this.pivot.quaternion.clone().multiply(this.pivotStartTurn.clone().invert());
+    for (const [object, start] of this.dragStartRotations) {
+      setRotation(object, rotationOf(turned.clone().multiply(start)));
     }
     if (scaling) this.scaleFlat(center);
     this.mirror.moves(this.dragStartPositions);
@@ -303,17 +341,20 @@ export class Editor extends EventTarget {
     const { scale } = this.pivot;
     const size = this.scaleBox.getSize(new THREE.Vector3());
     const reference = Math.max(size.x, size.y, size.z, 0.5) / 2; // one handle's pull adds this much to each side
+    const fits = this.foldsFit(this.scaleTurn);
     for (const axis of axes) {
       if (size[axis] > 1e-9) {
         // Flattened by this drag: every vertex remembers its side.
         if (Math.abs(scale[axis]) < 1e-9) {
-          for (const [i, start] of this.dragStartPositions) this.noteFold(i, axis, Math.sign(start[axis] - center[axis]));
+          for (const [i, start] of this.scaleStarts) {
+            if (fits(i)) this.noteFold(i, axis, Math.sign(start[axis] - center[axis]));
+          }
         }
         continue;
       }
       let half = reference * Math.max(0, scale[axis] - 1);
       if (this.snapGrid.enabled) half = Math.round(half / this.snapGrid.activeStep) * this.snapGrid.activeStep;
-      this.unfold([...this.dragStartPositions.keys()], axis, center[axis], half);
+      this.unfold([...this.dragStartPositions.keys()], axis, center[axis], half, this.scaleTurn);
     }
   }
 
@@ -337,12 +378,22 @@ export class Editor extends EventTarget {
   }
 
   // Puts the vertices `half` away from `centre` along `axis`, each on the
-  // side it was folded from. Nothing happens without sides to go to.
-  unfold(indices, axis, centre, half) {
+  // side it was folded from. Nothing happens without sides to go to. With
+  // `turn` (a quaternion) the axis is one of those turned by it, and `centre`
+  // is in their coordinates.
+  unfold(indices, axis, centre, half, turn = null) {
     const { folds, vertices } = this.mesh;
-    const sides = new Set(indices.map((i) => folds.get(i)?.[axis]).filter((sign) => sign));
+    const fits = this.foldsFit(turn);
+    const side = (i) => (fits(i) ? folds.get(i)?.[axis] : undefined);
+    const sides = new Set(indices.map(side).filter((sign) => sign));
     if (sides.size < 2) return false;
-    for (const i of indices) vertices[i][axis] = centre + (folds.get(i)?.[axis] ?? 0) * half;
+    const back = turn?.clone().invert();
+    for (const i of indices) {
+      const vertex = vertices[i];
+      if (turn) vertex.applyQuaternion(back);
+      vertex[axis] = centre + (side(i) ?? 0) * half;
+      if (turn) vertex.applyQuaternion(turn);
+    }
     return true;
   }
 
@@ -351,6 +402,18 @@ export class Editor extends EventTarget {
   beginGizmoSnap() {
     const handle = this.gizmo.axis.toLowerCase();
     const start = this.pivotStart;
+    if (this.moveTurn) {
+      // Along turned axes (which do not lie on the grid) the lattice is turned
+      // too and starts where the gizmo is: the travel goes in whole steps.
+      if (handle.length < 3) {
+        this.snapGrid.begin(start, handle, null, start, false, this.moveTurn);
+      } else {
+        const facing = this.viewport.camera.position.clone().sub(start).normalize();
+        const across = new THREE.Plane().setFromNormalAndCoplanarPoint(facing, start);
+        this.snapGrid.begin(start, 'free', across, start, false, this.moveTurn);
+      }
+      return;
+    }
     // A pivot point being placed lands on the grid itself, not a step away from where it was.
     // (So does the pivot of a whole object being moved: it is its pivot that snaps.)
     const origin = this.tool === 'pivot' || this.pivotEntry() !== null ? undefined : start;
@@ -368,6 +431,16 @@ export class Editor extends EventTarget {
   // handle and keeps the other axes exactly in place.
   snapPivot() {
     const handle = this.gizmo.axis.toLowerCase();
+    if (this.moveTurn) {
+      // Along turned axes: nothing along the axes the handle has not got,
+      // and the rest onto the turned lattice, see beginGizmoSnap().
+      const travel = this.pivot.position.clone().sub(this.pivotStart).applyQuaternion(this.moveTurn.clone().invert());
+      for (const axis of ['x', 'y', 'z']) if (!handle.includes(axis)) travel[axis] = 0;
+      this.pivot.position.copy(this.pivotStart).add(travel.applyQuaternion(this.moveTurn));
+      this.snapGrid.snap(this.pivot.position);
+      this.snapGrid.focus(this.pivot.position);
+      return;
+    }
     for (const axis of ['x', 'y', 'z']) {
       if (!handle.includes(axis)) this.pivot.position[axis] = this.pivotStart[axis];
     }
@@ -394,6 +467,12 @@ export class Editor extends EventTarget {
     const snapped = (axis) => {
       const half = reach[axis];
       if (Math.abs(half) < 1e-9) return scale[axis]; // flat along this axis: scaleFlat() takes it
+      if (this.scaleTurn) {
+        // Turned axes do not lie on the grid: there it is the size along the
+        // axis that moves in whole steps (down to nothing, like below).
+        const extent = this.scaleBox.max[axis] - this.scaleBox.min[axis];
+        return (Math.round((extent * scale[axis]) / step) * step) / extent;
+      }
       const side = Math.sign(half);
       let target = Math.round((center[axis] + half * scale[axis]) / step) * step - center[axis];
       // Down to nothing is allowed - the selection goes flat, a face shrinks
@@ -426,6 +505,13 @@ export class Editor extends EventTarget {
     if (!mode || nothing || this.operation) {
       this.gizmo.detach();
     } else {
+      // What belongs to a turned object is scaled along that object's own
+      // axes: the scale handles (which follow the gizmo's own turn) stand
+      // along them, and the bounds are taken along them too.
+      // With local axes on, so are the move and the rotate gizmo. (A pivot
+      // point is placed in the world.)
+      const turn = mode === 'scale' || (this.localAxes && this.tool !== 'pivot') ? this.scaleFrame() : null;
+      this.gizmo.setSpace(turn && mode !== 'scale' ? 'local' : 'world');
       if (entry !== null) {
         // One whole object or group: the gizmo stands in its pivot point.
         this.pivot.position.copy(this.pivotPoint(entry));
@@ -433,11 +519,12 @@ export class Editor extends EventTarget {
         // Scaling pivots on the middle of the bounds, which keeps both sides on the grid.
         this.pivot.position.copy(
           this.tool === 'scale'
-            ? this.selectionBox().getCenter(new THREE.Vector3())
+            ? this.selectionBox(turn).getCenter(new THREE.Vector3()).applyQuaternion(turn ?? new THREE.Quaternion())
             : this.selectionCenter(),
         );
       }
       this.pivot.quaternion.identity();
+      if (turn) this.pivot.quaternion.copy(turn);
       this.pivot.scale.set(1, 1, 1);
       this.gizmo.setMode(mode);
       this.gizmo.attach(this.pivot);
@@ -468,11 +555,47 @@ export class Editor extends EventTarget {
   pivotPoint(index) {
     const object = this.mesh.objects[index];
     if (object.pivot) return new THREE.Vector3().fromArray(object.pivot);
+    return this.middle(index) ?? new THREE.Vector3();
+  }
+
+  // The middle of the bounds of everything in an entry, or null if it is
+  // empty. The bounds are taken along the entry's own axes (see frames.js),
+  // so the middle turns with the entry instead of wandering as it is turned.
+  middle(index) {
     const { vertices } = this.contents([index]);
-    if (vertices.size === 0) return new THREE.Vector3();
+    if (vertices.size === 0) return null;
+    const points = [...vertices].map((i) => this.mesh.vertices[i]);
+    const { rotation } = this.mesh.objects[index];
+    if (!rotation) return new THREE.Box3().setFromPoints(points).getCenter(new THREE.Vector3());
+    const turn = quaternionOf(rotation);
+    const back = turn.clone().invert();
     return new THREE.Box3()
-      .setFromPoints([...vertices].map((i) => this.mesh.vertices[i]))
-      .getCenter(new THREE.Vector3());
+      .setFromPoints(points.map((point) => point.clone().applyQuaternion(back)))
+      .getCenter(new THREE.Vector3())
+      .applyQuaternion(turn);
+  }
+
+  // The entries of the objects list that are `index` and everything in it.
+  entriesUnder(index, found = []) {
+    const island = this.topology.islands[index];
+    if (!island) return found;
+    found.push(index);
+    for (const child of island.children) this.entriesUnder(child, found);
+    return found;
+  }
+
+  // The objects that travel as a whole with the selection in object mode -
+  // the picked entries and what they hold - with the turn each has now.
+  rotationsInMotion() {
+    const moving = new Map();
+    if (this.mode !== 'object') return moving;
+    for (const picked of this.picked) {
+      for (const index of this.entriesUnder(picked)) {
+        const object = this.mesh.objects[index];
+        if (!this.topology.islands[index].hidden) moving.set(object, quaternionOf(object.rotation));
+      }
+    }
+    return moving;
   }
 
   // The pivot points that travel with the selection, as a Map from the object
@@ -568,11 +691,8 @@ export class Editor extends EventTarget {
     const index = this.pivotEntry();
     if (index === null || this.busy()) return;
     const object = this.mesh.objects[index];
-    const { vertices } = this.contents([index]);
-    if (vertices.size === 0) return;
-    const middle = new THREE.Box3()
-      .setFromPoints([...vertices].map((i) => this.mesh.vertices[i]))
-      .getCenter(new THREE.Vector3());
+    const middle = this.middle(index);
+    if (!middle) return;
     const pinned = Boolean(object.mirror?.length);
     if (pinned ? JSON.stringify(object.pivot) === JSON.stringify(middle.toArray()) : !object.pivot) return;
     this.history.push(this.snapshot());
@@ -731,9 +851,52 @@ export class Editor extends EventTarget {
     if (entry === null) return null;
     const { vertices } = this.topology.islands[entry];
     if (vertices.length === 0) return null;
+    // Along the object's own axes: a turned object is as big as it was.
+    const back = quaternionOf(this.mesh.objects[entry].rotation).invert();
     return new THREE.Box3()
-      .setFromPoints(vertices.map((i) => this.mesh.vertices[i]))
+      .setFromPoints(vertices.map((i) => this.mesh.vertices[i].clone().applyQuaternion(back)))
       .getSize(new THREE.Vector3());
+  }
+
+  // --- how an entry has been turned (see frames.js) ---------------------------
+
+  // The turn of the entry the panels are about - an object or a group, picked
+  // whole in object mode - as { x, y, z } in degrees, or null.
+  objectRotation() {
+    const entry = this.pivotEntry();
+    if (entry === null) return null;
+    const [x, y, z] = this.mesh.objects[entry].rotation ?? [0, 0, 0];
+    return { x, y, z };
+  }
+
+  // Sets one of those angles: the entry, with everything in it, is turned
+  // about its pivot point by the difference. `record` as in setSelectionCenter().
+  setObjectRotation(axis, value, record = true) {
+    const entry = this.pivotEntry();
+    if (entry === null || !Number.isFinite(value) || this.busy()) return;
+    const object = this.mesh.objects[entry];
+    const from = object.rotation ?? [0, 0, 0];
+    const to = [...from];
+    to['xyz'.indexOf(axis)] = value;
+    if (to.join() === from.join()) return;
+    const turn = quaternionOf(to).multiply(quaternionOf(from).invert());
+    const before = record ? this.snapshot() : null;
+    const centre = this.pivotPoint(entry);
+    const turned = (point) => point.sub(centre).applyQuaternion(turn).add(centre);
+    const { vertices } = this.contents([entry]);
+    const moving = new Map([...vertices].map((i) => [i, this.mesh.vertices[i].clone()]));
+    for (const i of vertices) turned(this.mesh.vertices[i]);
+    for (const index of this.entriesUnder(entry)) {
+      const other = this.mesh.objects[index];
+      if (other.pivot) other.pivot = turned(new THREE.Vector3().fromArray(other.pivot)).toArray();
+      if (other !== object) setRotation(other, rotationOf(turn.clone().multiply(quaternionOf(other.rotation))));
+    }
+    setRotation(object, to); // the angles as they were given, not recomputed
+    this.mirror.moves(moving);
+    if (before) this.commit(before);
+    this.view.updatePositions();
+    this.placeGizmo();
+    this.emitChange();
   }
 
   // Stretches the object along an axis ('x' | 'y' | 'z') to the given size,
@@ -744,7 +907,15 @@ export class Editor extends EventTarget {
     if (entry === null || !Number.isFinite(value) || value < 0 || this.busy()) return;
     const { vertices } = this.topology.islands[entry];
     const size = this.objectSize()[axis];
-    const center = this.pivotPoint(entry)[axis];
+    // Along the object's own axes, about its pivot point: the vertices are
+    // taken into those axes and back (for an object that is not turned they
+    // are the world's, and nothing is taken anywhere).
+    const { rotation } = this.mesh.objects[entry];
+    const turn = rotation ? quaternionOf(rotation) : null;
+    const back = turn?.clone().invert();
+    const origin = this.pivotPoint(entry);
+    if (turn) origin.applyQuaternion(back);
+    const center = origin[axis];
     const flat = size < 1e-9;
     // Flat along the axis: the vertices go back out to the sides they were
     // folded from, if they were (see scaleFlat()).
@@ -752,13 +923,15 @@ export class Editor extends EventTarget {
     const before = record ? this.snapshot() : null;
     const moving = new Map(vertices.map((i) => [i, this.mesh.vertices[i].clone()]));
     if (flat) {
-      this.unfold(vertices, axis, center, value / 2);
+      this.unfold(vertices, axis, center, value / 2, turn);
     } else {
-      if (value < 1e-9) for (const i of vertices) this.noteFold(i, axis, Math.sign(this.mesh.vertices[i][axis] - center));
       const factor = value / size;
       for (const i of vertices) {
         const vertex = this.mesh.vertices[i];
+        if (turn) vertex.applyQuaternion(back);
+        if (value < 1e-9) this.noteFold(i, axis, Math.sign(vertex[axis] - center));
         vertex[axis] = center + (vertex[axis] - center) * factor;
+        if (turn) vertex.applyQuaternion(turn);
       }
     }
     this.mirror.moves(moving);
@@ -933,6 +1106,17 @@ export class Editor extends EventTarget {
   setSnapping(on) {
     if (on === this.snapGrid.enabled) return;
     this.snapGrid.enabled = on;
+    this.emitChange();
+  }
+
+  // Local axes: the move and rotate gizmos stand along the own axes of what
+  // they move - the object or group picked whole, or the one object the
+  // selection belongs to - when that has been turned (see frames.js). The
+  // scale gizmo always does. Off, they stand along the world's axes.
+  setLocalAxes(on) {
+    if (on === this.localAxes || this.busy()) return;
+    this.localAxes = on;
+    this.placeGizmo();
     this.emitChange();
   }
 
@@ -1307,7 +1491,8 @@ export class Editor extends EventTarget {
       normal.z += (a.x - b.x) * (a.y + b.y);
     });
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal.normalize(), points[0]);
-    const ray = viewer.ray(clientX, clientY);
+    // (A view hands out one ray object and aims it anew each time: the first is copied.)
+    const ray = viewer.ray(clientX, clientY).clone();
     // The screen's right in this view, at the face: where a pointer a little to the right looks.
     const beside = viewer.ray(clientX + 40, clientY);
     const depth = Math.max(ray.origin.distanceTo(this.cut.point), 1);
@@ -2298,10 +2483,11 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, mirror } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
+          rotation: rotation ? [...rotation] : null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -2329,6 +2515,7 @@ export class Editor extends EventTarget {
       const object = mesh.objects[mesh.objects.length - 1];
       if (source.hidden) object.hidden = true;
       if (source.pivot) object.pivot = [...source.pivot];
+      if (source.rotation) object.rotation = [...source.rotation];
       if (source.mirror) object.mirror = [...source.mirror];
       made.set(source.id, object);
     }
@@ -2500,13 +2687,14 @@ export class Editor extends EventTarget {
     mesh.vertices = model.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
     mesh.faces = model.faces.map((face) => [...face]);
     mesh.wires = model.wires.map((wire) => [...wire]);
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, mirror }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(pivot ? { pivot: [...pivot] } : {}),
+      ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
@@ -2742,8 +2930,40 @@ export class Editor extends EventTarget {
   // --- helpers -----------------------------------------------------------
 
   // Bounds of the selected vertices.
-  selectionBox() {
-    return new THREE.Box3().setFromPoints([...this.selection].map((i) => this.mesh.vertices[i]));
+  // The bounds of the selection; with `turn` (a quaternion), along the axes
+  // turned by it, in the coordinates of those axes.
+  selectionBox(turn = null) {
+    const points = [...this.selection].map((i) => this.mesh.vertices[i]);
+    if (!turn) return new THREE.Box3().setFromPoints(points);
+    const back = turn.clone().invert();
+    return new THREE.Box3().setFromPoints(points.map((point) => point.clone().applyQuaternion(back)));
+  }
+
+  // The turn of the axes a scale of the selection goes along: that of the
+  // object or group picked whole, or of the one object all of the selection
+  // belongs to. Null when that is not turned (or there are several objects):
+  // the scale then goes along the world's axes.
+  scaleFrame() {
+    const { objects, vertexObject } = this.mesh;
+    const entry = this.pivotEntry();
+    let rotation = null;
+    if (entry !== null) {
+      rotation = objects[entry].rotation;
+    } else {
+      const owners = new Set([...this.selection].map((i) => vertexObject[i]));
+      if (owners.size === 1) rotation = objects.find((object) => object.id === [...owners][0])?.rotation;
+    }
+    return rotation ? quaternionOf(rotation) : null;
+  }
+
+  // A vertex remembers the sides it was folded from along its object's own
+  // axes (see scaleFlat()). Returns a test: is a scale along the axes turned
+  // by `turn` (null = the world's) along the own axes of vertex i's object?
+  foldsFit(turn) {
+    const { objects, vertexObject } = this.mesh;
+    const wanted = turn ?? new THREE.Quaternion();
+    const fits = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation).angleTo(wanted) < 1e-6]));
+    return (i) => fits.get(vertexObject[i]) ?? false;
   }
 
   selectionCenter() {

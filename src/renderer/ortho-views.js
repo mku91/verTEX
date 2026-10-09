@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { theme, axisColor, onThemeChange } from './theme.js';
+import { edgeKey } from './mesh.js';
 
 const FIT_MARGIN = 0.25; // share of a view kept free on each side when framing
 const MIN_EXTENT = 0.5; // world units; keeps a tiny object from filling the view
 const PICK_RADIUS = 9; // px
+const EDGE_PICK_RADIUS = 6; // px, edges (in edge mode)
 const CLICK_TOLERANCE = 4; // px of pointer travel that still counts as a click
 const MIN_GRID_SPACING = 8; // px; denser grid lines and snap dots are not drawn
-const DOT_OPACITY = 0.35;
+const DOT_OPACITY = 0.26;
+const AROUND_WIDTH = 1.5; // px; the other objects of the shown object's group
 const FAR_EDGE_OPACITY = 0.35; // brightness of lines at the farthest point of the object
 const ZOOM_SPEED = 0.0015; // per wheel delta unit
 const MIN_SCALE = 2; // px per world unit
@@ -47,6 +50,7 @@ export class OrthoViews {
     this.shown = null; // { vertices, edges } of the editor's target object
     this.shownKey = ''; // identifies those objects; a change re-frames the views
     this.hovered = null; // vertex index under the pointer
+    this.hoveredKey = null; // outside vertex mode: the key of the mode's element under it
 
     this.views = VIEWS.map((definition) => this.createView(definition));
     editor.addEventListener('change', () => this.update());
@@ -172,6 +176,13 @@ export class OrthoViews {
       const { x, y } = this.localPoint(view, event.clientX, event.clientY);
       return this.pick(view, x, y);
     };
+    // The pointer takes the kind of element the mode is for: vertices in
+    // vertex mode only, and in the other modes their edges, faces or objects.
+    const elementAt = (event) => {
+      const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+      return this.pickElement(view, x, y);
+    };
+    const vertexAt = (event) => (editor.mode === 'vertex' ? pickAt(event) : null);
     // Whether the pointer is on the pivot point the pivot tool is editing.
     const onPivot = (event) => {
       const entry = editor.tool === 'pivot' ? editor.pivotEntry() : null;
@@ -204,12 +215,26 @@ export class OrthoViews {
         canvas.setPointerCapture(event.pointerId);
         return;
       }
-      const vertex = pickAt(event);
+      const element = elementAt(event);
+      const vertex = vertexAt(event);
       if (event.shiftKey) {
         // Shift: a drag draws a selection box, even when it starts on a vertex.
         canvas.setPointerCapture(event.pointerId);
         const { x, y } = this.localPoint(view, event.clientX, event.clientY);
-        view.box = { x0: x, y0: y, x1: x, y1: y, vertex, active: false };
+        view.box = { x0: x, y0: y, x1: x, y1: y, vertex, element, active: false };
+        return;
+      }
+      if (element !== null) {
+        // The element's vertex nearest to the pointer leads the drag.
+        const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+        const distance = (index) => {
+          const p = this.project(view, editor.mesh.vertices[index]);
+          return Math.hypot(p.x - x, p.y - y);
+        };
+        const lead = editor.elementVertices(element).reduce((best, index) =>
+          distance(index) < distance(best) ? index : best);
+        canvas.setPointerCapture(event.pointerId);
+        editor.pressElement(element, lead, event.clientX, event.clientY, false, view.viewer);
         return;
       }
       if (vertex === null) {
@@ -259,12 +284,13 @@ export class OrthoViews {
       if (editor.drag) {
         editor.dragTo(event.clientX, event.clientY);
       } else if (event.buttons === 0) {
-        this.setHovered(pickAt(event));
-        canvas.style.cursor = this.hovered === null && !onPivot(event) ? '' : 'grab';
+        const element = elementAt(event);
+        this.setHovered(vertexAt(event), element);
+        canvas.style.cursor = this.hovered === null && element === null && !onPivot(event) ? '' : 'grab';
       }
     });
     canvas.addEventListener('pointerleave', () => {
-      if (!editor.drag) this.setHovered(null);
+      if (!editor.drag) this.setHovered(null, null);
     });
     canvas.addEventListener('pointerup', (event) => {
       if (view.pan && event.button !== 0) {
@@ -316,6 +342,8 @@ export class OrthoViews {
     view.box = null;
     if (box.active) {
       this.editor.selectVertices(this.verticesInBox(view, box));
+    } else if (box.element !== null) {
+      this.editor.select(box.element, true);
     } else if (box.vertex === null) {
       this.editor.clearSelection();
     } else if (this.editor.mode === 'vertex') {
@@ -347,9 +375,11 @@ export class OrthoViews {
     });
   }
 
-  setHovered(vertex) {
-    if (vertex === this.hovered) return;
+  setHovered(vertex, key = null) {
+    if (vertex === this.hovered && key === this.hoveredKey) return;
     this.hovered = vertex;
+    this.hoveredKey = key;
+    this.hoveredMode = this.editor.mode;
     this.draw();
   }
 
@@ -364,8 +394,28 @@ export class OrthoViews {
     } else {
       const vertices = islands.flatMap((island) => topology.islands[island].vertices);
       const inside = new Set(vertices);
-      this.shown = { vertices, edges: topology.edges.filter(([a]) => inside.has(a)) };
+      const faces = islands.flatMap((island) => topology.islands[island].faces);
+      this.shown = { vertices, faces, edges: topology.edges.filter(([a]) => inside.has(a)) };
+      // What else is in the groups the shown objects are in, up to the
+      // outermost one: drawn faintly for reference, not to be touched.
+      const around = new Set();
+      const collect = (index) => {
+        const entry = topology.islands[index];
+        if (entry.hidden) return;
+        for (const vertex of entry.vertices) if (!inside.has(vertex)) around.add(vertex);
+        entry.children.forEach(collect);
+      };
+      for (const island of islands) {
+        let top = island;
+        while (topology.islands[top].parentIndex !== null) top = topology.islands[top].parentIndex;
+        if (top !== island) collect(top);
+      }
+      this.shown.around = topology.edges.filter(([a]) => around.has(a));
       if (!inside.has(this.hovered)) this.hovered = null;
+    }
+    // The hovered element is of the mode it was found in, and may be gone by now.
+    if (this.hoveredKey !== null && (this.hoveredMode !== this.editor.mode || !this.elementShown(this.hoveredKey))) {
+      this.hoveredKey = null;
     }
 
     // Another object came into view: frame it. Otherwise the cameras are left
@@ -427,6 +477,84 @@ export class OrthoViews {
     return [Math.min(a, b), Math.max(a, b)];
   }
 
+  // Key of the current mode's element at a view pixel, or null: an edge, a
+  // face, or the object the face (or, failing that, the edge) there belongs to.
+  // Vertex mode has none: its vertices are picked by pick().
+  pickElement(view, x, y) {
+    const { mode, topology } = this.editor;
+    if (mode === 'vertex' || !this.shown) return null;
+    if (mode === 'face') return this.pickFace(view, x, y);
+    const edge = this.pickEdge(view, x, y);
+    if (mode === 'edge') return edge && edgeKey(...edge);
+    const face = this.pickFace(view, x, y);
+    if (face !== null) return topology.islandOfFace[face];
+    return edge ? topology.islandOfVertex[edge[0]] : null;
+  }
+
+  // Whether an element key of the current mode names something shown here.
+  elementShown(key) {
+    if (!this.shown) return false;
+    const { mode, topology, mesh } = this.editor;
+    if (mode === 'edge') return this.shown.edges.some(([a, b]) => edgeKey(a, b) === key);
+    if (mode === 'face') return this.shown.faces.includes(key) && key < mesh.faces.length;
+    if (mode === 'object') return key < topology.islands.length;
+    return false;
+  }
+
+  // Shown face whose outline, as this view sees it, holds a view pixel; of
+  // overlapping ones, the one closest to the viewer. A face seen edge-on has
+  // no inside and is not found.
+  pickFace(view, x, y) {
+    if (!this.shown) return null;
+    const { vertices, faces } = this.editor.mesh;
+    let best = null;
+    let bestDepth = -Infinity;
+    for (const index of this.shown.faces) {
+      const face = faces[index];
+      if (!face) continue;
+      const outline = face.map((vertex) => this.project(view, vertices[vertex]));
+      let area = 0;
+      let inside = false;
+      outline.forEach((a, i) => {
+        const b = outline[(i + 1) % outline.length];
+        area += a.x * b.y - b.x * a.y;
+        if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+      });
+      if (!inside || Math.abs(area) < 8) continue;
+      const depth = -face.reduce((sum, vertex) => sum + vertices[vertex].dot(view.direction), 0) / face.length;
+      if (depth <= bestDepth) continue;
+      best = index;
+      bestDepth = depth;
+    }
+    return best;
+  }
+
+  // Shown edge nearest to a view pixel, as [a, b]; of overlapping ones, the
+  // one closest to the viewer. An edge seen end-on is a dot and is left to its vertices.
+  pickEdge(view, x, y) {
+    if (!this.shown) return null;
+    const { vertices } = this.editor.mesh;
+    let best = null;
+    let bestDistance = EDGE_PICK_RADIUS;
+    let bestDepth = -Infinity;
+    for (const [a, b] of this.shown.edges) {
+      const p = this.project(view, vertices[a]);
+      const q = this.project(view, vertices[b]);
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      const lengthSq = dx * dx + dy * dy;
+      if (lengthSq < 4) continue;
+      const t = THREE.MathUtils.clamp(((x - p.x) * dx + (y - p.y) * dy) / lengthSq, 0, 1);
+      const distance = Math.round(Math.hypot(p.x + t * dx - x, p.y + t * dy - y));
+      const depth = -(vertices[a].dot(view.direction) + vertices[b].dot(view.direction)) / 2;
+      if (distance > bestDistance || (distance === bestDistance && depth <= bestDepth)) continue;
+      best = [a, b];
+      bestDistance = distance;
+      bestDepth = depth;
+    }
+    return best;
+  }
+
   // Shown vertex nearest to a view pixel; of overlapping ones, the one closest to the viewer.
   pick(view, x, y) {
     if (!this.shown) return null;
@@ -476,7 +604,77 @@ export class OrthoViews {
 
     this.drawSnapDots(view);
 
+    // The rest of the group, behind everything: dark lines, for reference only.
+    if (this.shown.around.length) {
+      context.strokeStyle = theme.around;
+      context.lineWidth = AROUND_WIDTH;
+      context.beginPath();
+      for (const [a, b] of this.shown.around) {
+        const p = this.project(view, mesh.vertices[a]);
+        const q = this.project(view, mesh.vertices[b]);
+        context.moveTo(p.x, p.y);
+        context.lineTo(q.x, q.y);
+      }
+      context.stroke();
+      context.lineWidth = 1;
+    }
+
     this.drawEdges(view);
+
+    // The selected elements of the mode, and the one under the pointer.
+    const { mode, picked, topology } = this.editor;
+    if (mode !== 'vertex') {
+      const inside = new Set(this.shown.vertices);
+      const stroke = (pairs, color) => {
+        context.strokeStyle = color;
+        context.lineWidth = 2.5;
+        context.lineCap = 'round';
+        context.beginPath();
+        for (const [a, b] of pairs) {
+          if (!inside.has(a) || !inside.has(b)) continue;
+          const p = this.project(view, mesh.vertices[a]);
+          const q = this.project(view, mesh.vertices[b]);
+          context.moveTo(p.x, p.y);
+          context.lineTo(q.x, q.y);
+        }
+        context.stroke();
+        context.lineWidth = 1;
+        context.lineCap = 'butt';
+      };
+      // A face is tinted and outlined.
+      const fill = (faces, color) => {
+        for (const index of faces) {
+          const face = mesh.faces[index];
+          if (!face || !inside.has(face[0])) continue;
+          context.beginPath();
+          face.forEach((vertex, i) => {
+            const p = this.project(view, mesh.vertices[vertex]);
+            if (i === 0) context.moveTo(p.x, p.y);
+            else context.lineTo(p.x, p.y);
+          });
+          context.closePath();
+          context.fillStyle = withAlpha(color, 0.22);
+          context.fill();
+          context.strokeStyle = color;
+          context.lineWidth = 2;
+          context.stroke();
+          context.lineWidth = 1;
+        }
+      };
+      const show = (keys, color) => {
+        if (mode === 'edge') {
+          stroke(keys.map((key) => String(key).split('_').map(Number)), color);
+        } else if (mode === 'face') {
+          fill(keys, color);
+        } else {
+          // An object: all of its edges.
+          const own = new Set(keys.flatMap((key) => topology.islands[key]?.group ?? []));
+          stroke(this.shown.edges.filter(([a]) => own.has(a)), color);
+        }
+      };
+      show([...picked], theme.selected);
+      if (this.hoveredKey !== null) show([this.hoveredKey], theme.hovered);
+    }
 
     // The line of a cut being placed.
     const cut = this.editor.cut;
@@ -509,7 +707,7 @@ export class OrthoViews {
     const boxed = new Set(box ? this.verticesInBox(view, box) : []);
     for (const index of order) {
       const p = this.project(view, mesh.vertices[index]);
-      context.fillStyle = selection.has(index) ? theme.selected : theme.textDim;
+      context.fillStyle = selection.has(index) ? theme.selected : theme.vertex;
       if (index === this.hovered || boxed.has(index)) context.fillStyle = theme.hovered;
       context.beginPath();
       context.arc(p.x, p.y, selection.has(index) ? 5 : 3.5, 0, Math.PI * 2); // selected ones are larger
@@ -694,19 +892,25 @@ export class OrthoViews {
     const radius = Math.min(view.width, view.height) * 0.45;
     const point = new THREE.Vector3();
 
-    context.fillStyle = theme.snapDot;
-    for (let r = r0; r <= r1; r++) {
-      for (let u = u0; u <= u1; u++) {
-        point[view.right] = grid.coordinate(r, view.right);
-        point[view.up] = grid.coordinate(u, view.up);
-        const p = this.project(view, point);
-        const weight = 1 - THREE.MathUtils.smoothstep(Math.hypot(p.x - focus.x, p.y - focus.y), 0, radius);
-        context.globalAlpha = DOT_OPACITY * (0.15 + 0.85 * weight);
-        context.beginPath();
-        context.arc(p.x, p.y, 1 + 1.5 * weight, 0, Math.PI * 2);
-        context.fill();
+    // A dot for every axis of the drag, in the axis' colour; they add up like
+    // lights, as in the main view.
+    context.globalCompositeOperation = 'lighter';
+    for (const axis of grid.dotAxes()) {
+      context.fillStyle = axisColor(axis);
+      for (let r = r0; r <= r1; r++) {
+        for (let u = u0; u <= u1; u++) {
+          point[view.right] = grid.coordinate(r, view.right);
+          point[view.up] = grid.coordinate(u, view.up);
+          const p = this.project(view, point);
+          const weight = 1 - THREE.MathUtils.smoothstep(Math.hypot(p.x - focus.x, p.y - focus.y), 0, radius);
+          context.globalAlpha = DOT_OPACITY * (0.15 + 0.85 * weight);
+          context.beginPath();
+          context.arc(p.x, p.y, 1 + 1.5 * weight, 0, Math.PI * 2);
+          context.fill();
+        }
       }
     }
+    context.globalCompositeOperation = 'source-over';
     context.globalAlpha = 1;
   }
 }

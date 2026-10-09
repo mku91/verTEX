@@ -31,6 +31,7 @@ const HINTS = {
 
 const ACTIONS = {
   delete: () => editor.deleteSelection(),
+  'make-face': () => editor.makeFace(),
   frame: () => {
     editor.frame();
     orthoViews.frame();
@@ -39,6 +40,7 @@ const ACTIONS = {
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
+  'toggle-snapping': () => setSnapping(!editor.snapGrid.enabled),
   'toggle-focus': () => setFocus(!editor.focus),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
@@ -73,6 +75,7 @@ const KEYS = {
   KeyF: () => ACTIONS.frame(),
   KeyV: () => ACTIONS['toggle-views'](),
   KeyN: () => ACTIONS['toggle-orientation'](),
+  KeyJ: () => editor.makeFace(),
   KeyC: () => ACTIONS['toggle-focus'](),
   Escape: () =>
     orthoViews.cancelBox() ||
@@ -89,6 +92,7 @@ const ELEMENT_NAMES = { object: 'объектов', face: 'граней', edge: 
 const toolButtons = [...document.querySelectorAll('[data-tool]')];
 const modeButtons = [...document.querySelectorAll('#modes [data-mode]')]; // not the gizmos' own data-mode
 const coordInputs = [...document.querySelectorAll('[data-axis]')];
+const sizeInputs = [...document.querySelectorAll('[data-size]')];
 const $ = (id) => document.getElementById(id);
 
 for (const button of toolButtons) {
@@ -100,6 +104,34 @@ for (const button of modeButtons) {
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', () => ACTIONS[button.dataset.action]());
 }
+// The size panel: an object's extent along the axes; a new value stretches it.
+for (const input of sizeInputs) {
+  const axis = input.dataset.size;
+  const parse = () => parseFloat(input.value.replace(',', '.'));
+  input.addEventListener('change', () => {
+    editor.setObjectSize(axis, parse());
+    refresh(); // a value that was refused goes back to what the size is
+  });
+  let beforeScrub = null;
+  scrubbable(input, {
+    read: parse,
+    write: (value) => editor.setObjectSize(axis, value, false),
+    begin: () => { beforeScrub = editor.snapshot(); },
+    end: () => editor.commit(beforeScrub),
+    min: 0.01,
+  });
+  // Arrow keys step the size by the grid step.
+  input.addEventListener('keydown', (event) => {
+    if (event.code !== 'ArrowUp' && event.code !== 'ArrowDown') return;
+    event.preventDefault();
+    const step = editor.snapGrid.activeStep * (event.code === 'ArrowUp' ? 1 : -1);
+    const value = +(parse() + step).toFixed(5);
+    if (!(value > 0)) return;
+    editor.setObjectSize(axis, value);
+    input.value = value;
+  });
+}
+
 for (const input of coordInputs) {
   // Plain text fields: number inputs format with the system locale (decimal comma).
   const apply = (value) => editor.setSelectionCenter(input.dataset.axis, value);
@@ -176,7 +208,10 @@ for (const control of gridControls) {
   });
   control.slider.addEventListener('input', () => {
     const value = Number(control.slider.value);
-    if (control.kind === 'coarse') editor.snapGrid.step = COARSE_STEPS[value];
+    if (control.kind === 'coarse') {
+      editor.snapGrid.step = COARSE_STEPS[value];
+      viewport.setGridStep(editor.snapGrid.step); // the floor shows the same grid
+    }
     else editor.snapGrid.fineDivisor = value;
     localStorage.setItem(GRID_KEYS[control.kind], control.kind === 'coarse' ? COARSE_STEPS[value] : value);
     showGrid();
@@ -192,6 +227,7 @@ window.addEventListener('pointerdown', (event) => {
   const step = parseFloat(localStorage.getItem(GRID_KEYS.coarse));
   const divisor = parseInt(localStorage.getItem(GRID_KEYS.fine), 10);
   if (COARSE_STEPS.includes(step)) editor.snapGrid.step = step;
+  viewport.setGridStep(editor.snapGrid.step);
   if (divisor >= 2 && divisor <= 10) editor.snapGrid.fineDivisor = divisor;
   showGrid();
 }
@@ -207,6 +243,33 @@ function closeSettings() {
   document.activeElement?.blur(); // give the keyboard back to the editor shortcuts
 }
 $('settings-close').addEventListener('click', closeSettings);
+
+// Controls: how the wheel zooms the main view. Kept between runs.
+const ZOOM_SETTINGS = [
+  {
+    id: 'zoom-strength', key: 'vertex.zoomStrength', property: 'zoomStrength',
+    label: (value) => `${value}%`,
+  },
+  {
+    id: 'zoom-smoothness', key: 'vertex.zoomSmoothness', property: 'zoomSmoothness',
+    label: (value) => (value === 0 ? 'мгновенно' : String(value)),
+  },
+];
+for (const { id, key, property, label } of ZOOM_SETTINGS) {
+  const slider = $(id);
+  const saved = parseFloat(localStorage.getItem(key));
+  if (saved >= Number(slider.min) && saved <= Number(slider.max)) viewport[property] = saved;
+  const show = () => {
+    slider.value = viewport[property];
+    $(`${id}-value`).textContent = label(viewport[property]);
+  };
+  slider.addEventListener('input', () => {
+    viewport[property] = Number(slider.value);
+    localStorage.setItem(key, slider.value);
+    show();
+  });
+  show();
+}
 $('settings-dialog').addEventListener('mousedown', (event) => {
   if (event.target === $('settings-dialog')) closeSettings(); // a click on the backdrop
 });
@@ -229,45 +292,63 @@ function parseVector(text) {
   const numbers = (text ?? '').match(/(?<![\w.])-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?(?!\w)/gi);
   return numbers?.length === 3 ? numbers.map(Number) : null;
 }
-$('copy-vector').addEventListener('click', async () => {
-  const point = editor.panelPoint();
-  if (!point) return;
-  copiedVector = ['x', 'y', 'z'].map((axis) => +point[axis].toFixed(5)).join(', ');
-  try {
-    await navigator.clipboard.writeText(copiedVector);
-  } catch {
-    // No access to the system clipboard: the vector can still be pasted here.
+// A pair of buttons that copy three numbers as one vector and paste one:
+// read() gives { x, y, z } or null, write(axis, value) sets one of them
+// without an undo step of its own.
+function vectorButtons(copyButton, pasteButton, read, write) {
+  copyButton.addEventListener('click', async () => {
+    const vector = read();
+    if (!vector) return;
+    copiedVector = ['x', 'y', 'z'].map((axis) => +vector[axis].toFixed(5)).join(', ');
+    try {
+      await navigator.clipboard.writeText(copiedVector);
+    } catch {
+      // No access to the system clipboard: the vector can still be pasted here.
+    }
+    flash(copyButton, 'done');
+  });
+  pasteButton.addEventListener('click', async () => {
+    if (!read()) return;
+    let text = copiedVector;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      // No access to the system clipboard: what was copied here is used.
+    }
+    const vector = parseVector(text);
+    if (!vector) {
+      flash(pasteButton, 'failed');
+      return;
+    }
+    // All three numbers are one undo step.
+    const before = editor.snapshot();
+    ['x', 'y', 'z'].forEach((axis, k) => write(axis, vector[k]));
+    editor.commit(before);
+    flash(pasteButton, 'done');
+  });
+  for (const button of [copyButton, pasteButton]) {
+    button.addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
   }
-  flash($('copy-vector'), 'done');
-});
-$('paste-vector').addEventListener('click', async () => {
-  if (!editor.panelPoint()) return;
-  let text = copiedVector;
-  try {
-    text = await navigator.clipboard.readText();
-  } catch {
-    // No access to the system clipboard: what was copied here is used.
-  }
-  const vector = parseVector(text);
-  if (!vector) {
-    flash($('paste-vector'), 'failed');
-    return;
-  }
-  // All three coordinates are one undo step.
-  const before = editor.snapshot();
-  ['x', 'y', 'z'].forEach((axis, i) => editor.setSelectionCenter(axis, vector[i], false));
-  editor.commit(before);
-  flash($('paste-vector'), 'done');
-});
-for (const id of ['copy-vector', 'paste-vector']) {
-  $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
+vectorButtons($('copy-vector'), $('paste-vector'),
+  () => editor.panelPoint(), (axis, value) => editor.setSelectionCenter(axis, value, false));
+vectorButtons($('copy-size'), $('paste-size'),
+  () => editor.objectSize(), (axis, value) => editor.setObjectSize(axis, value, false));
 
 // --- the banner of the modal operation that is on ------------------------
 
 const OPERATION_NAMES = { cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
+// Grid snapping: a switch in the top bar, remembered between runs.
+const SNAPPING_KEY = 'vertex.snapping';
+function setSnapping(on) {
+  editor.setSnapping(on);
+  localStorage.setItem(SNAPPING_KEY, on ? '1' : '0');
+}
+editor.setSnapping(localStorage.getItem(SNAPPING_KEY) !== '0');
+$('snap-toggle').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
 // The focus look: a switch of its own, remembered between runs.
 const FOCUS_KEY = 'vertex.focus';
@@ -343,6 +424,9 @@ window.addEventListener('keydown', (event) => {
       if (event.code === 'KeyY' || event.shiftKey) editor.redo();
       else editor.undo();
     }
+    // Ctrl+C and Ctrl+V copy and paste objects (object mode).
+    if (event.code === 'KeyC' && !event.shiftKey && editor.copyObjects()) event.preventDefault();
+    if (event.code === 'KeyV' && !event.shiftKey && editor.pasteObjects()) event.preventDefault();
     // Ctrl+, opens the settings; the menu item shows the same shortcut.
     if (event.code === 'Comma') openSettings();
     return;
@@ -461,6 +545,13 @@ function refresh() {
   }
 
   $('copy-vector').disabled = $('paste-vector').disabled = !point;
+  // The size panel: one object selected, in object mode.
+  const size = editor.objectSize();
+  $('dimensions').hidden = !size;
+  for (const input of sizeInputs) {
+    if (!size || document.activeElement === input) continue;
+    input.value = +size[input.dataset.size].toFixed(5);
+  }
   $('properties').hidden = picked.size === 0; // only while something is selected
   $('selection-count').textContent =
     tool === 'pivot' && point
@@ -481,6 +572,11 @@ function refresh() {
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('focus-button').classList.toggle('active', editor.focus);
+  $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
+  $('snap-toggle').title = editor.snapGrid.enabled
+    ? 'Привязка к сетке включена: перемещение и масштаб идут по шагам сетки. Нажмите, чтобы отвязать'
+    : 'Привязка к сетке выключена: перемещение и масштаб свободные. Нажмите, чтобы привязать';
+  document.querySelector('[data-action="make-face"]').disabled = !editor.canMakeFace();
   // The banner keeps its last name while it slides away.
   if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];
   $('operation-banner').classList.toggle('shown', editor.operation !== null);

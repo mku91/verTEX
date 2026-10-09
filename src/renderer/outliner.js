@@ -14,7 +14,10 @@ const CLIPBOARD_KEYS = new Set(['KeyA', 'KeyC', 'KeyV', 'KeyX', 'KeyZ', 'KeyY'])
 // Parameters asked for before a primitive is made: field id, label, default
 // and limits. A kind without fields is made at once.
 const PRIMITIVES = {
-  cube: { title: 'Куб', fields: [] },
+  cube: {
+    title: 'Куб',
+    fields: [{ id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 }],
+  },
   cone: {
     title: 'Конус',
     fields: [

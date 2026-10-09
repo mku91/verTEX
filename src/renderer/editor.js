@@ -69,7 +69,7 @@ const CUT_FLOW = 40; // px per second
 // { sides, size, height }, sphere { segments, size }.
 function buildPrimitive(mesh, kind, options) {
   switch (kind) {
-    case 'cube': return mesh.addCube();
+    case 'cube': return mesh.addCube(options.size);
     case 'cone': return mesh.addCone(options.sides, options.size);
     case 'cylinder': return mesh.addCylinder(options.sides, options.size, options.height);
     case 'sphere': return mesh.addSphere(options.segments, options.size);
@@ -198,44 +198,79 @@ export class Editor extends EventTarget {
       // The pivot tool moves the point alone: the entry it belongs to.
       this.pivotEdited = this.tool === 'pivot' ? this.pivotEntry() : null;
       if (this.gizmo.mode === 'translate') this.beginGizmoSnap();
-      if (this.gizmo.mode === 'scale') {
-        // How far the selection reaches from the pivot along each axis, on the
-        // side where it reaches farther (signed).
-        const box = this.selectionBox();
-        const center = this.pivot.position;
-        this.scaleHalf = new THREE.Vector3();
-        for (const axis of ['x', 'y', 'z']) {
-          const up = box.max[axis] - center[axis];
-          const down = box.min[axis] - center[axis];
-          this.scaleHalf[axis] = Math.abs(up) >= Math.abs(down) ? up : down;
-        }
-      }
+      if (this.gizmo.mode === 'scale') this.scaleBox = this.selectionBox();
     });
-    this.gizmo.addEventListener('objectChange', () => {
-      if (this.gizmo.mode === 'translate') this.snapPivot();
-      if (this.gizmo.mode === 'scale') this.snapScale();
-      if (this.pivotEdited !== null) {
-        this.mesh.objects[this.pivotEdited].pivot = this.pivot.position.toArray();
-        this.emitChange();
-        return;
-      }
-      // Always transform the snapshot, never the current positions, to avoid drift.
-      this.pivot.updateMatrix();
-      const delta = this.pivot.matrix.clone().multiply(this.dragStartInverse);
-      for (const [i, start] of this.dragStartPositions) {
-        this.mesh.vertices[i].copy(start).applyMatrix4(delta);
-      }
-      for (const [object, start] of this.dragStartPivots) {
-        object.pivot = start.clone().applyMatrix4(delta).toArray();
-      }
-      this.view.updatePositions();
-      this.emitChange();
-    });
+    this.gizmo.addEventListener('objectChange', () => this.applyGizmo());
+    // Alt held while scaling: one-sided, see scaleCenter(). Pressing or
+    // letting go of it mid-drag takes effect at once. (And Alt must not send
+    // the keyboard to the window's menu while the scale tool is in hand.)
+    this.altHeld = false;
+    for (const type of ['keydown', 'keyup']) {
+      window.addEventListener(type, (event) => {
+        if (event.key !== 'Alt') return;
+        if (this.tool === 'scale') event.preventDefault();
+        this.setAltHeld(type === 'keydown');
+      });
+    }
+    window.addEventListener('blur', () => this.setAltHeld(false));
+    renderer.domElement.addEventListener('pointermove', (event) => this.setAltHeld(event.altKey));
     this.gizmo.addEventListener('mouseUp', () => {
       this.snapGrid.end();
       this.commit(this.gizmoBefore);
       this.placeGizmo();
     });
+  }
+
+  setAltHeld(on) {
+    if (on === this.altHeld) return;
+    this.altHeld = on;
+    if (this.gizmo.dragging && this.gizmo.mode === 'scale') this.applyGizmo();
+  }
+
+  // The point a scale drag holds still. Normally the gizmo's own place; with
+  // Alt held, the side of the selection opposite to the handle being pulled,
+  // along each axis of that handle - so only the pulled side moves.
+  scaleCenter() {
+    const center = this.pivotStart.clone();
+    const handle = (this.gizmo.axis ?? '').toLowerCase();
+    if (!this.altHeld || handle.length === 3) return center; // the middle handle scales all round
+    const grabbed = this.gizmo.pointStart; // where the handle was taken, from the gizmo's place
+    for (const axis of handle) {
+      center[axis] = grabbed[axis] >= 0 ? this.scaleBox.min[axis] : this.scaleBox.max[axis];
+    }
+    return center;
+  }
+
+  // Applies the gizmo's drag, as it stands, to what is being dragged.
+  applyGizmo() {
+    const scaling = this.gizmo.mode === 'scale';
+    const center = scaling ? this.scaleCenter() : null;
+    if (this.gizmo.mode === 'translate') this.snapPivot();
+    if (scaling && this.snapGrid.enabled) this.snapScale(center);
+    if (this.pivotEdited !== null) {
+      this.mesh.objects[this.pivotEdited].pivot = this.pivot.position.toArray();
+      this.emitChange();
+      return;
+    }
+    // Always transform the snapshot, never the current positions, to avoid drift.
+    this.pivot.updateMatrix();
+    let delta = this.pivot.matrix.clone().multiply(this.dragStartInverse);
+    if (scaling) {
+      // About the centre of this drag, which need not be the gizmo's place.
+      const { scale } = this.pivot;
+      delta = new THREE.Matrix4()
+        .makeTranslation(center.x, center.y, center.z)
+        .multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z))
+        .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+    }
+    for (const [i, start] of this.dragStartPositions) {
+      this.mesh.vertices[i].copy(start).applyMatrix4(delta);
+    }
+    for (const [object, start] of this.dragStartPivots) {
+      object.pivot = start.clone().applyMatrix4(delta).toArray();
+    }
+    this.view.updatePositions();
+    this.emitChange();
   }
 
   // Sets up the snap grid for the move gizmo handle being dragged ('X', 'XY',
@@ -244,7 +279,8 @@ export class Editor extends EventTarget {
     const handle = this.gizmo.axis.toLowerCase();
     const start = this.pivotStart;
     // A pivot point being placed lands on the grid itself, not a step away from where it was.
-    const origin = this.tool === 'pivot' ? undefined : start;
+    // (So does the pivot of a whole object being moved: it is its pivot that snaps.)
+    const origin = this.tool === 'pivot' || this.pivotEntry() !== null ? undefined : start;
     if (handle.length < 3) {
       this.snapGrid.begin(start, handle, null, origin);
       return;
@@ -268,14 +304,22 @@ export class Editor extends EventTarget {
 
   // Snaps the scale gizmo so that the selection's size, not the factor, moves
   // in grid steps: along each axis of the dragged handle the side of the
-  // selection that is farther from the pivot lands on a grid line. With the
-  // pivot in the middle of the bounds, so does the other side.
-  snapScale() {
+  // selection that is farther from `center` (the point the drag holds still,
+  // see scaleCenter()) lands on a grid line. With the centre in the middle of
+  // the bounds, so does the other side.
+  snapScale(center) {
     const step = this.snapGrid.activeStep;
-    const center = this.pivot.position;
     const { scale } = this.pivot;
+    // How far the selection reaches from the centre along each axis, on the
+    // side where it reaches farther (signed).
+    const reach = new THREE.Vector3();
+    for (const axis of ['x', 'y', 'z']) {
+      const up = this.scaleBox.max[axis] - center[axis];
+      const down = this.scaleBox.min[axis] - center[axis];
+      reach[axis] = Math.abs(up) >= Math.abs(down) ? up : down;
+    }
     const snapped = (axis) => {
-      const half = this.scaleHalf[axis];
+      const half = reach[axis];
       if (Math.abs(half) < 1e-9) return 1; // flat along this axis: nothing to scale
       const side = Math.sign(half);
       let target = Math.round((center[axis] + half * scale[axis]) / step) * step - center[axis];
@@ -291,7 +335,7 @@ export class Editor extends EventTarget {
     if (handle.length === 3) {
       // Uniform: one factor for all, snapped by the longest side.
       const axis = ['x', 'y', 'z'].reduce((best, candidate) =>
-        Math.abs(this.scaleHalf[candidate]) > Math.abs(this.scaleHalf[best]) ? candidate : best);
+        Math.abs(reach[candidate]) > Math.abs(reach[best]) ? candidate : best);
       scale.setScalar(snapped(axis));
       return;
     }
@@ -494,6 +538,48 @@ export class Editor extends EventTarget {
     this.pivotMarker.scale.set(size, size, 1);
   }
 
+  // --- an object's size ------------------------------------------------------
+
+  // The object whose size is shown and set: in object mode, the one object
+  // (not a group) that is the whole selection. Null otherwise.
+  sizeEntry() {
+    const entry = this.pivotEntry();
+    return entry !== null && this.topology.islands[entry].kind !== 'group' ? entry : null;
+  }
+
+  // The extent of that object along the axes, or null.
+  objectSize() {
+    const entry = this.sizeEntry();
+    if (entry === null) return null;
+    const { vertices } = this.topology.islands[entry];
+    if (vertices.length === 0) return null;
+    return new THREE.Box3()
+      .setFromPoints(vertices.map((i) => this.mesh.vertices[i]))
+      .getSize(new THREE.Vector3());
+  }
+
+  // Stretches the object along an axis ('x' | 'y' | 'z') to the given size,
+  // about its pivot point. An object that is flat along the axis has no size
+  // to stretch. `record` as in setSelectionCenter().
+  setObjectSize(axis, value, record = true) {
+    const entry = this.sizeEntry();
+    if (entry === null || !Number.isFinite(value) || value <= 0 || this.busy()) return;
+    const { vertices } = this.topology.islands[entry];
+    const size = this.objectSize()[axis];
+    if (size < 1e-9) return;
+    const before = record ? this.snapshot() : null;
+    const center = this.pivotPoint(entry)[axis];
+    const factor = value / size;
+    for (const i of vertices) {
+      const vertex = this.mesh.vertices[i];
+      vertex[axis] = center + (vertex[axis] - center) * factor;
+    }
+    if (before) this.commit(before);
+    this.view.updatePositions();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
   // What the coordinate fields show and move: the pivot point with the pivot
   // tool, the middle of the selection otherwise. Null when there is nothing.
   panelPoint() {
@@ -649,6 +735,15 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
+  // Grid snapping, the user's switch: on, things move and scale by the grid's
+  // steps; off, freely. (Tools that work by the grid's points - the polygon
+  // tool, the cut - stay on it.)
+  setSnapping(on) {
+    if (on === this.snapGrid.enabled) return;
+    this.snapGrid.enabled = on;
+    this.emitChange();
+  }
+
   // The focus look, a mode of its own that the user switches: a dark
   // background and the object as a white wireframe with its vertices marked,
   // on top of any shading. Nothing hides anything in it.
@@ -714,7 +809,7 @@ export class Editor extends EventTarget {
     const start = polygon.cursor?.clone() ?? this.viewport.orbit.target.clone();
     start[polygon.axis] = polygon.offset;
     const inPlane = ['x', 'y', 'z'].filter((axis) => axis !== polygon.axis).join('');
-    this.snapGrid.begin(start, inPlane, null);
+    this.snapGrid.begin(start, inPlane, null, undefined, true); // the tool is the grid's points
     if (!polygon.cursor) this.snapGrid.snap(start);
     this.snapGrid.focus(start);
   }
@@ -1208,6 +1303,12 @@ export class Editor extends EventTarget {
     };
   }
 
+  // The same for an element of the current mode (an edge, a face, an object),
+  // by its key; `lead` is the vertex of it that the cursor leads.
+  pressElement(key, lead, clientX, clientY, additive, viewer) {
+    this.drag = { vertex: lead, key, x: clientX, y: clientY, additive, start: null, viewer };
+  }
+
   dragTo(clientX, clientY) {
     const drag = this.drag;
     if (!drag.start) {
@@ -1219,18 +1320,22 @@ export class Editor extends EventTarget {
     const point =
       drag.plane && drag.viewer.ray(clientX, clientY).intersectPlane(drag.plane, new THREE.Vector3());
     const vertex = this.mesh.vertices[drag.index];
+    // The point that is moved and snapped: the grabbed vertex, or, for a whole
+    // object, its pivot point - wherever the object was taken by.
+    const from = drag.anchor ?? drag.start;
     // Always offset the snapshot, never the current position, to avoid drift.
-    vertex.copy(drag.start);
+    const lead = from.clone();
     if (point) {
       const delta = point.sub(drag.grab);
       if (drag.axis) delta.projectOnVector(drag.axis);
-      this.snapGrid.snap(vertex.add(delta));
+      this.snapGrid.snap(lead.add(delta));
     }
-    // The rest of the dragged group follows the grabbed vertex rigidly.
-    const offset = vertex.clone().sub(drag.start);
+    // Everything dragged follows that point rigidly.
+    const offset = lead.clone().sub(from);
+    vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();
-    this.snapGrid.focus(vertex);
+    this.snapGrid.focus(lead);
     this.view.updatePositions();
     this.emitChange();
   }
@@ -1244,7 +1349,6 @@ export class Editor extends EventTarget {
     drag.index = drag.vertex ?? this.nearestVertex(this.elementVertices(drag.key), drag.x, drag.y);
     const vertex = this.mesh.vertices[drag.index];
     drag.start = vertex.clone();
-    this.constrainDrag();
 
     // Grabbing a selected element drags the whole selection; grabbing an unselected
     // one drags it alone, or joins it to the selection when Shift is held.
@@ -1263,6 +1367,10 @@ export class Editor extends EventTarget {
     }
     // Whole objects carry their pivot points along.
     drag.pivots = this.selection.has(drag.index) ? this.pivotsInMotion() : new Map();
+    // A whole object or group goes by its pivot point: that is what lands on the grid.
+    const entry = this.selection.has(drag.index) ? this.pivotEntry() : null;
+    drag.anchor = entry === null ? null : this.pivotPoint(entry);
+    this.constrainDrag();
     this.refreshHighlight();
     this.gizmo.detach();
     this.viewport.renderer.domElement.style.cursor = 'grabbing';
@@ -1279,24 +1387,25 @@ export class Editor extends EventTarget {
     // view. In an axis-aligned view that is a grid plane ('xz', ...).
     const lock = drag.axis ? this.axisLock : viewer.planeAxes ?? 'free';
     const normal = viewer.planeNormal();
+    const from = drag.anchor ?? drag.start; // the point that is snapped, see dragTo()
     if (drag.axis) {
       // Locked: the plane through the axis that faces the viewer as much as possible.
-      const view = viewer.viewDirection(drag.start);
+      const view = viewer.viewDirection(from);
       normal.copy(view).addScaledVector(drag.axis, -view.dot(drag.axis));
       // The axis points almost straight at the viewer: the cursor can't express
       // movement along it, so the vertex stays put instead of flying away.
       if (normal.length() < MIN_AXIS_SINE) {
         drag.plane = null;
-        this.snapGrid.begin(drag.start, lock, null);
+        this.snapGrid.begin(from, lock, null);
         return;
       }
       normal.normalize();
     }
-    drag.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, drag.start);
+    drag.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, from);
     drag.grab =
       viewer.ray(drag.x, drag.y).intersectPlane(drag.plane, new THREE.Vector3()) ??
-      drag.start.clone();
-    this.snapGrid.begin(drag.start, lock, drag.plane);
+      from.clone();
+    this.snapGrid.begin(from, lock, drag.plane);
   }
 
   endDrag() {
@@ -1777,12 +1886,50 @@ export class Editor extends EventTarget {
     this.select(index, additive);
   }
 
+  // Where a new object goes when something is selected: up against the
+  // selection, on its side that faces the camera. Returns { point, axis, sign }
+  // - the point of the selection the object touches and the side of it the
+  // object stands on - or null with nothing selected (the object then stays
+  // at the origin). The side is that of a selected face's normal, or else the
+  // one towards the camera, in both cases rounded to the nearest axis so that
+  // the object stands square to the grid.
+  primitiveAnchor() {
+    if (this.selection.size === 0) return null;
+    const box = this.selectionBox();
+    const point = box.getCenter(new THREE.Vector3());
+    const toward = this.viewport.camera.position.clone().sub(point);
+    if (this.mode === 'face') {
+      const normal = new THREE.Vector3();
+      for (const face of this.picked) normal.add(this.mesh.faceNormal(face));
+      // Whichever side of the faces the camera is on.
+      if (normal.lengthSq() > 1e-6) toward.copy(normal.dot(toward) < 0 ? normal.negate() : normal);
+    }
+    const axis = ['x', 'y', 'z'].reduce((best, candidate) =>
+      Math.abs(toward[candidate]) > Math.abs(toward[best]) ? candidate : best);
+    const sign = toward[axis] < 0 ? -1 : 1;
+    point[axis] = sign > 0 ? box.max[axis] : box.min[axis];
+    return { point, axis, sign };
+  }
+
+  // Moves the given vertices of a mesh (a freshly built primitive) to an
+  // anchor of primitiveAnchor(): its near side on the anchor's point, the
+  // rest of it centred on that point. Without an anchor nothing moves.
+  attachPrimitive(mesh, vertices, anchor) {
+    if (!anchor) return;
+    const { point, axis, sign } = anchor;
+    const box = new THREE.Box3().setFromPoints(vertices.map((i) => mesh.vertices[i]));
+    const offset = point.clone().sub(box.getCenter(new THREE.Vector3()));
+    offset[axis] = point[axis] - (sign > 0 ? box.min[axis] : box.max[axis]);
+    for (const i of vertices) mesh.vertices[i].add(offset);
+  }
+
   // Shows, as a wireframe in the scene, the object addPrimitive() would make
   // with these arguments; a null kind takes the preview away. Nothing is added
   // to the model.
   previewPrimitive(kind, options = {}) {
     const draft = new EditableMesh();
     const made = kind && buildPrimitive(draft, kind, options);
+    if (made) this.attachPrimitive(draft, made, this.primitiveAnchor());
     this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
     this.viewport.requestRender();
   }
@@ -1862,6 +2009,94 @@ export class Editor extends EventTarget {
     return { vertices, groups };
   }
 
+  // --- copying and pasting objects ------------------------------------------
+
+  // Object mode: remembers a copy of the selected objects and groups, a group
+  // with all it holds. Returns false if there was nothing to copy.
+  copyObjects() {
+    if (this.mode !== 'object' || this.picked.size === 0) return false;
+    const { islands } = this.topology;
+    const { mesh } = this;
+    // What is selected through a selected group goes with that group.
+    const underPicked = (index) => {
+      for (let parent = islands[index].parentIndex; parent !== null; parent = islands[parent].parentIndex) {
+        if (this.picked.has(parent)) return true;
+      }
+      return false;
+    };
+    const roots = new Set([...this.picked].filter((index) => !underPicked(index)));
+    const entries = new Set();
+    const collect = (index) => {
+      entries.add(index);
+      islands[index].children.forEach(collect);
+    };
+    roots.forEach(collect);
+    const order = [...entries].sort((a, b) => a - b);
+
+    const vertices = order.flatMap((index) => islands[index].vertices);
+    const place = new Map(vertices.map((vertex, k) => [vertex, k]));
+    this.clipboard = {
+      // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
+      objects: order.map((index) => {
+        const { id, name, kind, parent, hidden, pivot } = mesh.objects[index];
+        const top = roots.has(index);
+        return {
+          id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null,
+          parent: top ? null : parent, outer: top ? parent ?? null : null,
+        };
+      }),
+      vertices: vertices.map((vertex) => mesh.vertices[vertex].clone()),
+      vertexObject: vertices.map((vertex) => mesh.vertexObject[vertex]),
+      faces: mesh.faces.filter((face) => place.has(face[0])).map((face) => face.map((vertex) => place.get(vertex))),
+      wires: mesh.wires.filter(([a]) => place.has(a)).map((wire) => wire.map((vertex) => place.get(vertex))),
+    };
+    return true;
+  }
+
+  // Object mode: adds what copyObjects() remembered as new objects, in the
+  // same place, and selects them with the move tool in hand. Returns false if
+  // there was nothing to paste.
+  pasteObjects() {
+    const clip = this.clipboard;
+    if (!clip || this.mode !== 'object' || this.operation || this.busy()) return false;
+    const before = this.snapshot();
+    const { mesh } = this;
+    const groups = new Set(mesh.objects.filter((object) => object.kind === 'group').map((object) => object.id));
+
+    const made = new Map(); // copied id -> the new object
+    for (const source of clip.objects) {
+      mesh.addObject(source.name, source.kind);
+      const object = mesh.objects[mesh.objects.length - 1];
+      if (source.hidden) object.hidden = true;
+      if (source.pivot) object.pivot = [...source.pivot];
+      made.set(source.id, object);
+    }
+    for (const source of clip.objects) {
+      const object = made.get(source.id);
+      // Inside the copy as it was; a root goes back into its group, if that is still there.
+      if (source.parent !== null) object.parent = made.get(source.parent).id;
+      else object.parent = groups.has(source.outer) ? source.outer : null;
+    }
+    const base = mesh.vertices.length;
+    clip.vertices.forEach((point, k) => {
+      mesh.addVertex(point.x, point.y, point.z, made.get(clip.vertexObject[k]).id);
+    });
+    for (const face of clip.faces) mesh.addFace(face.map((vertex) => base + vertex));
+    for (const wire of clip.wires) mesh.wires.push(wire.map((vertex) => base + vertex));
+    this.history.push(before);
+
+    this.selection = new Set(clip.vertices.map((_, k) => base + k));
+    this.rebuildView();
+    // The copies themselves are what is picked, groups included.
+    const roots = clip.objects.filter((source) => source.parent === null).map((source) => made.get(source.id));
+    this.picked = new Set(roots.map((object) => mesh.objects.indexOf(object)));
+    this.activeObject = roots[roots.length - 1].id;
+    this.syncSelection();
+    this.refreshHighlight();
+    this.setTool('move');
+    return true;
+  }
+
   // Flies the camera to an object or a group (index in the objects list).
   focusObject(index) {
     const { vertices } = this.contents([index]);
@@ -1898,12 +2133,33 @@ export class Editor extends EventTarget {
     if (this.busy()) return;
     this.previewPrimitive(null);
     const before = this.snapshot();
+    const anchor = this.primitiveAnchor(); // from the selection as it is now
     const vertices = buildPrimitive(this.mesh, kind, options);
     if (!vertices) return;
+    this.attachPrimitive(this.mesh, vertices, anchor);
     this.selection = new Set(vertices);
     this.commit(before);
     this.rebuildView();
     this.setTool('move');
+  }
+
+  // Whether makeFace() has something to work on: in vertex or edge mode, at
+  // least two vertices selected (the ends of the selected edges count).
+  canMakeFace() {
+    return (this.mode === 'vertex' || this.mode === 'edge') && this.selection.size >= 2 && !this.operation;
+  }
+
+  // Joins the selected vertices (or the ends of the selected edges): two with
+  // an edge, more with one face through them all. See EditableMesh.fill().
+  makeFace() {
+    if (!this.canMakeFace() || this.busy()) return;
+    const before = this.snapshot();
+    const facing = this.viewport.camera.getWorldDirection(new THREE.Vector3());
+    if (!this.mesh.fill([...this.selection], facing)) return;
+    this.history.push(before);
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
   }
 
   // Vertices and objects go with every face that uses them; faces and edges

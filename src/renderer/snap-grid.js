@@ -1,9 +1,7 @@
 import * as THREE from 'three';
-import { theme, axisColor } from './theme.js';
+import { axisColor } from './theme.js';
 
 const AXES = ['x', 'y', 'z'];
-// Dots along a single axis take that axis' colour.
-const dotColor = (lock) => (lock.length === 1 ? axisColor(lock) : theme.snapDot);
 const PLANE_CELLS = 64; // free mode: dots shown this many cells around the vertex
 const AXIS_CELLS = 256; // axis lock: dots shown this many cells along the axis
 const WORLD_ORIGIN = new THREE.Vector3();
@@ -11,7 +9,7 @@ const VIEW_CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => new TH
 
 // Dots are largest and most opaque at the dragged vertex and fade with distance.
 const DOT_SIZE = 7; // px at the vertex
-const DOT_OPACITY = 0.35; // at the vertex
+const DOT_OPACITY = 0.26; // at the vertex
 const FALLOFF_RADIUS = 0.4; // in viewport heights
 const FAR_SIZE = 0.4; // fraction of DOT_SIZE at and beyond the radius
 const FAR_OPACITY = 0.15; // fraction of DOT_OPACITY at and beyond the radius
@@ -21,9 +19,12 @@ const DOT_VERTEX_SHADER = /* glsl */ `
   uniform float radius;
   uniform float reach;
   uniform float size;
+  attribute vec3 color;
   varying float vAlpha;
+  varying vec3 vColor;
 
   void main() {
+    vColor = color;
     float distanceToFocus = distance(position, focus);
     float weight = 1.0 - smoothstep(0.0, radius, distanceToFocus);
     vAlpha = mix(${FAR_OPACITY.toFixed(3)}, 1.0, weight);
@@ -35,32 +36,37 @@ const DOT_VERTEX_SHADER = /* glsl */ `
 `;
 
 const DOT_FRAGMENT_SHADER = /* glsl */ `
-  uniform vec3 color;
   uniform float opacity;
   varying float vAlpha;
+  varying vec3 vColor;
 
   void main() {
     float disc = 1.0 - smoothstep(0.35, 0.5, length(gl_PointCoord - 0.5));
-    gl_FragColor = vec4(color, opacity * vAlpha * disc);
+    gl_FragColor = vec4(vColor, opacity * vAlpha * disc);
     #include <colorspace_fragment>
   }
 `;
 
 // World-space lattice that dragged vertices snap to, and the dots that show
 // which lattice points the current drag can reach.
+//
+// A lattice point gets a dot for every axis the drag can move along, in that
+// axis' colour (the gizmo's), and the dots add up like lights: along one axis
+// they are of its colour, in a plane of the mix of two, in a free drag of all three.
 export class SnapGrid {
   constructor(viewport) {
     this.viewport = viewport;
     this.step = 0.25;
     this.fine = false; // precision modifier held
     this.fineDivisor = 3; // fine mode splits every grid cell into this many
+    this.enabled = true; // the user's switch: off, drags go free of the lattice
+    this.idle = false; // the current drag is one of those
     this.raycaster = new THREE.Raycaster();
 
     this.dots = new THREE.Points(
       new THREE.BufferGeometry(),
       new THREE.ShaderMaterial({
         uniforms: {
-          color: { value: new THREE.Color() },
           opacity: { value: DOT_OPACITY },
           size: { value: DOT_SIZE * viewport.renderer.getPixelRatio() },
           focus: { value: new THREE.Vector3() }, // the dragged vertex
@@ -70,6 +76,7 @@ export class SnapGrid {
         vertexShader: DOT_VERTEX_SHADER,
         fragmentShader: DOT_FRAGMENT_SHADER,
         transparent: true,
+        blending: THREE.AdditiveBlending, // dots that coincide mix their colours
         // Drawn over the model: targets behind or inside it stay visible.
         depthTest: false,
         depthWrite: false,
@@ -91,7 +98,14 @@ export class SnapGrid {
   // through `start`), or the axes the point may move along: 'x', 'xy', ...
   // `origin`: a point the lattice passes through. The world origin snaps to
   // absolute grid positions; `start` itself snaps the travel to whole steps.
-  begin(start, lock, plane, origin = WORLD_ORIGIN) {
+  // `required`: this drag is on the lattice whatever the user's switch says
+  // (a tool that works by the grid's points).
+  begin(start, lock, plane, origin = WORLD_ORIGIN, required = false) {
+    this.idle = !this.enabled && !required;
+    if (this.idle) {
+      this.dots.visible = false;
+      return;
+    }
     this.start = start.clone();
     this.origin = origin.clone();
     this.plane = plane;
@@ -118,7 +132,6 @@ export class SnapGrid {
     // other half is the distance at which dots are guaranteed to exist.
     uniforms.reach.value = (this.cells / 2) * this.active;
     uniforms.radius.value = Math.min(FALLOFF_RADIUS * viewHeight, uniforms.reach.value);
-    uniforms.color.value.set(dotColor(lock));
 
     this.buildDots(start);
     this.focus(start);
@@ -167,12 +180,23 @@ export class SnapGrid {
       }
     }
 
+    // One dot per point for each axis of the drag, in the axis' colour.
+    const tints = this.dotAxes().map((axis) => new THREE.Color(axisColor(axis)));
+    const layered = tints.flatMap(() => points);
+    const colors = tints.flatMap((tint) => points.flatMap(() => [tint.r, tint.g, tint.b]));
     this.dots.geometry.dispose();
-    this.dots.geometry = new THREE.BufferGeometry().setFromPoints(points);
+    this.dots.geometry = new THREE.BufferGeometry().setFromPoints(layered);
+    this.dots.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  }
+
+  // The axes the current drag can move along: those of its lock, or all three.
+  dotAxes() {
+    return this.axes ?? AXES;
   }
 
   // Centers the dot falloff on the dragged point.
   focus(position) {
+    if (this.idle) return;
     this.dots.material.uniforms.focus.value.copy(position);
     // The point drifted halfway to the window's edge: move the window to it.
     const limit = (this.cells / 2) * this.active;
@@ -186,6 +210,7 @@ export class SnapGrid {
 
   // Moves `position` to the nearest snap point of the current drag.
   snap(position) {
+    if (this.idle) return; // snapping is switched off: the point stays where it is
     const round = (axis) => {
       position[axis] = this.coordinate(this.index(position[axis], axis), axis);
     };

@@ -10,6 +10,61 @@ const MAX_LOOP = 8; // the pencil fills loops of up to this many vertices
 // Identifies an undirected edge by its two vertex indices.
 export const edgeKey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
 
+const AXIS_VECTORS = {
+  x: new THREE.Vector3(1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+};
+
+// Splitting a simple polygon, convex or not, with a line: the points of its
+// outline that lie on the line are put in order along it, and two neighbours
+// are joined when the stretch between them runs inside the polygon and is not
+// one of its edges already.
+//   outline: the polygon's corners (Vector3[]), those on the line included
+//   on:      flags of the corners that lie on the line
+//   axis:    the line is where the plane perpendicular to this axis meets the polygon
+// Returns the chords as pairs of indices into `outline`.
+function cutChords(outline, on, axis) {
+  const count = outline.length;
+  // Newell's method: the normal even if the polygon is not perfectly flat.
+  const normal = new THREE.Vector3();
+  outline.forEach((a, i) => {
+    const b = outline[(i + 1) % count];
+    normal.x += (a.y - b.y) * (a.z + b.z);
+    normal.y += (a.z - b.z) * (a.x + b.x);
+    normal.z += (a.x - b.x) * (a.y + b.y);
+  });
+  const along = new THREE.Vector3().crossVectors(normal, AXIS_VECTORS[axis]);
+  if (along.lengthSq() < 1e-12) return []; // the polygon lies in the plane: no line
+
+  // The polygon flattened: without the axis its normal is most along.
+  const dropped = ['x', 'y', 'z'].reduce((best, candidate) =>
+    Math.abs(normal[candidate]) > Math.abs(normal[best]) ? candidate : best);
+  const [u, v] = ['x', 'y', 'z'].filter((candidate) => candidate !== dropped);
+  const inside = (point) => {
+    let odd = false;
+    outline.forEach((a, i) => {
+      const b = outline[(i + 1) % count];
+      if (a[v] > point[v] === b[v] > point[v]) return;
+      if (point[u] < ((b[u] - a[u]) * (point[v] - a[v])) / (b[v] - a[v]) + a[u]) odd = !odd;
+    });
+    return odd;
+  };
+
+  const marks = outline.flatMap((_, i) => (on[i] ? [i] : []));
+  marks.sort((i, j) => outline[i].dot(along) - outline[j].dot(along));
+  const chords = [];
+  const middle = new THREE.Vector3();
+  for (let k = 0; k + 1 < marks.length; k++) {
+    const i = marks[k];
+    const j = marks[k + 1];
+    const neighbours = (i + 1) % count === j || (j + 1) % count === i;
+    if (neighbours || outline[i].distanceToSquared(outline[j]) < 1e-12) continue;
+    if (inside(middle.lerpVectors(outline[i], outline[j], 0.5))) chords.push([i, j]);
+  }
+  return chords;
+}
+
 // Editing model: shared vertices, polygonal faces (loops of vertex indices)
 // and wires: loose edges between two vertices that belong to no face.
 // Every vertex belongs to one of the named objects; a face or a wire belongs
@@ -351,6 +406,144 @@ export class EditableMesh {
     return true;
   }
 
+  // --- making a face out of chosen vertices ---------------------------------
+
+  // Joins the given vertices: two with an edge, three or more with one face
+  // through all of them. Returns false when there is nothing to make (the
+  // edge or the face is there already, or the vertices are on one line).
+  // The face is turned the way the faces it borders are, or, where it borders
+  // none, towards the viewer; `facing` is the direction the viewer looks in.
+  // Vertices of several objects become one object, the first vertex's.
+  fill(vertices, facing) {
+    const chosen = [...new Set(vertices)];
+    if (chosen.length < 2) return false;
+    if (chosen.length === 2) {
+      const [a, b] = chosen;
+      if (this.edges().some(([c, d]) => edgeKey(c, d) === edgeKey(a, b))) return false;
+      this.connect(a, b);
+      return true;
+    }
+    const loop = this.fillOrder(chosen);
+    if (!loop) return false;
+    const normal = this.loopNormal(loop);
+    if (normal.lengthSq() < 0.5) return false; // all on one line
+    const members = new Set(loop);
+    if (this.faces.some((face) => face.length === loop.length && face.every((vertex) => members.has(vertex)))) {
+      return false;
+    }
+
+    // Two faces that are turned the same way run along their common edge in
+    // opposite directions.
+    const directed = new Set();
+    for (const face of this.faces) {
+      face.forEach((a, i) => directed.add(`${a}>${face[(i + 1) % face.length]}`));
+    }
+    let along = 0;
+    let against = 0;
+    loop.forEach((a, i) => {
+      const b = loop[(i + 1) % loop.length];
+      if (directed.has(`${a}>${b}`)) along++;
+      if (directed.has(`${b}>${a}`)) against++;
+    });
+    if (along > against || (along === against && normal.dot(facing) > 0)) loop.reverse();
+
+    const object = this.vertexObject[loop[0]];
+    for (const vertex of loop) {
+      if (this.vertexObject[vertex] !== object) this.mergeObjects(object, this.vertexObject[vertex]);
+    }
+    this.faces.push(loop);
+    // The wires along the loop are sides of the face now.
+    const sides = new Set(loop.map((vertex, i) => edgeKey(vertex, loop[(i + 1) % loop.length])));
+    this.wires = this.wires.filter(([c, d]) => !sides.has(edgeKey(c, d)));
+    return true;
+  }
+
+  // The order in which a face goes through the given vertices, or null if
+  // they are all on one line. Vertices already joined by edges are walked
+  // along those edges, so an outline that is drawn keeps its shape, concave
+  // or not; separate chains are put together end to nearest end. Vertices
+  // with no edges between them, or with a tangle of them, are taken by angle
+  // around their middle.
+  fillOrder(chosen) {
+    const inside = new Set(chosen);
+    const links = new Map(chosen.map((vertex) => [vertex, []]));
+    for (const [a, b] of this.edges()) {
+      if (!inside.has(a) || !inside.has(b)) continue;
+      links.get(a).push(b);
+      links.get(b).push(a);
+    }
+    const tangled = chosen.some((vertex) => links.get(vertex).length > 2);
+    const linked = chosen.some((vertex) => links.get(vertex).length > 0);
+    if (tangled || !linked) return this.angularOrder(chosen);
+
+    const left = new Set(chosen);
+    const walk = (start) => {
+      const chain = [start];
+      left.delete(start);
+      for (let current = start; ; ) {
+        const next = links.get(current).find((vertex) => left.has(vertex));
+        if (next === undefined) return chain;
+        chain.push(next);
+        left.delete(next);
+        current = next;
+      }
+    };
+    const chains = [];
+    // Open chains from their ends first; what is left after that are rings.
+    for (const vertex of chosen) if (left.has(vertex) && links.get(vertex).length < 2) chains.push(walk(vertex));
+    for (const vertex of chosen) if (left.has(vertex)) chains.push(walk(vertex));
+
+    const loop = chains.shift();
+    while (chains.length) {
+      const tail = this.vertices[loop[loop.length - 1]];
+      let best = null;
+      chains.forEach((chain, index) => {
+        for (const reversed of [false, true]) {
+          const end = this.vertices[reversed ? chain[chain.length - 1] : chain[0]];
+          const distance = tail.distanceToSquared(end);
+          if (!best || distance < best.distance) best = { index, reversed, distance };
+        }
+      });
+      const [chain] = chains.splice(best.index, 1);
+      loop.push(...(best.reversed ? chain.reverse() : chain));
+    }
+    return loop;
+  }
+
+  // The given vertices in order of their angle around their middle, in the
+  // plane through the three of them that are farthest apart; null if they
+  // are all on one line.
+  angularOrder(chosen) {
+    const points = chosen.map((vertex) => this.vertices[vertex]);
+    let a = points[0];
+    let b = points[0];
+    for (const p of points) {
+      for (const q of points) {
+        if (p.distanceToSquared(q) > a.distanceToSquared(b)) [a, b] = [p, q];
+      }
+    }
+    const u = b.clone().sub(a);
+    if (u.lengthSq() < 1e-12) return null;
+    u.normalize();
+    const normal = new THREE.Vector3();
+    for (const p of points) {
+      const candidate = new THREE.Vector3().crossVectors(u, p.clone().sub(a));
+      if (candidate.lengthSq() > normal.lengthSq()) normal.copy(candidate);
+    }
+    if (normal.lengthSq() < 1e-12) return null;
+    normal.normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u);
+    const middle = points.reduce((sum, p) => sum.add(p), new THREE.Vector3()).divideScalar(points.length);
+    const angle = (p) => {
+      const offset = p.clone().sub(middle);
+      return Math.atan2(offset.dot(v), offset.dot(u));
+    };
+    return chosen
+      .map((vertex, i) => ({ vertex, angle: angle(points[i]) }))
+      .sort((p, q) => p.angle - q.angle)
+      .map((entry) => entry.vertex);
+  }
+
   // Unit normal of a loop of vertices (Newell's method); zero if they are all on one line.
   loopNormal(loop) {
     this.faces.push(loop);
@@ -388,31 +581,49 @@ export class EditableMesh {
     return Math.abs(distance) < PLANE_EPSILON ? 0 : Math.sign(distance);
   }
 
+  // A face's loop with a vertex added on every edge the plane crosses:
+  // { loop, on }, where `on` flags the entries that lie on the plane. A new
+  // point is made by make(a, b, point) for the edge a-b and put in its place.
+  cutLoop(face, axis, value, make) {
+    const loop = [];
+    const on = [];
+    face.forEach((a, j) => {
+      const b = face[(j + 1) % face.length];
+      const sideA = this.planeSide(a, axis, value);
+      loop.push(a);
+      on.push(sideA === 0);
+      if (sideA * this.planeSide(b, axis, value) >= 0) return;
+      const start = this.vertices[a];
+      const end = this.vertices[b];
+      const point = start.clone().lerp(end, (value - start[axis]) / (end[axis] - start[axis]));
+      point[axis] = value; // exactly on the plane, free of rounding
+      loop.push(make(a, b, point));
+      on.push(true);
+    });
+    return { loop, on };
+  }
+
   // Where the plane crosses the given faces, as [Vector3, Vector3] segments.
   planeSegments(faceIndices, axis, value) {
     const segments = [];
     for (const faceIndex of faceIndices) {
-      const face = this.faces[faceIndex];
+      // Points stand in for vertices here: nothing is added to the mesh.
       const points = [];
-      face.forEach((a, j) => {
-        const b = face[(j + 1) % face.length];
-        const sideA = this.planeSide(a, axis, value);
-        const start = this.vertices[a];
-        if (sideA === 0) {
-          points.push(start.clone());
-        } else if (sideA * this.planeSide(b, axis, value) < 0) {
-          const end = this.vertices[b];
-          points.push(start.clone().lerp(end, (value - start[axis]) / (end[axis] - start[axis])));
-        }
+      const { loop, on } = this.cutLoop(this.faces[faceIndex], axis, value, (a, b, point) => {
+        points.push(point);
+        return -points.length; // -1, -2, ...: a made point
       });
-      if (points.length === 2) segments.push(points);
+      const position = (entry) => (entry < 0 ? points[-entry - 1] : this.vertices[entry]);
+      const outline = loop.map(position);
+      for (const [i, j] of cutChords(outline, on, axis)) segments.push([outline[i].clone(), outline[j].clone()]);
     }
     return segments;
   }
 
   // Cuts the given faces with the plane: every edge that crosses it gets a
-  // vertex (shared by the faces on both sides of the edge), and every face
-  // crossed in two places is split in two along the line between them.
+  // vertex (shared by the faces on both sides of the edge), and every face is
+  // split along each stretch of the plane's line that runs inside it - a
+  // concave face may be cut into more than two pieces.
   // Returns { changed, vertices }: the vertices that lie on the cut.
   planeCut(faceIndices, axis, value) {
     const cutVertices = new Map(); // edge key -> index of the vertex cut into it
@@ -421,39 +632,32 @@ export class EditableMesh {
 
     for (const faceIndex of faceIndices) {
       const face = this.faces[faceIndex];
-      const loop = [];
-      face.forEach((a, j) => {
-        const b = face[(j + 1) % face.length];
-        loop.push(a);
-        const sideA = this.planeSide(a, axis, value);
-        if (sideA === 0) onPlane.add(a);
-        if (sideA * this.planeSide(b, axis, value) >= 0) return;
-
+      const { loop, on } = this.cutLoop(face, axis, value, (a, b, point) => {
         const key = edgeKey(a, b);
         if (!cutVertices.has(key)) {
-          const start = this.vertices[a];
-          const end = this.vertices[b];
-          const point = start.clone().lerp(end, (value - start[axis]) / (end[axis] - start[axis]));
-          point[axis] = value; // exactly on the plane, free of rounding
           cutVertices.set(key, this.addVertex(point.x, point.y, point.z, this.vertexObject[a]));
         }
-        loop.push(cutVertices.get(key));
-        onPlane.add(cutVertices.get(key));
+        return cutVertices.get(key);
       });
       if (loop.length !== face.length) changed = true;
+      loop.forEach((vertex, i) => {
+        if (on[i]) onPlane.add(vertex);
+      });
 
-      // Positions in the loop of the two points the cut runs between.
-      const marks = loop.flatMap((vertex, i) => (onPlane.has(vertex) ? [i] : []));
-      const [p, q] = marks;
-      const splits = marks.length === 2 && q - p > 1 && q - p < loop.length - 1;
-      if (splits) {
+      // The chords never cross (they lie on one line), so each of them
+      // simply splits the piece that holds both its ends.
+      const pieces = [loop];
+      for (const [i, j] of cutChords(loop.map((vertex) => this.vertices[vertex]), on, axis)) {
+        const index = pieces.findIndex((piece) => piece.includes(loop[i]) && piece.includes(loop[j]));
+        if (index < 0) continue;
+        const piece = pieces[index];
+        const [p, q] = [piece.indexOf(loop[i]), piece.indexOf(loop[j])].sort((a, b) => a - b);
         // Both halves keep the winding of the original face.
-        this.faces[faceIndex] = loop.slice(p, q + 1);
-        this.faces.push([...loop.slice(q), ...loop.slice(0, p + 1)]);
-        changed = true;
-      } else {
-        this.faces[faceIndex] = loop;
+        pieces.splice(index, 1, piece.slice(p, q + 1), [...piece.slice(q), ...piece.slice(0, p + 1)]);
       }
+      this.faces[faceIndex] = pieces[0];
+      for (const piece of pieces.slice(1)) this.faces.push(piece);
+      if (pieces.length > 1) changed = true;
     }
     return { changed, vertices: [...onPlane] };
   }

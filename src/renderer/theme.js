@@ -24,14 +24,15 @@ export const THEMES = {
     grid: '#343746',
     gridCenter: '#44475a',
     surface: '#6272a4',
-    wire: '#191a21',
+    wire: '#f8f8f2',
     wireFocus: '#f8f8f2',
-    vertex: '#191a21',
+    vertex: '#ffb86c',
     vertexFocus: '#c9cbd6',
     hovered: '#f8f8f2',
     hoveredFocus: '#f1fa8c',
     cut: '#ff79c6',
     pivot: '#f1fa8c', // pivot point markers outside the pivot tool
+    around: '#44475a', // the rest of the group, in the three views
     snapDot: '#f8f8f2',
     faceFront: '#8be9fd', // face orientation display: the side a face looks to
     faceBack: '#ff5555', // ...and its reverse
@@ -63,6 +64,7 @@ export const THEMES = {
     hoveredFocus: '#ffd23f',
     cut: '#ffd23f',
     pivot: '#f1fa8c',
+    around: '#3a3f4b',
     snapDot: '#ffffff',
     faceFront: '#5f96dc',
     faceBack: '#e0606a',

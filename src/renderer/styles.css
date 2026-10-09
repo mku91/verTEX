@@ -774,11 +774,19 @@ body {
 }
 
 /* Floating panel with the selection's position, in the viewport's corner. */
-#properties {
+/* The floating panels in the viewport's corner, one above the other. */
+#float-panels {
   position: absolute;
   right: 10px;
   bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 238px;
+}
+
+#dimensions,
+#properties {
   padding: 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -793,6 +801,7 @@ body {
   margin-bottom: 4px;
 }
 
+#dimensions p,
 #properties p {
   flex: 1;
   margin: 0;
@@ -833,6 +842,7 @@ body {
   color: var(--axis-x);
 }
 
+#dimensions label,
 #properties label {
   display: flex;
   align-items: center;
@@ -851,6 +861,7 @@ body {
   position: relative;
 }
 
+.grid-toggle,
 .grid-control > button {
   display: flex;
   align-items: center;
@@ -865,9 +876,28 @@ body {
   cursor: pointer;
 }
 
+.grid-toggle:hover,
 .grid-control > button:hover,
 .grid-control > button.active {
   background: var(--hover);
+}
+
+/* The snapping switch: lit while snapping is on. */
+.grid-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.grid-toggle:not(.active) {
+  color: var(--text-dim);
+}
+
+.grid-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
 }
 
 .grid-control svg {
@@ -926,6 +956,7 @@ body {
 .axis.y { color: var(--axis-y); }
 .axis.z { color: var(--axis-z); }
 
+#dimensions input,
 #properties input,
 #outliner input,
 #add-form input {
@@ -939,6 +970,7 @@ body {
   font: inherit;
 }
 
+#dimensions input:focus,
 #properties input:focus,
 #outliner input:focus,
 #add-form input:focus {
@@ -955,6 +987,7 @@ body {
   border-color: var(--accent);
 }
 
+#dimensions input:disabled,
 #properties input:disabled {
   opacity: 0.4;
 }
@@ -1152,10 +1185,39 @@ body {
   font-weight: 600;
 }
 
+.dialog h3 {
+  margin: 4px 0 -4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
 .dialog label {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.dialog label > span {
+  flex: none;
+  width: 130px;
+}
+
+.dialog input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.dialog output {
+  flex: none;
+  width: 64px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .dialog select {

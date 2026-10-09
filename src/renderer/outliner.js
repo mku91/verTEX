@@ -1,4 +1,5 @@
 import { scrubbable } from './scrub.js';
+import { MARKER_COLORS, markerColor } from './marker-colors.js';
 
 const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
 const GROUP_ICON = '<i class="fa-solid fa-folder"></i>';
@@ -86,6 +87,7 @@ export class Outliner {
       [...selected],
       whole,
       [...this.folded],
+      this.editor.mesh.objects.map((object) => object.color ?? null), // the icons' colours
     ]);
     if (signature === this.shown) return;
     this.shown = signature;
@@ -116,6 +118,9 @@ export class Outliner {
       const group = island.kind === 'group';
       row.classList.toggle('group', group);
       row.insertAdjacentHTML('beforeend', group ? GROUP_ICON : OBJECT_ICON);
+      // Its marker colour, if it has one.
+      const marker = markerColor(this.editor.mesh.objects[index].color);
+      if (marker) row.lastElementChild.style.color = marker;
       row.append(name);
       row.title = group
         ? `Группа: внутри ${island.children.length}`
@@ -234,9 +239,34 @@ export class Outliner {
         });
         return button;
       };
+      // A marker colour: for this row, or - if it is one of several picked - for all of them.
+      const whole = editor.mode === 'object' && editor.picked.has(index) ? [...editor.picked] : [index];
+      const current = editor.mesh.objects[index].color ?? null;
+      const swatch = (label, color, id) => {
+        const button = item(label, () => editor.setObjectColor(whole, id));
+        const dot = document.createElement('i');
+        dot.className = 'color-dot';
+        if (color) dot.style.background = color;
+        else dot.classList.add('none');
+        button.prepend(dot);
+        button.classList.toggle('current', id === current);
+        return button;
+      };
+      const colors = document.createElement('div');
+      colors.className = 'submenu';
+      colors.append(
+        ...MARKER_COLORS.map((marker) => swatch(marker.label, marker.color, marker.id)),
+        swatch('Без цвета', null, null),
+      );
+      const colorItem = document.createElement('div');
+      colorItem.className = 'submenu-item';
+      const colorLabel = document.createElement('button');
+      colorLabel.innerHTML = '<span>Цвет метки</span><i class="fa-solid fa-chevron-right"></i>';
+      colorItem.append(colorLabel, colors);
       menu.replaceChildren(
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
+        colorItem,
         item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
       );
@@ -246,6 +276,10 @@ export class Outliner {
       const { width, height } = menu.getBoundingClientRect();
       menu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 4)}px`;
       menu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 4)}px`;
+      // The submenu opens to the right, or to the left where there is no room; and up near the bottom.
+      const placed = menu.getBoundingClientRect();
+      colorItem.classList.toggle('left', placed.right + 170 > window.innerWidth);
+      colorItem.classList.toggle('up', colorItem.getBoundingClientRect().top + (MARKER_COLORS.length + 1) * 28 + 12 > window.innerHeight);
     });
     // Its buttons must not take the keyboard focus.
     menu.addEventListener('mousedown', (event) => event.preventDefault());

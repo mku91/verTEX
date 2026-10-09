@@ -870,6 +870,23 @@ export class Editor extends EventTarget {
       .getSize(new THREE.Vector3());
   }
 
+  // --- marker colours (see marker-colors.js) ------------------------------------
+
+  // Gives the entries of the objects list a marker colour, by its id; null
+  // takes it away. One undo step.
+  setObjectColor(indices, color) {
+    const objects = indices.map((index) => this.mesh.objects[index]).filter(Boolean);
+    if (objects.every((object) => (object.color ?? null) === color) || this.busy()) return;
+    this.history.push(this.snapshot());
+    for (const object of objects) {
+      if (color) object.color = color;
+      else delete object.color;
+    }
+    this.view.updateSurfaceColors();
+    this.viewport.requestRender();
+    this.emitChange();
+  }
+
   // --- how an entry has been turned (see frames.js) ---------------------------
 
   // The turn of the entry the panels are about - an object or a group, picked
@@ -2704,11 +2721,11 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
-          rotation: rotation ? [...rotation] : null,
+          rotation: rotation ? [...rotation] : null, color: color ?? null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -2737,6 +2754,7 @@ export class Editor extends EventTarget {
       if (source.hidden) object.hidden = true;
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
+      if (source.color) object.color = source.color;
       if (source.mirror) object.mirror = [...source.mirror];
       made.set(source.id, object);
     }
@@ -2908,7 +2926,7 @@ export class Editor extends EventTarget {
     mesh.vertices = model.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
     mesh.faces = model.faces.map((face) => [...face]);
     mesh.wires = model.wires.map((wire) => [...wire]);
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -2916,6 +2934,7 @@ export class Editor extends EventTarget {
       ...(hidden ? { hidden: true } : {}),
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
+      ...(typeof color === 'string' ? { color } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);

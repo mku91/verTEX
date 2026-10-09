@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { markerColor } from './marker-colors.js';
 import { theme } from './theme.js';
 
 const PLANE_EPSILON = 1e-6; // a vertex this close to a cutting plane lies on it
@@ -1080,7 +1081,8 @@ export class MeshView {
     this.solid = new THREE.Mesh(
       new THREE.BufferGeometry(),
       new THREE.MeshStandardMaterial({
-        color: COLOR_SURFACE,
+        // The colour is the geometry's, per object: see updateSurfaceColors().
+        vertexColors: true,
         roughness: 1,
         flatShading: true,
         side: THREE.DoubleSide,
@@ -1243,8 +1245,26 @@ export class MeshView {
     this.points.geometry.setAttribute('scale', new THREE.BufferAttribute(new Float32Array(vertices.length).fill(1), 1));
 
     this.highlight = NO_HIGHLIGHT; // its indices referred to the old topology
+    this.updateSurfaceColors();
     this.updatePositions();
     this.updateColors(new Set(), -1);
+  }
+
+  // Paints the surface: every object in its marker colour (see
+  // marker-colors.js), or in the theme's surface colour if it has none. Call
+  // after an object's colour changes; rebuild() and applyTheme() do it themselves.
+  updateSurfaceColors() {
+    const { faces, objects, vertexObject } = this.mesh;
+    const tints = new Map(objects.map((object) => {
+      const hex = markerColor(object.color);
+      return [object.id, hex ? new THREE.Color(hex) : COLOR_SURFACE];
+    }));
+    const colors = new Float32Array(this.triangleFaces.length * 9);
+    this.triangleFaces.forEach((face, triangle) => {
+      const tint = tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
+      for (let corner = 0; corner < 3; corner++) tint.toArray(colors, triangle * 9 + corner * 3);
+    });
+    this.solid.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }
 
   setPositions(object, count) {
@@ -1279,7 +1299,7 @@ export class MeshView {
   // caller's to refresh, see updateColors().
   applyTheme() {
     loadColors();
-    this.solid.material.color.copy(COLOR_SURFACE);
+    this.updateSurfaceColors();
     this.applyLook();
     this.overlays.selectedFaces.material.color.copy(COLOR_SELECTED);
     this.overlays.hoveredFaces.material.color.copy(COLOR_HOVERED);

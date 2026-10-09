@@ -461,6 +461,7 @@ export class Mirror {
           const made = mesh.objects[mesh.objects.length - 1];
           made.parent = object.parent ?? null;
           if (object.hidden) made.hidden = true;
+          if (object.color) made.color = object.color;
           changed = true;
         }
         // Its pivot point and its turn: this object's, mirrored the way the piece is.

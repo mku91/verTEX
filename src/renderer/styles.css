@@ -903,6 +903,80 @@ body {
   cursor: default;
 }
 
+/* An item that opens a menu of its own beside it, while the pointer is on it. */
+.submenu-item {
+  position: relative;
+  display: flex;
+}
+
+.submenu-item > button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.submenu-item > button i {
+  width: auto;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.submenu-item:hover > button {
+  background: var(--hover);
+}
+
+.submenu {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  display: none;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.submenu-item.left > .submenu {
+  right: 100%;
+  left: auto;
+}
+
+.submenu-item.up > .submenu {
+  top: auto;
+  bottom: -5px;
+}
+
+.submenu-item:hover > .submenu {
+  display: flex;
+}
+
+.submenu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.submenu button.current {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* A marker colour's dot; the one for "none" is an empty ring. */
+.color-dot {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.color-dot.none {
+  border: 1.5px solid var(--text-dim);
+}
+
 /* Floating panel with the selection's position, in the viewport's corner. */
 /* The floating panels in the viewport's corner, one above the other. */
 #float-panels {

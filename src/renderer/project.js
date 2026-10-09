@@ -44,7 +44,7 @@ function modelOf(editor) {
     faces: mesh.faces.map((face) => [...face]),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => {
       const frame = frames.get(id);
       const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
       // Inside a group that is not turned the angles are the entry's own, as they were set.
@@ -60,6 +60,7 @@ function modelOf(editor) {
         // No pivot point of its own: the position is the middle of its bounds, and follows them.
         ...(pivot ? {} : { autoOrigin: true }),
         ...(mirror?.length ? { mirror: [...mirror] } : {}),
+        ...(color ? { color } : {}), // a marker colour's id, see marker-colors.js
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -170,6 +171,7 @@ export function readProject(files) {
   for (const object of model.objects) {
     const sound =
       object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
+      (object.color === undefined || typeof object.color === 'string') &&
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))
         : object.pivot === undefined || triple(object.pivot));

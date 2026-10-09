@@ -6,6 +6,28 @@ const GRID_SIZE = 16;
 
 // Scene, camera, navigation and on-demand rendering.
 const FLIGHT_TIME = 400; // ms, a smooth camera move
+// The "forward" marker: a flat arrowhead on the floor at the far end of the
+// +Z ground axis, where a model's front is meant to face. World units.
+const FORWARD_HEAD = 0.3; // long
+const FORWARD_WIDTH = 0.233; // wide
+const FORWARD_LABEL = 'N'; // written flat on the floor past the arrowhead (never translated)
+const FORWARD_LABEL_SIZE = 0.5; // world units
+const FORWARD_LABEL_GAP = 0.15; // between the arrowhead's tip and the letter
+
+// The letter as a texture: white on nothing, to be tinted by its material.
+function letterTexture(letter) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#fff';
+  context.font = 'bold 104px "Segoe UI", system-ui, sans-serif';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(letter, 64, 70);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
 const WHEEL_NOTCH = 100; // wheel travel of one notch
 const MIN_DISTANCE = 0.2;
 const MAX_DISTANCE = 300;
@@ -102,6 +124,7 @@ export class Viewport {
     for (const object of this.backdrop) {
       this.scene.remove(object);
       object.geometry.dispose();
+      object.material.map?.dispose();
       object.material.dispose();
     }
     // The floor grid: a line every snap step, those on whole units a shade stronger.
@@ -130,10 +153,37 @@ export class Viewport {
       const toned = shade(new THREE.Color(color).lerp(new THREE.Color(theme.viewBg), 0.3));
       return new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: toned }));
     };
+    // The forward arrowhead: a flat triangle on the floor, its tip at the end
+    // of the +Z ground axis, in the axis' own colour.
+    const headGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-FORWARD_WIDTH / 2, 0, half - FORWARD_HEAD),
+      new THREE.Vector3(FORWARD_WIDTH / 2, 0, half - FORWARD_HEAD),
+      new THREE.Vector3(0, 0, half),
+    ]);
+    const forwardColor = shade(new THREE.Color(theme.axisZ).lerp(new THREE.Color(theme.viewBg), 0.3));
+    const head = new THREE.Mesh(
+      headGeometry,
+      new THREE.MeshBasicMaterial({ color: forwardColor, side: THREE.DoubleSide }),
+    );
+    // The letter, flat on the floor just past the tip, upright when seen
+    // from the +Z side (its top towards -Z, as the floor is read from there).
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(FORWARD_LABEL_SIZE, FORWARD_LABEL_SIZE),
+      new THREE.MeshBasicMaterial({
+        map: letterTexture(FORWARD_LABEL),
+        color: forwardColor,
+        transparent: true,
+        side: THREE.DoubleSide,
+      }),
+    );
+    label.rotation.x = -Math.PI / 2;
+    label.position.set(0, 0, half + FORWARD_LABEL_GAP + FORWARD_LABEL_SIZE / 2);
     this.backdrop = [
       grid,
       axis(new THREE.Vector3(-half, 0, 0), new THREE.Vector3(half, 0, 0), theme.axisX),
       axis(new THREE.Vector3(0, 0, -half), new THREE.Vector3(0, 0, half), theme.axisZ),
+      head,
+      label,
     ];
     // The floor is a backdrop: drawn before everything else and leaving no
     // trace in the depth buffer, so whatever lies on it - an edge, a vertex, a

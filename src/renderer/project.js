@@ -10,6 +10,7 @@
 //   view.json        { camera: { position, target } }
 //   materials.json   [] - materials, none yet
 //   textures/        atlas.png - the texture atlas, see atlas.js
+//   preview.png      a small picture of the model, shown on the welcome screen
 //
 // A newer program may add entries and fields; this one reads what it knows.
 //
@@ -229,7 +230,8 @@ export function readProject(files) {
 // The project the editor is working on: its file, whether it has unsaved
 // changes, and the commands of the File menu. `api` is the main process's
 // side (window.vertex.project), absent when the page runs without it.
-// Dispatches 'change' when the name or the unsaved mark changes.
+// Dispatches 'change' when the name or the unsaved mark changes, and 'open'
+// when the editor has got another project: a new one, or one from a file.
 export class Project extends EventTarget {
   constructor(editor, api) {
     super();
@@ -238,6 +240,8 @@ export class Project extends EventTarget {
     this.path = null;
     this.savedState = editor.history.id; // the history state that is on disk (or was the start)
     this.working = false; // a command is waiting for a dialog
+    this.ask = null; // asks what kind of project a new one is to be, see newProject()
+    this.picture = null; // gives the picture of the model that goes into the file (PNG bytes), see write()
     this.shown = '';
     editor.addEventListener('change', () => this.report());
     this.report();
@@ -298,7 +302,10 @@ export class Project extends EventTarget {
   // set. Returns whether it was written.
   async write(elsewhere) {
     if (this.editor.busy()) return false;
-    const result = await this.api.save(elsewhere ? null : this.path, await projectFilesWithTextures(this.editor));
+    const files = await projectFilesWithTextures(this.editor);
+    const picture = await this.picture?.();
+    if (picture) files['preview.png'] = picture;
+    const result = await this.api.save(elsewhere ? null : this.path, files);
     if (!result) return false;
     if (result.error) {
       await this.api.alert('Не удалось сохранить проект', result.error);
@@ -320,13 +327,15 @@ export class Project extends EventTarget {
       this.path = null;
       this.savedState = this.editor.history.id;
       this.report();
+      this.dispatchEvent(new Event('open'));
     });
   }
 
-  open() {
+  // Opens the project in the given file; without one the user is asked for it.
+  open(path = null) {
     return this.run(async () => {
       if (!(await this.mayDiscard())) return;
-      const result = await this.api.open();
+      const result = await this.api.open(path);
       if (!result) return;
       let project;
       try {
@@ -341,6 +350,7 @@ export class Project extends EventTarget {
       this.path = result.path;
       this.savedState = this.editor.history.id;
       this.report();
+      this.dispatchEvent(new Event('open'));
     });
   }
 

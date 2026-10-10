@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('vertex', {
     setState: (state) => ipcRenderer.send('project:state', state),
     close: () => ipcRenderer.send('project:close'),
   },
+  // The projects worked on lately, see recent.js.
+  recent: {
+    list: () => ipcRenderer.invoke('recent:list'),
+    remove: (path) => ipcRenderer.invoke('recent:remove', { path }),
+  },
   // The atlas as working files on disk, see atlas-file.js.
   atlas: {
     link: (project) => ipcRenderer.invoke('atlas:link', { project }),

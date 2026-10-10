@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const path = require('node:path');
 const { registerProjectIo } = require('./project-io.js');
 const { registerAtlasFile } = require('./atlas-file.js');
+const { registerRecent } = require('./recent.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
@@ -27,7 +28,8 @@ function createWindow() {
   return win;
 }
 
-const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow });
+const recent = registerRecent({ ipcMain, file: path.join(app.getPath('userData'), 'recent.json') });
+const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow, recent });
 registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow });
 
 // Menu items talk to the renderer through a single 'menu' channel.

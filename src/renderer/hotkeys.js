@@ -69,11 +69,12 @@ export class Hotkeys extends EventTarget {
   }
 
   // Runs the binding the key press is for. Returns true if there was one and it took the press.
-  handle(event) {
+  // With `only` (ids), the other bindings are not heard.
+  handle(event, only = null) {
     const combo = comboOf(event);
     if (!combo) return false;
     const binding = this.bindings.find(({ id }) => this.keysOf(id) === combo);
-    if (!binding || binding.run() === false) return false;
+    if (!binding || (only && !only.includes(binding.id)) || binding.run() === false) return false;
     event.preventDefault();
     return true;
   }

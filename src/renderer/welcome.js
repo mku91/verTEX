@@ -1,0 +1,100 @@
+// The welcome screen: what the program starts with, over the whole window. It
+// offers a new project, a project from a file, and the projects worked on
+// lately - a grid of cards, each with the picture its file holds (see
+// project.js: preview.png). It goes away when the editor has a project.
+// Behind it all a floor of vertices sways (see welcome-backdrop.js), while
+// the screen is there to be seen.
+//
+// `api` is the main process's list of those projects (window.vertex.recent,
+// see src/main/recent.js), absent when the page runs without it.
+import { WelcomeBackdrop } from './welcome-backdrop.js';
+
+export class Welcome {
+  constructor(element, project, api) {
+    this.element = element;
+    this.project = project;
+    this.api = api ?? null;
+    this.grid = element.querySelector('.welcome-grid');
+    this.empty = element.querySelector('.welcome-empty');
+    this.pictures = []; // the object URLs of the cards' pictures, to be let go of
+    this.backdrop = new WelcomeBackdrop(element.querySelector('canvas'));
+
+    element.querySelector('[data-welcome="new"]').addEventListener('click', () => project.newProject());
+    element.querySelector('[data-welcome="open"]').addEventListener('click', () => project.open());
+    project.addEventListener('open', () => this.hide());
+    this.show();
+  }
+
+  get open() {
+    return !this.element.hidden;
+  }
+
+  show() {
+    this.element.hidden = false;
+    this.backdrop.start();
+    this.refresh();
+  }
+
+  hide() {
+    this.element.hidden = true;
+    this.backdrop.stop();
+    this.fill([]);
+  }
+
+  async refresh() {
+    let entries = [];
+    try {
+      entries = (await this.api?.list()) ?? [];
+    } catch {
+      // The main process is older than this page and has no list: none is shown.
+    }
+    if (this.open) this.fill(entries);
+  }
+
+  fill(entries) {
+    for (const url of this.pictures) URL.revokeObjectURL(url);
+    this.pictures = [];
+    this.grid.replaceChildren(...entries.map((entry) => this.card(entry)));
+    this.empty.hidden = entries.length > 0;
+  }
+
+  card({ path, name, opened, missing, preview }) {
+    const card = document.createElement('div');
+    card.className = 'welcome-card';
+    card.classList.toggle('missing', missing);
+    card.title = missing ? `${path}\n\nФайла нет на месте` : path;
+
+    const picture = document.createElement('div');
+    picture.className = 'welcome-picture';
+    if (preview) {
+      const url = URL.createObjectURL(new Blob([preview], { type: 'image/png' }));
+      this.pictures.push(url);
+      const image = document.createElement('img');
+      image.src = url;
+      image.alt = '';
+      image.draggable = false;
+      picture.append(image);
+    } else {
+      picture.innerHTML = `<i class="fa-solid ${missing ? 'fa-link-slash' : 'fa-cube'}"></i>`;
+    }
+
+    const title = document.createElement('b');
+    title.textContent = name;
+    const note = document.createElement('small');
+    note.textContent = missing ? 'файл не найден' : new Date(opened).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const remove = document.createElement('button');
+    remove.className = 'welcome-remove';
+    remove.title = 'Убрать из списка (файл останется на месте)';
+    remove.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+    remove.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await this.api.remove(path);
+      this.refresh();
+    });
+
+    card.append(picture, title, note, remove);
+    if (!missing) card.addEventListener('click', () => this.project.open(path));
+    return card;
+  }
+}

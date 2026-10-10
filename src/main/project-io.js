@@ -6,7 +6,9 @@ const FILTERS = [{ name: 'Проект verTEX', extensions: [EXTENSION] }];
 
 // The renderer's access to project files: dialogs, reading and writing.
 // `ipcMain`, `dialog` and `BrowserWindow` are Electron's (passed in, so that
-// the handlers can be driven without the real ones).
+// the handlers can be driven without the real ones); `recent` is the list of
+// the projects worked on lately (see recent.js), told of every file that is
+// saved or opened.
 //
 //   project:save    { path, files } -> { path } | null (cancelled) | { error }
 //                   Without a path the user is asked for one.
@@ -17,7 +19,7 @@ const FILTERS = [{ name: 'Проект verTEX', extensions: [EXTENSION] }];
 //   project:state   { dirty } - the window has unsaved changes or not; a
 //                   window that has them asks before it closes.
 //   project:close   closes the window with no more questions.
-function registerProjectIo({ ipcMain, dialog, BrowserWindow }) {
+function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
   const dirty = new WeakSet(); // windows with unsaved changes
   const closing = new WeakSet(); // windows told to close regardless
   const windowOf = (event) => BrowserWindow.fromWebContents(event.sender);
@@ -40,6 +42,7 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow }) {
       const temporary = `${target}.${process.pid}.tmp`;
       await fs.writeFile(temporary, pack(files));
       await fs.rename(temporary, target);
+      recent?.add(target);
       return { path: target };
     } catch (error) {
       return { error: error.message };
@@ -58,7 +61,9 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow }) {
       [source] = result.filePaths;
     }
     try {
-      return { path: source, files: unpack(await fs.readFile(source)) };
+      const files = unpack(await fs.readFile(source));
+      recent?.add(source);
+      return { path: source, files };
     } catch (error) {
       return { path: source, error: error.message };
     }

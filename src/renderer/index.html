@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:">
   <title>verTEX</title>
   <link rel="stylesheet" href="../fonts/all.css">
   <link rel="stylesheet" href="styles.css">
@@ -354,6 +354,25 @@
   </div>
 
   <div id="warnings-list" hidden></div>
+
+  <!-- Shown from the start, until the editor has a project (see welcome.js). -->
+  <div id="welcome">
+    <canvas class="welcome-backdrop"></canvas>
+    <div class="welcome-box">
+      <div class="welcome-head">
+        <span class="logo">ver<b>TEX</b></span>
+        <button data-welcome="new" class="primary" title="Создать новый проект">
+          <i class="fa-solid fa-plus"></i><span>Новый проект</span>
+        </button>
+        <button data-welcome="open" title="Открыть проект из файла">
+          <i class="fa-regular fa-folder-open"></i><span>Открыть…</span>
+        </button>
+      </div>
+      <h2>Недавние проекты</h2>
+      <div class="welcome-grid"></div>
+      <p class="welcome-empty" hidden>Здесь появятся проекты, с которыми вы работали.</p>
+    </div>
+  </div>
 
   <div id="new-project-dialog" class="modal" hidden>
     <form class="dialog">

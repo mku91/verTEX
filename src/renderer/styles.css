@@ -1833,6 +1833,183 @@ body {
   display: none;
 }
 
+/* The welcome screen: over the whole window, under the dialogs. */
+#welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+#welcome[hidden] {
+  display: none;
+}
+
+/* Stays where it is while the cards scroll over it. */
+.welcome-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.welcome-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+
+.welcome-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-head .logo {
+  flex: 1;
+  font-size: 26px;
+}
+
+.welcome-head button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.welcome-head button:hover {
+  background: var(--hover);
+}
+
+.welcome-head button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.welcome-head button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 85%, var(--text));
+}
+
+.welcome-box h2 {
+  margin: 16px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.welcome-empty {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.welcome-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.welcome-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-raised);
+  cursor: pointer;
+}
+
+.welcome-card:hover {
+  border-color: var(--accent);
+}
+
+.welcome-card.missing {
+  cursor: default;
+}
+
+.welcome-card.missing > :not(.welcome-remove) {
+  opacity: 0.45;
+}
+
+.welcome-card.missing:hover {
+  border-color: var(--border);
+}
+
+/* The picture is the preview's: the model on black. */
+.welcome-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 8px;
+  background: #000;
+  color: var(--text-dim);
+  font-size: 34px;
+}
+
+.welcome-picture img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.welcome-card b,
+.welcome-card small {
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.welcome-card b {
+  font-weight: 600;
+}
+
+.welcome-card small {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.welcome-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.welcome-card:hover .welcome-remove {
+  display: block;
+}
+
+.welcome-remove:hover {
+  background: var(--hover);
+}
+
 /* A dialog that asks one thing, over the whole window. */
 .modal {
   position: fixed;

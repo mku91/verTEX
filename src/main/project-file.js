@@ -9,8 +9,10 @@ const { zipSync, unzipSync, strToU8, strFromU8 } = require('fflate');
 //   view.json        the camera
 //   materials.json   materials (none yet)
 //   textures/        texture files: atlas.png, the project's atlas
+//   preview.png      a small picture of the model, for the welcome screen
 
 const EXTENSION = 'vertex';
+const PREVIEW = 'preview.png';
 const isText = (name) => name.endsWith('.json');
 
 // { name: string | Uint8Array } -> the archive's bytes. A name ending in '/'
@@ -33,4 +35,11 @@ function unpack(buffer) {
   return files;
 }
 
-module.exports = { EXTENSION, pack, unpack };
+// The archive's bytes -> its picture of the model alone (the rest is not even
+// unpacked), or null if it has none. Throws if the bytes are not a zip archive.
+function preview(buffer) {
+  const found = unzipSync(new Uint8Array(buffer), { filter: (file) => file.name === PREVIEW });
+  return found[PREVIEW]?.length ? found[PREVIEW] : null;
+}
+
+module.exports = { EXTENSION, pack, unpack, preview };

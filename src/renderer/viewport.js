@@ -256,6 +256,35 @@ export class Viewport {
     this.renderer.render(this.scene, this.camera);
   }
 
+  // The view as it is drawn now, on a canvas of the given size: scaled to
+  // cover it, what does not fit cut off evenly at the sides. With a sphere
+  // given (THREE.Sphere), the picture is taken from the side the camera is on
+  // but from as far as it takes for the sphere to fill it.
+  capture(width, height, sphere = null) {
+    const { camera } = this;
+    const source = this.renderer.domElement;
+    const [position, quaternion] = [camera.position.clone(), camera.quaternion.clone()];
+    if (sphere?.radius > 0) {
+      // Half the angle the picture takes up from top to bottom: all of the
+      // camera's, or less if the view is narrower than the picture.
+      const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(1, camera.aspect / (width / height)));
+      const away = camera.position.clone().sub(this.orbit.target).normalize();
+      camera.position.copy(sphere.center).addScaledVector(away, (sphere.radius * 1.15) / Math.sin(half));
+      camera.lookAt(sphere.center);
+    }
+    this.render(); // the drawing is only there to be read right after it is made
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const scale = Math.max(width / source.width, height / source.height);
+    const [w, h] = [source.width * scale, source.height * scale];
+    canvas.getContext('2d').drawImage(source, (width - w) / 2, (height - h) / 2, w, h);
+    camera.position.copy(position);
+    camera.quaternion.copy(quaternion);
+    this.requestRender(); // the view itself, as it was
+    return canvas;
+  }
+
   // Moves the camera towards its orbit target (factor < 1) or away from it,
   // smoothly: turns of the wheel add up into one distance to be at, and every
   // frame the camera covers a share of what is left.

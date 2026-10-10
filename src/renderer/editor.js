@@ -2605,6 +2605,25 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
+  // A picture of the model as the preview shows it - alone, painted, on black -
+  // seen from the side the camera is on and filling the picture, on a canvas
+  // of the given size. What the editor is in the middle of is left as it is.
+  picture(width, height) {
+    const look = (on) => {
+      this.preview = on;
+      this.view.setBare(on);
+      this.viewport.setPreview(on);
+      this.refreshHighlight();
+      this.placeGizmo();
+    };
+    const was = this.preview;
+    if (!was) look(true);
+    const sphere = this.mesh.vertices.length ? new THREE.Sphere().setFromPoints(this.mesh.vertices) : null;
+    const canvas = this.viewport.capture(width, height, sphere);
+    if (!was) look(false);
+    return canvas;
+  }
+
   // Whether the UV editor is open: picked faces are then shown by their
   // outline, not by a tint (see refreshHighlight()).
   setUVLook(on) {

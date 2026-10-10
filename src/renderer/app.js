@@ -13,6 +13,7 @@ import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
+import { Welcome } from './welcome.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -767,6 +768,12 @@ window.addEventListener('keydown', (event) => {
     if (event.code === 'Escape' && !capturingHotkey) closeSettings();
     return;
   }
+  // On the welcome screen there is no project to work on yet: of the
+  // shortcuts, only those that get one, and the settings.
+  if (welcome.open) {
+    hotkeys.handle(event, WELCOME_HOTKEYS);
+    return;
+  }
   if (event.code === 'Escape' && !$('shading-menu').hidden) {
     closeShadingMenu();
     return;
@@ -847,7 +854,10 @@ for (const control of gridControls) {
   control.button.addEventListener('mousedown', (event) => event.preventDefault());
 }
 
-window.vertex?.onMenu((action) => ACTIONS[action]?.());
+window.vertex?.onMenu((action) => {
+  if (welcome.open && !WELCOME_ACTIONS.includes(action)) return;
+  ACTIONS[action]?.();
+});
 
 // For debugging a running window from outside (see the debugging port in
 // main.js): `vertexDebug.text()` returns the whole project as text, and
@@ -870,8 +880,25 @@ const showProject = () => {
 project.addEventListener('change', showProject);
 showProject();
 
-// Texturing: the atlas as a file beside the project, painted in another program.
 project.ask = askNewProject;
+// The picture of the model kept in the project's file, for the welcome screen.
+project.picture = () => {
+  const planes = mirrorDisplay.group.visible; // the mirror's planes are the editor's, not the model's
+  mirrorDisplay.group.visible = false;
+  const canvas = editor.picture(480, 300);
+  mirrorDisplay.group.visible = planes;
+  return new Promise((resolve) => {
+    canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
+  });
+};
+
+// The welcome screen, up until a project is made or opened; meanwhile the
+// menu and the keyboard do only what makes sense without one.
+const WELCOME_ACTIONS = ['project-new', 'project-open', 'project-close', 'new', 'settings'];
+const WELCOME_HOTKEYS = ['file.new', 'file.open', 'view.settings'];
+const welcome = new Welcome($('welcome'), project, window.vertex?.recent);
+
+// Texturing: the atlas as a file beside the project, painted in another program.
 
 // The settings' external editor: the program the atlas' picture is opened in.
 {

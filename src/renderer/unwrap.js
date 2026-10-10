@@ -34,11 +34,11 @@ import { quaternionOf } from './frames.js';
 // of each other's way, and out of the pinned ones'.
 
 const SAME_PLANE = 1e-4; // how far apart two faces' planes may be, and their normals' cosine from 1
-// Every chart has a rim of this many pixels all round it, which is its own:
-// the atlas repeats the chart's edge pixels there (see Atlas.extrude()), so
-// that a renderer that blends neighbouring pixels at a face's edge blends in
-// more of the same and not another face or nothing. Charts are therefore two
-// rims apart, and one rim from the atlas' edge.
+// Every chart has room for a rim of this many pixels all round it, which is
+// its own: an export can repeat the chart's edge pixels there (see
+// Atlas.extrude()), so that a renderer that blends neighbouring pixels at a
+// face's edge blends in more of the same and not another face or nothing.
+// Charts are therefore two rims apart, and one rim from the atlas' edge.
 export const PADDING = 1;
 const START_SIZE = 64; // px, an empty project's atlas
 const MAX_SIZE = 4096;

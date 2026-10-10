@@ -988,7 +988,6 @@ export class Editor extends EventTarget {
         const face = this.mesh.faces[index];
         const corner = face.indexOf(vertex);
         if (!settle) this.chartPreview.set(face, face.uv);
-        if (settle && !face.pin && !face.home) face.home = face.uv; // taken in hand for the first time
         if (corner >= 0) face.uv = face.uv.map((point, k) => (k === corner ? [place[0], place[1]] : point));
         if (settle) {
           // The whole chart: its other faces keep their shape, but are not laid out apart from it.
@@ -1007,13 +1006,39 @@ export class Editor extends EventTarget {
     return changed;
   }
 
+  // Makes the charts that hold any of the given faces anew: they are the
+  // unwrap's again - not pinned, not shaped - their room is swept of what was
+  // painted for them, and they are laid out and filled in like new ones. With
+  // no faces given, the whole atlas (see repackAtlas()). One undo step.
+  regenerateCharts(faces) {
+    const charts = this.chartsOfFaces(faces);
+    if (this.busy()) return false;
+    if (charts.length === 0) {
+      this.repackAtlas();
+      return true;
+    }
+    this.history.push(this.snapshot());
+    for (const chart of charts) {
+      for (const index of chart.faces) {
+        const face = this.mesh.faces[index];
+        delete face.uv;
+        delete face.pin;
+        delete face.shaped;
+      }
+    }
+    this.layOut(); // sweeps the rooms they have left, gives them new ones
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
+    return true;
+  }
+
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
   // given faces. Only the faces' places change, not the picture: this is how
   // a face is given another picture, or several faces the same one.
   //   { move: [dx, dy] }   by whole pixels (kept on the atlas)
   //   { turn: 1 | -1 }     a quarter turn, clockwise or back, about the chart's top left room
   //   { flip: 'h' | 'v' }  turned over, left to right or top to bottom
-  //   { auto: true }       given back to the unwrap, which finds it free room if it needs any
   // A chart placed so is pinned: the unwrap leaves it where it is. One undo step.
   placeCharts(faces, how) {
     if (this.chartPreview) this.previewCharts(faces, null);
@@ -1024,21 +1049,6 @@ export class Editor extends EventTarget {
     for (const chart of charts) {
       const { rect } = chart;
       const members = chart.faces.map((index) => this.mesh.faces[index]);
-      if (how.auto) {
-        for (const face of members) {
-          if (face.pin || face.shaped) changed = true;
-          // Back to where the unwrap had it, and to the picture that is there -
-          // its own. (If that is not known any more, it is laid out as a new one.)
-          if (face.pin || face.shaped) {
-            if (face.home?.length === face.length) face.uv = face.home;
-            else delete face.uv;
-          }
-          delete face.home;
-          delete face.pin;
-          delete face.shaped; // laid flat again: its shape is the unwrap's
-        }
-        continue;
-      }
       let place;
       if (how.move) {
         const [dx, dy] = this.chartShift(chart, how.move[0], how.move[1]);
@@ -1057,7 +1067,6 @@ export class Editor extends EventTarget {
         continue;
       }
       for (const face of members) {
-        if (!face.pin && !face.home) face.home = face.uv; // taken in hand for the first time
         face.uv = face.uv.map((point) => place(point).map((value) => +value.toFixed(6)));
         face.pin = true;
       }

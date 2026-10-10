@@ -7,7 +7,7 @@ import { theme, onThemeChange } from './theme.js';
 // dragged to another place - on top of another chart, if they are to share a
 // picture - turned by quarter turns, or turned over. Nothing is stretched and
 // no pixel is painted or moved here; only where the faces look changes. A
-// chart placed so is pinned (see unwrap.js), and "auto" gives it back.
+// chart placed so is pinned (see unwrap.js); "regenerate" makes it anew.
 //
 // With the shape lock open the picked charts have a marker at every corner,
 // and a marker can be dragged, by whole pixels: that changes the shape the
@@ -80,9 +80,10 @@ export class UVEditor {
     if (size !== this.fitted && this.canvas.clientWidth > 0) this.fit();
     const charts = this.pickedCharts();
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove', 'shape'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
+      if (!['fit', 'add', 'remove', 'shape', 'regenerate'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
     }
-    this.container.querySelector('[data-uv="auto"]').disabled = !charts.some((chart) => chart.pinned);
+    // Regenerate: the picked charts, or with none picked the whole atlas - if there is anything on it.
+    this.container.querySelector('[data-uv="regenerate"]').disabled = this.editor.atlas.charts.length === 0;
     const lock = this.container.querySelector('[data-uv="shape"]');
     lock.classList.toggle('active', this.shaping);
     lock.firstElementChild.className = `fa-solid ${this.shaping ? 'fa-lock-open' : 'fa-lock'}`;
@@ -119,7 +120,12 @@ export class UVEditor {
     else if (name === 'turn-right') this.editor.placeCharts(faces, { turn: 1 });
     else if (name === 'flip-h') this.editor.placeCharts(faces, { flip: 'h' });
     else if (name === 'flip-v') this.editor.placeCharts(faces, { flip: 'v' });
-    else if (name === 'auto') this.editor.placeCharts(faces, { auto: true });
+    else if (name === 'regenerate') {
+      // With nothing picked it is the whole atlas, and everything painted: asked first.
+      const all = this.pickedCharts().length === 0;
+      if (all && !window.confirm('Перегенерировать весь атлас?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) return;
+      this.editor.regenerateCharts(faces);
+    }
   }
 
   // The whole atlas in view, with a margin.

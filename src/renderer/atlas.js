@@ -13,10 +13,10 @@ import { START_SIZE, PADDING } from './unwrap.js';
 //   - the guide: a picture of the same size with nothing but the faces'
 //     outlines, to lay over the atlas in the painting program.
 //
-// And it is kept safe from bleeding: every chart has a rim (see PADDING in
-// unwrap.js) in which its edge pixels are repeated outwards. That is done
-// here, after every change, and is not for painting: what is painted in a
-// rim is painted over.
+// Every chart has room for a rim round it (see PADDING in unwrap.js), in
+// which its edge pixels can be repeated outwards against bleeding. That is
+// not done to the picture that is painted - it is an export's to do, if it is
+// asked to, with extrude() on a copy.
 
 const OUTLINE = 0.72; // how much of the fill's brightness a template outline has
 
@@ -211,7 +211,6 @@ export class Atlas extends EventTarget {
       const within = (rect) => [...result.fresh, ...result.moved.map(({ to }) => to)].some((f) => f.x === rect.x && f.y === rect.y);
       for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart);
     }
-    if (this.extrude(false)) painted = true;
     if (painted) this.touch();
     // Where the faces are has changed, painted or not: the guide is another picture now.
     if (result.changed || painted) this.dispatchEvent(new Event('layout'));
@@ -263,7 +262,6 @@ export class Atlas extends EventTarget {
   // Paints the template over every chart again - where nothing is painted.
   paintTemplates() {
     for (const chart of this.charts) this.paintTemplate(chart);
-    this.extrude(false);
     this.touch();
   }
 
@@ -271,6 +269,7 @@ export class Atlas extends EventTarget {
   // the chart that no face shows takes the colour of the chart's pixel it
   // touches - by a side if it can, by a corner otherwise. Returns whether the
   // picture changed; `tell` says whether to announce it (see touch()).
+  // Nothing here calls it: it is there for an export that is asked for rims.
   extrude(tell = true) {
     if (this.charts.length === 0) return false;
     const { width, height } = this;
@@ -360,10 +359,7 @@ export class Atlas extends EventTarget {
     this.context.clearRect(0, 0, this.width, this.height);
     this.context.drawImage(picture, 0, 0);
     picture.close();
-    // The painter's picture is taken as it is; its rims are ours to fill, and
-    // if that changed anything the file is to be written again.
-    const rimmed = this.extrude(false);
-    this.touch(byUser && !rimmed);
+    this.touch(byUser);
     return true;
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mirrorRotation, setRotation } from './frames.js';
+import { inheritUV } from './mesh.js';
 
 // Mirror modeling: every edit is repeated on the other side of a plane (or of
 // several), as if the pointer had a twin there.
@@ -354,6 +355,7 @@ export class Mirror {
           faceByKey.set(key, mesh.faces.length - 1);
           changed = true;
         } else if (!sameCycle(mesh.faces[existing], loop)) {
+          inheritUV(loop, mesh.faces[existing]);
           mesh.faces[existing] = loop;
           changed = true;
         }

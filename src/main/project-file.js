@@ -8,7 +8,7 @@ const { zipSync, unzipSync, strToU8, strFromU8 } = require('fflate');
 //   model.json       the mesh and the scene tree
 //   view.json        the camera
 //   materials.json   materials (none yet)
-//   textures/        texture files (none yet)
+//   textures/        texture files: atlas.png, the project's atlas
 
 const EXTENSION = 'vertex';
 const isText = (name) => name.endsWith('.json');

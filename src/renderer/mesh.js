@@ -431,7 +431,10 @@ export class EditableMesh {
     this.faces = this.faces
       .map((face) => {
         const loop = face.map(resolve);
-        return loop.filter((vertex, k) => vertex !== loop[(k + 1) % loop.length]);
+        const stays = loop.map((vertex, k) => vertex !== loop[(k + 1) % loop.length]);
+        const merged = loop.filter((_, k) => stays[k]);
+        if (face.uv) merged.uv = face.uv.filter((_, k) => stays[k]);
+        return merged;
       })
       .filter((face) => {
         if (face.length < 3 || new Set(face).size !== face.length) return false;
@@ -703,6 +706,7 @@ export class EditableMesh {
         // Both halves keep the winding of the original face.
         pieces.splice(index, 1, piece.slice(p, q + 1), [...piece.slice(q), ...piece.slice(0, p + 1)]);
       }
+      for (const piece of pieces) inheritUV(piece, face);
       this.faces[faceIndex] = pieces[0];
       for (const piece of pieces.slice(1)) this.faces.push(piece);
       if (pieces.length > 1) changed = true;
@@ -756,7 +760,9 @@ export class EditableMesh {
       if (edgeUse.get(edgeKey(a, b)) === 1) sides.push([a, b, copies.get(b), copies.get(a)]);
     });
     for (const faceIndex of faceIndices) {
-      this.faces[faceIndex] = this.faces[faceIndex].map((vertex) => copies.get(vertex));
+      const cap = this.faces[faceIndex].map((vertex) => copies.get(vertex));
+      if (this.faces[faceIndex].uv) cap.uv = this.faces[faceIndex].uv;
+      this.faces[faceIndex] = cap;
     }
     this.faces.push(...sides);
 
@@ -899,7 +905,11 @@ export class EditableMesh {
     this.vertices = kept;
     this.faces = this.faces
       .filter((face) => face.every((i) => remap.has(i)))
-      .map((face) => face.map((i) => remap.get(i)));
+      .map((face) => {
+        const renumbered = face.map((i) => remap.get(i));
+        if (face.uv) renumbered.uv = face.uv;
+        return renumbered;
+      });
     this.wires = this.wires
       .filter((wire) => wire.every((i) => remap.has(i)))
       .map((wire) => wire.map((i) => remap.get(i)));
@@ -915,6 +925,7 @@ export class EditableMesh {
 
 // The theme's colours as THREE.Color objects; loadColors() refills them.
 const COLOR_SURFACE = new THREE.Color();
+const COLOR_WHITE = new THREE.Color(1, 1, 1);
 const COLOR_WIRE = new THREE.Color();
 const COLOR_WIRE_FOCUS = new THREE.Color();
 const COLOR_VERTEX = new THREE.Color();
@@ -1070,6 +1081,35 @@ function pointsMaterial() {
 // Thick lines: plain GL lines are always one pixel wide.
 function edgeOverlay(color) {
   return new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ color, linewidth: 3 }));
+}
+
+// --- what a face carries ------------------------------------------------------
+//
+// A face is a loop: an array of vertex indices. The array may also carry
+// `uv` - where the face's corners are on the texture atlas, in pixels: an
+// array in step with the loop, of [x, y] or null for a corner that has no
+// place yet (see unwrap.js, which gives them). It is a property of the array
+// itself, so a face that is merely moved keeps it without anyone's care; code
+// that makes a new array for an old face carries it over with these.
+
+// A copy of a face, with what it carries.
+export function cloneFace(face) {
+  const copy = [...face];
+  if (face.uv) copy.uv = face.uv.map((point) => (point ? [point[0], point[1]] : null));
+  return copy;
+}
+
+// Gives `loop` (a new array) the places of `source`'s corners, by vertex: a
+// corner whose vertex is in the old face keeps its place, others have none.
+// `before` maps a vertex of the new loop to what it was in the old one.
+export function inheritUV(loop, source, before = (vertex) => vertex) {
+  if (!source.uv) return loop;
+  const places = new Map(source.map((vertex, k) => [vertex, source.uv[k]]));
+  loop.uv = loop.map((vertex) => {
+    const place = places.get(before(vertex));
+    return place ? [place[0], place[1]] : null;
+  });
+  return loop;
 }
 
 // Render model: surface, edges and vertex points built from an EditableMesh.
@@ -1246,6 +1286,7 @@ export class MeshView {
 
     this.highlight = NO_HIGHLIGHT; // its indices referred to the old topology
     this.updateSurfaceColors();
+    this.updateUVs();
     this.updatePositions();
     this.updateColors(new Set(), -1);
   }
@@ -1255,16 +1296,37 @@ export class MeshView {
   // after an object's colour changes; rebuild() and applyTheme() do it themselves.
   updateSurfaceColors() {
     const { faces, objects, vertexObject } = this.mesh;
+    const painted = Boolean(this.solid.material.map); // the atlas is the colour then
     const tints = new Map(objects.map((object) => {
       const hex = markerColor(object.color);
-      return [object.id, hex ? new THREE.Color(hex) : COLOR_SURFACE];
+      return [object.id, painted ? COLOR_WHITE : hex ? new THREE.Color(hex) : COLOR_SURFACE];
     }));
     const colors = new Float32Array(this.triangleFaces.length * 9);
     this.triangleFaces.forEach((face, triangle) => {
-      const tint = tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
+      const tint = tints.get(vertexObject[faces[face][0]]) ?? (painted ? COLOR_WHITE : COLOR_SURFACE);
       for (let corner = 0; corner < 3; corner++) tint.toArray(colors, triangle * 9 + corner * 3);
     });
     this.solid.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
+  // Tells the surface where each of its corners is on the atlas, from the
+  // faces' `uv` (pixels, y down) - call when those or the atlas' size change.
+  updateUVs() {
+    const { faces } = this.mesh;
+    const width = this.atlas?.width || 1;
+    const height = this.atlas?.height || 1;
+    const uvs = new Float32Array(this.triangleFaces.length * 6);
+    this.triangleFaces.forEach((faceIndex, triangle) => {
+      const face = faces[faceIndex];
+      if (!face.uv) return;
+      for (let corner = 0; corner < 3; corner++) {
+        const place = face.uv[face.indexOf(this.triangleIndices[triangle * 3 + corner])];
+        if (!place) continue;
+        uvs[triangle * 6 + corner * 2] = place[0] / width;
+        uvs[triangle * 6 + corner * 2 + 1] = 1 - place[1] / height; // a texture's rows run upwards
+      }
+    });
+    this.solid.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   }
 
   setPositions(object, count) {
@@ -1316,7 +1378,8 @@ export class MeshView {
   // How the object is drawn:
   //   'solid'       - the lit surface;
   //   'wireframe'   - edges and vertices only;
-  //   'orientation' - the surface with front sides in one colour and back sides in another.
+  //   'orientation' - the surface with front sides in one colour and back sides in another;
+  //   'textured'    - the surface painted with the atlas (see atlas.js).
   // The vertex colours are the caller's to refresh, see updateColors().
   setShading(mode) {
     this.shading = mode;
@@ -1334,6 +1397,15 @@ export class MeshView {
     const wireframe = this.focus || this.shading === 'wireframe';
     this.light = wireframe;
     this.solid.visible = !wireframe; // still hit by picking rays when not drawn
+    // Painted: the atlas' pixels as they are, and its see-through ones as holes.
+    const map = this.shading === 'textured' && this.atlas ? this.atlas.texture : null;
+    const { material } = this.solid;
+    if (material.map !== map) {
+      material.map = map;
+      material.alphaTest = map ? 0.5 : 0;
+      material.needsUpdate = true;
+      this.updateSurfaceColors(); // the marker colours give way to the picture
+    }
     for (const tint of Object.values(this.tints)) {
       tint.visible = !this.focus && this.shading === 'orientation';
     }

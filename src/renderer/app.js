@@ -9,6 +9,7 @@ import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles } from './project.js';
+import { AtlasLink } from './atlas-link.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
 
@@ -805,7 +806,36 @@ const showProject = () => {
 project.addEventListener('change', showProject);
 showProject();
 
-window.vertexDebug = { warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
+// Texturing: the atlas as a file beside the project, painted in another program.
+const atlasLink = new AtlasLink(editor, project, window.vertex?.atlas);
+$('atlas-open').addEventListener('click', () => atlasLink.open());
+$('atlas-reveal').addEventListener('click', () => atlasLink.reveal());
+$('atlas-repack').addEventListener('click', () => {
+  if (window.confirm('Разложить все грани на атласе заново?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) editor.repackAtlas();
+});
+for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
+  $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+}
+{
+  // The project's pixels per unit of length.
+  const input = $('ppu-input');
+  const parse = () => parseInt(input.value, 10);
+  const apply = (value) => {
+    if (value === editor.ppu || !(value >= 1 && value <= 128)) return;
+    const faces = editor.mesh.faces.length;
+    if (faces && !window.confirm(`Изменить плотность на ${value} пикселей на единицу?\n\nВся развёртка будет построена заново, нарисованное на текстуре потеряется. Действие можно отменить.`)) return;
+    editor.setPPU(value);
+  };
+  input.addEventListener('change', () => {
+    apply(parse());
+    refresh();
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.code === 'Enter' || event.code === 'Escape') input.blur();
+  });
+}
+
+window.vertexDebug = { atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
 
 // The three-view panel; whether it is open is remembered between launches.
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
@@ -999,6 +1029,9 @@ function refresh() {
   showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('local-toggle').classList.toggle('active', editor.localAxes);
+  // Texturing.
+  if (document.activeElement !== $('ppu-input')) $('ppu-input').value = editor.ppu;
+  $('atlas-size').textContent = `${editor.atlas.width} × ${editor.atlas.height}`;
   // Undo and redo: lit while there is a step to take.
   $('undo-button').disabled = editor.history.undoStack.length === 0;
   $('redo-button').disabled = editor.history.redoStack.length === 0;

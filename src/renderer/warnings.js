@@ -18,8 +18,8 @@ const point = (p) => `(${[p.x, p.y, p.z].map((n) => +n.toFixed(3)).join(', ')})`
 // bar, which opens the list of them. "Keep" silences a warning until the
 // vertices in question change.
 //
-// Next to it is the errors button, for what is wrong rather than doubtful;
-// nothing reports errors yet (`errors` stays empty).
+// Next to it is the errors button, for what is wrong rather than doubtful:
+// faces that are not flat, which cannot be textured without stretch.
 export class Warnings {
   constructor(editor, { toast, button, errorButton, list }) {
     this.editor = editor;
@@ -72,6 +72,8 @@ export class Warnings {
       for (const signature of set) if (!live.has(signature)) set.delete(signature);
     }
     this.current = found.filter((warning) => !this.kept.has(warning.signature));
+    // What is wrong rather than doubtful, see Editor.problems().
+    this.errors = editor.problems();
     const fresh = this.current.filter((warning) => !this.seen.has(warning.signature));
     for (const warning of fresh) this.seen.add(warning.signature);
     this.pending = this.pending

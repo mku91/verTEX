@@ -9,7 +9,7 @@
 //                    the global mirror's axes, an object's `mirror` its own
 //   view.json        { camera: { position, target } }
 //   materials.json   [] - materials, none yet
-//   textures/        texture files, none yet
+//   textures/        atlas.png - the texture atlas, see atlas.js
 //
 // A newer program may add entries and fields; this one reads what it knows.
 //
@@ -19,12 +19,16 @@
 // object are in that object's own frame. (Version 1 had the vertices and the
 // pivot points in world coordinates, and no rotation.) The editor itself
 // works in world coordinates: modelOf() and worldModel() go between the two.
+//
+// Since version 3 the model is textured: `ppu` is the project's pixels per
+// unit of length, `atlas` the size of its texture atlas, and `uvs` where each
+// face's corners are on it, in pixels (see unwrap.js).
 
 import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
 
 const FORMAT = 'vertex-project';
-const VERSION = 2;
+const VERSION = 3;
 const UNTITLED = 'Без названия';
 
 const round = (value) => +value.toFixed(6);
@@ -42,6 +46,8 @@ function modelOf(editor) {
     // In the frame of the object each belongs to.
     vertices: mesh.vertices.map((vertex, i) => triple(toLocal(vertex, frames.get(mesh.vertexObject[i])))),
     faces: mesh.faces.map((face) => [...face]),
+    // Where each face's corners are on the atlas, in pixels (see unwrap.js); null = not placed.
+    uvs: mesh.faces.map((face) => (face.uv ? face.uv.map((point) => (point ? [round(point[0]), round(point[1])] : null)) : null)),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
     objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => {
@@ -66,6 +72,8 @@ function modelOf(editor) {
     vertexObject: [...mesh.vertexObject],
     nextObjectId: mesh.nextObjectId,
     mirror: [...editor.mirror.globalAxes],
+    ppu: editor.ppu,
+    atlas: { width: editor.atlas.width, height: editor.atlas.height },
     // Vertices scaled flat and the sides they came from, see Editor.scaleFlat().
     folds: [...mesh.folds].map(([i, fold]) => [i, { ...fold }]),
   };
@@ -128,7 +136,12 @@ function worldModel(model) {
   };
 }
 
-// Reads the entries of a project file back: { model, view }, checked - a
+// The same with the picture of the atlas, which takes a moment to pack.
+export async function projectFilesWithTextures(editor) {
+  return { ...projectFiles(editor), 'textures/atlas.png': await editor.atlas.png() };
+}
+
+// Reads the entries of a project file back: { model, view, atlas }, checked - a
 // file that is damaged or not ours is refused with an Error whose message
 // says what is wrong, rather than let half of it into the editor.
 export function readProject(files) {
@@ -178,6 +191,15 @@ export function readProject(files) {
     if (!sound) fail('объекты');
     ids.add(object.id);
   }
+  if (model.uvs !== undefined) {
+    const place = (point) => point === null || (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite));
+    const sound = Array.isArray(model.uvs) && model.uvs.length === model.faces.length && model.uvs.every((uv, i) =>
+      uv === null || (Array.isArray(uv) && uv.length === model.faces[i].length && uv.every(place)));
+    if (!sound) fail('развёртка');
+  }
+  if (model.ppu !== undefined && !(Number.isInteger(model.ppu) && model.ppu >= 1 && model.ppu <= 256)) fail('плотность пикселей');
+  const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;
+  if (model.atlas !== undefined && !(model.atlas && size(model.atlas.width) && size(model.atlas.height))) fail('размер атласа');
   const meshes = new Set(model.objects.filter((object) => object.kind !== 'group').map((object) => object.id));
   if (model.vertexObject.length !== count || !model.vertexObject.every((id) => meshes.has(id))) {
     fail('принадлежность вершин объектам');
@@ -191,7 +213,9 @@ export function readProject(files) {
   } catch {
     // The view is a convenience: without it the camera stays where it is.
   }
-  return { model: local ? worldModel(model) : model, view };
+  // The picture of the atlas, as the bytes of its file; a project from before there was one has none.
+  const atlas = files['textures/atlas.png'] instanceof Uint8Array && files['textures/atlas.png'].length ? files['textures/atlas.png'] : null;
+  return { model: local ? worldModel(model) : model, view, atlas };
 }
 
 // The project the editor is working on: its file, whether it has unsaved
@@ -263,7 +287,7 @@ export class Project extends EventTarget {
   // set. Returns whether it was written.
   async write(elsewhere) {
     if (this.editor.busy()) return false;
-    const result = await this.api.save(elsewhere ? null : this.path, projectFiles(this.editor));
+    const result = await this.api.save(elsewhere ? null : this.path, await projectFilesWithTextures(this.editor));
     if (!result) return false;
     if (result.error) {
       await this.api.alert('Не удалось сохранить проект', result.error);
@@ -299,6 +323,7 @@ export class Project extends EventTarget {
         return;
       }
       if (!this.editor.loadProject(project)) return;
+      if (project.atlas) await this.editor.atlas.load(project.atlas);
       this.path = result.path;
       this.savedState = this.editor.history.id;
       this.report();

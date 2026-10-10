@@ -180,7 +180,7 @@
           <button data-shading="solid">Сплошной</button>
           <button data-shading="wireframe">Каркас</button>
           <button data-shading="orientation" title="Лицевая сторона грани — голубая, обратная — красная (N)">Ориентация граней</button>
-          <button disabled title="Текстур и развёртки в программе пока нет">Текстуры <small>пока нет</small></button>
+          <button data-shading="textured" title="Модель с текстурой из атласа проекта">Текстура</button>
         </div>
       </div>
       <div id="overlap-toast">
@@ -268,6 +268,27 @@
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
       </div>
+      </section>
+      <section id="texture-section">
+        <h2>Текстура</h2>
+        <label title="Сколько пикселей текстуры приходится на единицу длины. Одно значение на весь проект: пиксель везде одного размера. При смене вся развёртка строится заново, нарисованное теряется">
+          <span>Пикселей на единицу</span>
+          <input id="ppu-input" type="text" inputmode="numeric" spellcheck="false">
+        </label>
+        <div class="texture-line" title="Размер атласа: он растёт сам, когда граням не хватает места">
+          <span>Атлас</span><b id="atlas-size"></b>
+        </div>
+        <div class="texture-buttons">
+          <button id="atlas-open" title="Открыть картинку атласа в программе для рисования. Она лежит рядом с файлом проекта; сохранённое там сразу видно на модели. Рядом кладётся файл-подсказка с контурами граней">
+            <i class="fa-solid fa-paintbrush"></i><span>Рисовать</span>
+          </button>
+          <button id="atlas-reveal" title="Показать файл атласа и файл с контурами граней в папке">
+            <i class="fa-regular fa-folder-open"></i>
+          </button>
+          <button id="atlas-repack" title="Разложить все грани на атласе заново, плотно. Нарисованное теряется (можно отменить)">
+            <i class="fa-solid fa-table-cells"></i>
+          </button>
+        </div>
       </section>
       <section id="stats">
         <h2 id="stats-title" title="Данные выделенных объектов; без выделения — всей сцены"></h2>

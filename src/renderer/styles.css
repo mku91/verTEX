@@ -602,6 +602,82 @@ body {
   background: var(--bg-raised); /* one with the splitter's strip on its left */
 }
 
+/* Texturing: the project's pixel density and its atlas. */
+#texture-section {
+  flex: none;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+#texture-section label,
+.texture-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+}
+
+#texture-section label .scrub-field {
+  flex: 0 0 84px;
+}
+
+#texture-section input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+#texture-section input:focus {
+  border-color: var(--accent);
+  outline: 0;
+}
+
+.texture-line b {
+  color: var(--text);
+  font-weight: 400;
+}
+
+.texture-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.texture-buttons button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.texture-buttons button:first-child {
+  flex: 1;
+}
+
+.texture-buttons button:hover {
+  background: var(--hover);
+}
+
+.texture-buttons i {
+  width: auto;
+  font-size: 12px;
+}
+
 /* The statistics sit at the bottom of the panel. */
 #panel #stats {
   flex: none;

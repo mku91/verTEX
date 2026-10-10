@@ -1,6 +1,7 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const path = require('node:path');
 const { registerProjectIo } = require('./project-io.js');
+const { registerAtlasFile } = require('./atlas-file.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
@@ -27,6 +28,7 @@ function createWindow() {
 }
 
 const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow });
+registerAtlasFile({ ipcMain, shell, BrowserWindow });
 
 // Menu items talk to the renderer through a single 'menu' channel.
 const send = (action) => (_item, win) => win?.webContents.send('menu', action);

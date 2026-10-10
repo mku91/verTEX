@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { EditableMesh, MeshView, edgeKey } from './mesh.js';
+import { EditableMesh, MeshView, edgeKey, cloneFace } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
+import { Atlas } from './atlas.js';
+import { unwrap, START_SIZE } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -120,6 +122,10 @@ export class Editor extends EventTarget {
     // The move and rotate gizmos stand along the axes of the object they move
     // (see setLocalAxes()) rather than the world's.
     this.localAxes = false;
+    // Texturing (see unwrap.js): the project's pixels per unit of length, and its atlas.
+    this.ppu = 16;
+    this.atlas = new Atlas();
+    this.atlas.addEventListener('change', () => this.viewport.requestRender());
     // The place tool: what is being placed (see beginPlace()), and the side it lies on.
     this.place = null;
     this.placeSide = '-y';
@@ -134,6 +140,7 @@ export class Editor extends EventTarget {
     this.mesh.addCube();
     this.mirror = new Mirror(this); // mirror modeling, see mirror.js
     this.view = new MeshView(this.mesh);
+    this.view.atlas = this.atlas;
     viewport.scene.add(this.view.group);
     // The vertex dots are hidden by the surface through a depth map of it.
     viewport.depthPass = {
@@ -141,6 +148,7 @@ export class Editor extends EventTarget {
       prepare: (camera, target) => this.view.prepareDepth(camera, target),
     };
     this.updateTopology();
+    this.layOut(); // the first object's faces take their places on the atlas
     this.target = new Set(this.mesh.vertices.keys());
 
     // How the drag code sees the main viewport; the orthographic views supply their own.
@@ -868,6 +876,78 @@ export class Editor extends EventTarget {
     return new THREE.Box3()
       .setFromPoints(vertices.map((i) => this.mesh.vertices[i].clone().applyQuaternion(back)))
       .getSize(new THREE.Vector3());
+  }
+
+  // --- texturing (see unwrap.js, atlas.js) ---------------------------------------
+
+  // Lays the faces out on the atlas as the model is now: every face gets its
+  // place, or keeps the one it has. Returns whether anything is where it was
+  // not. `repack` forgets the places and lays everything out anew.
+  layOut(repack = false) {
+    const result = unwrap(this.mesh, { ppu: this.ppu, width: this.atlas.width, height: this.atlas.height, repack });
+    const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
+    this.atlas.apply(result, this.mesh);
+    return result.changed || resized;
+  }
+
+  // What is wrong with the model, as [{ text }] - for now, faces that are not
+  // flat: such a face cannot lie on the atlas without stretch, which is the
+  // one thing the unwrap is there to rule out.
+  problems() {
+    const { faces, vertices, vertexObject, objects } = this.mesh;
+    const bent = new Map(); // object id -> how many
+    faces.forEach((face, index) => {
+      if (face.length < 4) return;
+      const normal = this.mesh.faceNormal(index);
+      if (normal.lengthSq() < 0.5) return;
+      const heights = face.map((i) => normal.dot(vertices[i]));
+      // Out of its plane by more than a tenth of a pixel.
+      if ((Math.max(...heights) - Math.min(...heights)) * this.ppu <= 0.1) return;
+      const owner = vertexObject[face[0]];
+      bent.set(owner, (bent.get(owner) ?? 0) + 1);
+    });
+    const plural = (count) => {
+      const n = count % 100;
+      if (n >= 11 && n <= 14) return 'неплоских граней';
+      return n % 10 === 1 ? 'неплоская грань' : n % 10 >= 2 && n % 10 <= 4 ? 'неплоские грани' : 'неплоских граней';
+    };
+    return [...bent].map(([id, count]) => ({
+      text: `${count} ${plural(count)}: текстура ляжет с искажением · ${objects.find((object) => object.id === id)?.name ?? ''}`,
+    }));
+  }
+
+  // Takes a new picture for the atlas from the bytes of an image file - the
+  // painter's work, done outside. One undo step. Returns false if the bytes
+  // are no picture.
+  async paintAtlas(bytes) {
+    const before = this.snapshot();
+    if (!(await this.atlas.load(bytes, true))) return false;
+    const now = this.atlas.pixels().data;
+    if (now.length === before.atlas.data.length && now.every((value, i) => value === before.atlas.data[i])) return true;
+    this.history.push(before);
+    this.emitChange();
+    return true;
+  }
+
+  // The project's pixels per unit of length: the whole model is laid out anew at it.
+  setPPU(ppu) {
+    ppu = Math.round(ppu);
+    if (!(ppu >= 1 && ppu <= 256) || ppu === this.ppu || this.busy()) return;
+    this.history.push(this.snapshot());
+    this.ppu = ppu;
+    this.repackAtlas(false);
+  }
+
+  // Lays the whole model out on the atlas from scratch, as tightly as it
+  // goes. What was painted is lost: the places are new.
+  repackAtlas(record = true) {
+    if (this.busy()) return;
+    if (record) this.history.push(this.snapshot());
+    this.atlas.reset(START_SIZE, START_SIZE);
+    this.layOut(true);
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
   }
 
   // --- marker colours (see marker-colors.js) ------------------------------------
@@ -2731,7 +2811,11 @@ export class Editor extends EventTarget {
       }),
       vertices: vertices.map((vertex) => mesh.vertices[vertex].clone()),
       vertexObject: vertices.map((vertex) => mesh.vertexObject[vertex]),
-      faces: mesh.faces.filter((face) => place.has(face[0])).map((face) => face.map((vertex) => place.get(vertex))),
+      faces: mesh.faces.filter((face) => place.has(face[0])).map((face) => {
+        const copy = cloneFace(face);
+        face.forEach((vertex, k) => { copy[k] = place.get(vertex); });
+        return copy;
+      }),
       wires: mesh.wires.filter(([a]) => place.has(a)).map((wire) => wire.map((vertex) => place.get(vertex))),
     };
     return true;
@@ -2768,7 +2852,11 @@ export class Editor extends EventTarget {
     clip.vertices.forEach((point, k) => {
       mesh.addVertex(point.x, point.y, point.z, made.get(clip.vertexObject[k]).id);
     });
-    for (const face of clip.faces) mesh.addFace(face.map((vertex) => base + vertex));
+    for (const face of clip.faces) {
+      const copy = cloneFace(face);
+      face.forEach((vertex, k) => { copy[k] = base + vertex; });
+      mesh.addFace(copy);
+    }
     for (const wire of clip.wires) mesh.wires.push(wire.map((vertex) => base + vertex));
 
     this.selection = new Set(clip.vertices.map((_, k) => base + k));
@@ -2846,7 +2934,10 @@ export class Editor extends EventTarget {
     const faces = this.facesToFlip();
     if (faces.length === 0 || this.busy()) return;
     const before = this.snapshot();
-    for (const index of faces) this.mesh.faces[index].reverse();
+    for (const index of faces) {
+      this.mesh.faces[index].reverse();
+      this.mesh.faces[index].uv?.reverse(); // its corners' places, in step
+    }
     this.edited(before);
     this.rebuildView();
     this.placeGizmo();
@@ -2924,7 +3015,12 @@ export class Editor extends EventTarget {
     this.cancelBox();
     const { mesh } = this;
     mesh.vertices = model.vertices.map(([x, y, z]) => new THREE.Vector3(x, y, z));
-    mesh.faces = model.faces.map((face) => [...face]);
+    mesh.faces = model.faces.map((face, i) => {
+      const loop = [...face];
+      const uv = model.uvs?.[i];
+      if (uv) loop.uv = uv.map((point) => (point ? [point[0], point[1]] : null));
+      return loop;
+    });
     mesh.wires = model.wires.map((wire) => [...wire]);
     mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => ({
       id,
@@ -2942,6 +3038,10 @@ export class Editor extends EventTarget {
     const highest = mesh.objects.reduce((most, object) => Math.max(most, object.id), 0);
     mesh.nextObjectId = Math.max(model.nextObjectId ?? 0, highest + 1);
     mesh.folds = new Map((model.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
+    // Its texturing: the density, and an atlas of its size - empty until the
+    // picture is loaded into it (a project without one gets the template).
+    this.ppu = model.ppu ?? 16;
+    this.atlas.reset(model.atlas?.width ?? START_SIZE, model.atlas?.height ?? START_SIZE);
 
     this.history = new History();
     this.clipboard = null;
@@ -3067,7 +3167,7 @@ export class Editor extends EventTarget {
   snapshot() {
     return {
       vertices: this.mesh.vertices.map((vertex) => vertex.clone()),
-      faces: this.mesh.faces.map((face) => [...face]),
+      faces: this.mesh.faces.map(cloneFace),
       wires: this.mesh.wires.map((wire) => [...wire]),
       objects: this.mesh.objects.map((object) => ({ ...object })),
       vertexObject: [...this.mesh.vertexObject],
@@ -3076,18 +3176,22 @@ export class Editor extends EventTarget {
       selection: [...this.selection],
       target: [...this.target],
       mirror: [...this.mirror.globalAxes],
+      ppu: this.ppu,
+      atlas: this.atlas.pixels(), // the picture is part of the document
     };
   }
 
   restore(state) {
     this.mesh.vertices = state.vertices.map((vertex) => vertex.clone());
-    this.mesh.faces = state.faces.map((face) => [...face]);
+    this.mesh.faces = state.faces.map(cloneFace);
     this.mesh.wires = state.wires.map((wire) => [...wire]);
     // A state from before objects existed has none; the mesh then makes them up.
     this.mesh.objects = (state.objects ?? []).map((object) => ({ ...object }));
     this.mesh.vertexObject = [...(state.vertexObject ?? [])];
     this.mesh.nextObjectId = Math.max(this.mesh.nextObjectId, state.nextObjectId ?? 1);
     this.mirror.globalAxes = new Set(state.mirror ?? []);
+    this.ppu = state.ppu ?? this.ppu;
+    if (state.atlas) this.atlas.setPixels(state.atlas);
     this.mesh.folds = new Map((state.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
     this.selection = new Set(state.selection);
     this.target = new Set(state.target);
@@ -3103,7 +3207,11 @@ export class Editor extends EventTarget {
   edited(before) {
     this.history.push(before);
     const remap = this.mirror.reconcile(before);
-    if (!remap) return;
+    if (!remap) {
+      // Nothing was added or taken away, but faces may have changed shape.
+      if (this.layOut()) this.view.updateUVs();
+      return;
+    }
     const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
     this.selection = kept(this.selection);
     this.target = kept(this.target);
@@ -3222,6 +3330,7 @@ export class Editor extends EventTarget {
     this.hovered = null;
     this.viewport.renderer.domElement.style.cursor = '';
     this.updateTopology(); // first: it tells the view what is hidden
+    this.layOut();
     this.view.rebuild();
     this.adoptSelection();
     this.refreshHighlight();

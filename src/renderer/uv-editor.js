@@ -230,6 +230,7 @@ export class UVEditor {
       const marker = this.markerAt(event.clientX, event.clientY);
       if (marker) {
         this.drag = { marker, place: [marker.x, marker.y], moved: false };
+        canvas.style.cursor = 'grabbing';
         return;
       }
       const chart = this.chartAt(this.toAtlas(event.clientX, event.clientY));
@@ -243,7 +244,8 @@ export class UVEditor {
         if (chart !== this.hovered || marker?.vertex !== this.hoveredMarker?.vertex || marker?.chart !== this.hoveredMarker?.chart) {
           this.hovered = chart;
           this.hoveredMarker = marker;
-          canvas.style.cursor = marker ? 'crosshair' : chart ? 'grab' : '';
+          // A hand on a marker, which is there to be dragged; the plain pointer everywhere else.
+          canvas.style.cursor = marker ? 'grab' : '';
           this.draw();
         }
         return;
@@ -275,7 +277,6 @@ export class UVEditor {
         if (!this.pickedCharts().includes(drag.chart)) this.pick(drag.chart, drag.additive);
         drag.charts = this.pickedCharts();
         drag.lead = drag.charts.find((chart) => chart.faces.includes(drag.chart.faces[0])) ?? drag.charts[0];
-        canvas.style.cursor = 'grabbing';
       }
       const shift = this.snapped(drag, (event.clientX - drag.x) / this.zoom, (event.clientY - drag.y) / this.zoom);
       if (shift[0] === drag.shift[0] && shift[1] === drag.shift[1]) return;
@@ -294,10 +295,10 @@ export class UVEditor {
         const settled = event.type === 'pointerup' && drag.moved && (drag.place[0] !== x || drag.place[1] !== y);
         if (settled) editor.shapeCorner(chart.faces, vertex, drag.place, true);
         else editor.previewCharts(chart.faces, null);
+        canvas.style.cursor = this.markerAt(event.clientX, event.clientY) ? 'grab' : '';
         this.draw();
         return;
       }
-      canvas.style.cursor = this.hovered ? 'grab' : '';
       if (!drag.moved) {
         // A click: picks the chart, or with nothing under the pointer picks nothing.
         if (event.type === 'pointerup') this.pick(drag.chart, drag.additive);

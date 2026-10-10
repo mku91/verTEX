@@ -565,6 +565,16 @@ body {
   font-size: 12px;
 }
 
+/* The shape lock, open: corners can be dragged. */
+.uv-bar button.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.uv-bar button.active:hover:enabled {
+  background: var(--accent);
+}
+
 /* A button with its name on it. */
 .uv-bar button.worded {
   gap: 6px;

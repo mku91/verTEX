@@ -22,6 +22,12 @@ import { quaternionOf } from './frames.js';
 // Nothing is laid out unasked: an object is put on the atlas by the user
 // (`atlas` on the object), and only then do its faces get places.
 //
+// The one way out of all this is the user's own: a face whose shape on the
+// atlas the user has changed by hand is `shaped`. Its places are then the
+// user's altogether - it is not laid flat again, so it may be stretched and
+// skewed, which is the price of fitting its edges to the pixels - until it is
+// given back to the unwrap.
+//
 // A chart the user has placed by hand is pinned (`pin` on its faces): it stays
 // where it was put whatever else is there - that is how several faces are
 // given the same picture - and only the charts that are not pinned keep out
@@ -61,7 +67,8 @@ export function chartsOf(mesh, ppu) {
   const offsets = faces.map((face, i) => normals[i].dot(vertices[face[0]]));
   // Only the objects the user has put on the atlas are laid out on it.
   const onAtlas = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
-  const sound = (i) => normals[i].lengthSq() > 0.5 && onAtlas.has(vertexObject[faces[i][0]]);
+  // (Shaped faces are not laid out: see shapedCharts().)
+  const sound = (i) => normals[i].lengthSq() > 0.5 && onAtlas.has(vertexObject[faces[i][0]]) && !faces[i].shaped;
 
   // Faces that share an edge and a plane are one chart.
   const root = faces.map((_, i) => i);
@@ -117,6 +124,89 @@ export function chartsOf(mesh, ppu) {
     const width = Math.max(...[...flat.values()].map(([x]) => x));
     const height = Math.max(...[...flat.values()].map(([, y]) => y));
     return { faces: members, object, normal, flat, width, height, pinned: members.some((i) => faces[i].pin) };
+  });
+}
+
+// The faces whose shape on the atlas is the user's, as charts - the pieces
+// they hang together in there, by edges whose ends have the same places in
+// both faces - each { faces, rect, pinned, shaped }. A corner that has no
+// place (the face was cut since) gets one between its neighbours'; a face
+// that cannot be kept so - none of its corners has a place, or its object is
+// off the atlas - is the unwrap's again.
+function shapedCharts(mesh) {
+  const { faces, vertices, vertexObject, objects } = mesh;
+  const onAtlas = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
+  const members = [];
+  faces.forEach((face, i) => {
+    if (!face.shaped) return;
+    if (!face.uv || !face.uv.some(Boolean) || !onAtlas.has(vertexObject[face[0]])) {
+      delete face.shaped;
+      return;
+    }
+    if (face.uv.some((place) => !place)) {
+      // Along the face's outline from one placed corner to the next, by distance.
+      const count = face.length;
+      const filled = [...face.uv];
+      for (let k = 0; k < count; k++) {
+        if (face.uv[k]) continue;
+        let before = k;
+        let after = k;
+        while (!face.uv[before]) before = (before - 1 + count) % count;
+        while (!face.uv[after]) after = (after + 1) % count;
+        let gone = 0; // from the placed corner before it to this one
+        let whole = 0; // and on to the placed corner after it
+        let reached = false;
+        for (let j = before; j !== after; j = (j + 1) % count) {
+          if (j === k) reached = true;
+          const step = vertices[face[j]].distanceTo(vertices[face[(j + 1) % count]]);
+          whole += step;
+          if (!reached) gone += step;
+        }
+        const t = whole > 0 ? gone / whole : 0.5;
+        filled[k] = [0, 1].map((axis) => tidy(face.uv[before][axis] + (face.uv[after][axis] - face.uv[before][axis]) * t));
+      }
+      face.uv = filled;
+    }
+    members.push(i);
+  });
+
+  const root = new Map(members.map((i) => [i, i]));
+  const find = (i) => {
+    while (root.get(i) !== i) i = root.get(i);
+    return i;
+  };
+  const byEdge = new Map();
+  for (const i of members) {
+    const face = faces[i];
+    face.forEach((a, k) => {
+      const next = (k + 1) % face.length;
+      const key = edgeKey(a, face[next]);
+      const ends = new Map([[a, face.uv[k]], [face[next], face.uv[next]]]);
+      const other = byEdge.get(key);
+      if (!other) {
+        byEdge.set(key, { face: i, ends });
+        return;
+      }
+      const same = [...ends].every(([vertex, place]) => {
+        const there = other.ends.get(vertex);
+        return there && Math.abs(there[0] - place[0]) < 1e-6 && Math.abs(there[1] - place[1]) < 1e-6;
+      });
+      if (same) root.set(find(i), find(other.face));
+    });
+  }
+  const groups = new Map();
+  for (const i of members) {
+    const key = find(i);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+  return [...groups.values()].map((group) => {
+    const places = group.flatMap((i) => faces[i].uv);
+    const x = Math.floor(Math.min(...places.map((place) => place[0])) + 1e-6);
+    const y = Math.floor(Math.min(...places.map((place) => place[1])) + 1e-6);
+    const w = Math.max(1, Math.ceil(Math.max(...places.map((place) => place[0])) - 1e-6) - x);
+    const h = Math.max(1, Math.ceil(Math.max(...places.map((place) => place[1])) - 1e-6) - y);
+    return { faces: group, rect: { x, y, w, h }, pinned: true, shaped: true };
   });
 }
 
@@ -202,6 +292,15 @@ class Room {
     return true;
   }
 
+  // Holds a rectangle that may reach off the atlas, for a shaped chart: what of it is on the atlas.
+  hold({ x, y, w, h }) {
+    for (let row = Math.max(0, y); row < Math.min(this.height, y + h); row++) {
+      const from = Math.max(0, x);
+      const to = Math.min(this.width, x + w);
+      if (to > from) this.held.fill(1, row * this.width + from, row * this.width + to);
+    }
+  }
+
   // Takes the rectangle and its rim, for a chart that keeps its room to itself or for a pinned one.
   take(x, y, w, h, pinned = false) {
     const room = pinned ? this.held : this.taken;
@@ -241,8 +340,13 @@ class Room {
 //                  chart that had to move, to be copied to where it is now
 //   changed        whether any face's places are not what they were
 export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, repack = false }) {
+  // A repack gives every face back to the unwrap, the shaped ones too.
+  if (repack) for (const face of mesh.faces) delete face.shaped;
+  // The shaped faces first: they are as they are, and the rest keeps off their room.
+  const shaped = shapedCharts(mesh);
   const charts = chartsOf(mesh, ppu);
   let room = new Room(width, height);
+  for (const chart of shaped) room.hold(chart.rect);
   const fresh = [];
   const moved = [];
 
@@ -288,7 +392,8 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
 
   let changed = false;
   // A face that is in no chart - its object is not on the atlas - has no place.
-  const placed = new Set(charts.flatMap((chart) => chart.faces));
+  const placed = new Set([...charts, ...shaped].flatMap((chart) => chart.faces));
+  for (const chart of shaped) for (const i of chart.faces) mesh.faces[i].pin = true;
   mesh.faces.forEach((face, i) => {
     if (placed.has(i) || (!face.uv && !face.pin)) return;
     delete face.uv;
@@ -314,7 +419,7 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
       else delete face.pin;
     }
   }
-  return { width: room.width, height: room.height, charts, fresh, moved, changed };
+  return { width: room.width, height: room.height, charts: [...charts, ...shaped], fresh, moved, changed };
 }
 
 export { START_SIZE };

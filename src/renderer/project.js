@@ -50,6 +50,8 @@ function modelOf(editor) {
     uvs: mesh.faces.map((face) => (face.uv ? face.uv.map((point) => (point ? [round(point[0]), round(point[1])] : null)) : null)),
     // The faces placed on the atlas by hand, which the unwrap leaves where they are.
     pins: mesh.faces.map((face, i) => (face.pin ? i : -1)).filter((i) => i >= 0),
+    // And those whose shape there was changed by hand, which the unwrap does not lay flat again.
+    shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
     objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas }) => {
@@ -201,6 +203,7 @@ export function readProject(files) {
       uv === null || (Array.isArray(uv) && uv.length === model.faces[i].length && uv.every(place)));
     if (!sound) fail('развёртка');
   }
+  if (model.shaped !== undefined && !(Array.isArray(model.shaped) && model.shaped.every((i) => isIndex(i, model.faces.length)))) fail('грани с изменённой развёрткой');
   if (model.pins !== undefined && !(Array.isArray(model.pins) && model.pins.every((i) => isIndex(i, model.faces.length)))) fail('закреплённые грани');
   if (model.ppu !== undefined && !(Number.isInteger(model.ppu) && model.ppu >= 1 && model.ppu <= 256)) fail('плотность пикселей');
   const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;

@@ -203,7 +203,7 @@ export class Atlas extends EventTarget {
       // The pixels the chart's faces show: what is the painter's in its room.
       const pixels = new Set();
       for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
-      return { rect: chart.rect, polygons, pixels, faces: chart.faces, pinned: chart.pinned };
+      return { rect: chart.rect, polygons, pixels, faces: chart.faces, pinned: chart.pinned, shaped: Boolean(chart.shaped) };
     });
     if (this.template) {
       // New rooms, and those a chart has moved to: it moved because it grew,

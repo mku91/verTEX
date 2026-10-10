@@ -965,6 +965,47 @@ export class Editor extends EventTarget {
     this.viewport.requestRender();
   }
 
+  // Changes the shape a chart has on the atlas: the corner at `vertex` (of the
+  // charts that hold any of the given faces) goes to `place`, [x, y] in
+  // pixels. That stretches the faces there, which nothing else here does;
+  // they are the user's from then on (`shaped`, see unwrap.js). With `settle`
+  // off it is only shown, as the corner is dragged; on, it is done: one undo step.
+  shapeCorner(faces, vertex, place, settle = true) {
+    if (this.chartPreview) this.previewCharts(faces, null);
+    const charts = this.chartsOfFaces(faces).filter((chart) => chart.faces.some((index) => this.mesh.faces[index].includes(vertex)));
+    if (charts.length === 0 || this.busy()) return false;
+    const moves = charts.some((chart) => chart.faces.some((index) => {
+      const face = this.mesh.faces[index];
+      const corner = face.indexOf(vertex);
+      return corner >= 0 && (face.uv[corner][0] !== place[0] || face.uv[corner][1] !== place[1]);
+    }));
+    if (settle && !moves) return false;
+    const before = settle ? this.snapshot() : null;
+    if (!settle) this.chartPreview = new Map();
+    const changed = moves;
+    for (const chart of charts) {
+      for (const index of chart.faces) {
+        const face = this.mesh.faces[index];
+        const corner = face.indexOf(vertex);
+        if (!settle) this.chartPreview.set(face, face.uv);
+        if (corner >= 0) face.uv = face.uv.map((point, k) => (k === corner ? [place[0], place[1]] : point));
+        if (settle) {
+          // The whole chart: its other faces keep their shape, but are not laid out apart from it.
+          face.shaped = true;
+          face.pin = true;
+        }
+      }
+    }
+    if (settle && changed) {
+      this.history.push(before);
+      this.layOut(false, false);
+      this.emitChange();
+    }
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    return changed;
+  }
+
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
   // given faces. Only the faces' places change, not the picture: this is how
   // a face is given another picture, or several faces the same one.
@@ -984,8 +1025,9 @@ export class Editor extends EventTarget {
       const members = chart.faces.map((index) => this.mesh.faces[index]);
       if (how.auto) {
         for (const face of members) {
-          if (face.pin) changed = true;
+          if (face.pin || face.shaped) changed = true;
           delete face.pin;
+          delete face.shaped; // laid flat again: its shape is the unwrap's
         }
         continue;
       }
@@ -3188,6 +3230,7 @@ export class Editor extends EventTarget {
       const uv = model.uvs?.[i];
       if (uv) loop.uv = uv.map((point) => (point ? [point[0], point[1]] : null));
       if (model.pins?.includes(i)) loop.pin = true;
+      if (model.shaped?.includes(i)) loop.shaped = true;
       return loop;
     });
     mesh.wires = model.wires.map((wire) => [...wire]);

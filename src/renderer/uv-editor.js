@@ -9,6 +9,11 @@ import { theme, onThemeChange } from './theme.js';
 // no pixel is painted or moved here; only where the faces look changes. A
 // chart placed so is pinned (see unwrap.js), and "auto" gives it back.
 //
+// With the shape lock open the picked charts have a marker at every corner,
+// and a marker can be dragged, by whole pixels: that changes the shape the
+// faces have on the atlas - stretches them, which nothing else does - so
+// that their edges can be made to lie along the pixels' edges.
+//
 //   LMB on a chart       pick it (Shift adds); the faces are selected in the scene too
 //   LMB drag             move the picked charts, by whole pixels
 //   wheel                zoom at the pointer
@@ -18,6 +23,9 @@ const MAX_ZOOM = 64;
 const GRID_FROM = 8; // px per pixel from which the pixel grid is drawn
 const CLICK = 4; // px of pointer travel that is still a click
 const SNAP = 3; // atlas px within which a dragged chart jumps onto another's room
+const MARKER = 4.5; // px, the radius of a corner's marker
+const MARKER_REACH = 8; // px within which a marker is taken
+const SHAPED = '#ffb86c'; // the outline of a chart whose shape was changed by hand
 
 export class UVEditor {
   constructor(container, editor) {
@@ -29,6 +37,8 @@ export class UVEditor {
     this.hovered = null; // a chart of editor.atlas.charts
     this.drag = null;
     this.fitted = ''; // the atlas size the view was last fitted to
+    this.shaping = false; // the shape lock is open: corners can be dragged
+    this.hoveredMarker = null;
 
     this.canvas = container.querySelector('canvas');
     this.context = this.canvas.getContext('2d');
@@ -70,9 +80,12 @@ export class UVEditor {
     if (size !== this.fitted && this.canvas.clientWidth > 0) this.fit();
     const charts = this.pickedCharts();
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
+      if (!['fit', 'add', 'remove', 'shape'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
     }
     this.container.querySelector('[data-uv="auto"]').disabled = !charts.some((chart) => chart.pinned);
+    const lock = this.container.querySelector('[data-uv="shape"]');
+    lock.classList.toggle('active', this.shaping);
+    lock.firstElementChild.className = `fa-solid ${this.shaping ? 'fa-lock-open' : 'fa-lock'}`;
     // Nothing is on the atlas unasked: the objects in hand are put there, or taken off.
     const { objects } = this.editor.mesh;
     const hand = this.editor.objectsInHand().map((index) => objects[index]);
@@ -86,7 +99,7 @@ export class UVEditor {
         ? 'Клик по грани на атласе выбирает её лоскут'
         : 'Атлас пуст: выберите объект и нажмите «Создать атлас»'
       : charts.length === 1
-        ? `${charts[0].rect.w} × ${charts[0].rect.h} px, место ${charts[0].rect.x}, ${charts[0].rect.y}${charts[0].pinned ? ' · закреплён' : ''}`
+        ? `${charts[0].rect.w} × ${charts[0].rect.h} px, место ${charts[0].rect.x}, ${charts[0].rect.y}${charts[0].shaped ? ' · форма изменена' : charts[0].pinned ? ' · закреплён' : ''}`
         : `Лоскутов: ${charts.length}`;
     this.draw();
   }
@@ -96,6 +109,10 @@ export class UVEditor {
     if (name === 'fit') {
       this.fit();
       this.draw();
+    } else if (name === 'shape') {
+      this.shaping = !this.shaping;
+      this.hoveredMarker = null;
+      this.update();
     } else if (name === 'add') this.editor.setOnAtlas(this.editor.objectsInHand(), true);
     else if (name === 'remove') this.editor.setOnAtlas(this.editor.objectsInHand(), false);
     else if (name === 'turn-left') this.editor.placeCharts(faces, { turn: -1 });
@@ -126,6 +143,47 @@ export class UVEditor {
     return { x: (clientX - rect.left - this.origin.x) / this.zoom, y: (clientY - rect.top - this.origin.y) / this.zoom };
   }
 
+  // A chart's faces on the atlas as they are this moment (a drag in progress changes them).
+  polygons(chart) {
+    return chart.faces.map((index) => this.editor.mesh.faces[index]?.uv).filter(Boolean);
+  }
+
+  // The corners of the picked charts, while the shape lock is open: each
+  // { chart, vertex, x, y } - a vertex of the model and its place on the atlas.
+  markers() {
+    if (!this.shaping) return [];
+    const { faces } = this.editor.mesh;
+    const found = [];
+    for (const chart of this.pickedCharts()) {
+      const seen = new Set();
+      for (const index of chart.faces) {
+        const face = faces[index];
+        if (!face?.uv) continue;
+        face.forEach((vertex, k) => {
+          if (seen.has(vertex) || !face.uv[k]) return;
+          seen.add(vertex);
+          found.push({ chart, vertex, x: face.uv[k][0], y: face.uv[k][1] });
+        });
+      }
+    }
+    return found;
+  }
+
+  // The marker at a point of the screen, or null.
+  markerAt(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    let best = null;
+    let nearest = MARKER_REACH;
+    for (const marker of this.markers()) {
+      const off = Math.hypot(rect.left + this.origin.x + marker.x * this.zoom - clientX, rect.top + this.origin.y + marker.y * this.zoom - clientY);
+      if (off < nearest) {
+        nearest = off;
+        best = marker;
+      }
+    }
+    return best;
+  }
+
   // The chart under a place on the atlas: the smallest of those whose faces
   // hold it (charts may lie on each other), or null.
   chartAt({ x, y }) {
@@ -138,7 +196,7 @@ export class UVEditor {
       }
       return within;
     };
-    const hit = this.editor.atlas.charts.filter((chart) => chart.polygons.some(inside));
+    const hit = this.editor.atlas.charts.filter((chart) => this.polygons(chart).some(inside));
     hit.sort((a, b) => a.rect.w * a.rect.h - b.rect.w * b.rect.h);
     return hit[0] ?? null;
   }
@@ -168,18 +226,40 @@ export class UVEditor {
         return;
       }
       if (editor.busy()) return;
+      // A corner's marker first: it lies on the chart it belongs to.
+      const marker = this.markerAt(event.clientX, event.clientY);
+      if (marker) {
+        this.drag = { marker, place: [marker.x, marker.y], moved: false };
+        return;
+      }
       const chart = this.chartAt(this.toAtlas(event.clientX, event.clientY));
       this.drag = { chart, x: event.clientX, y: event.clientY, additive: event.shiftKey, moved: false, shift: [0, 0] };
     });
     canvas.addEventListener('pointermove', (event) => {
       const { drag } = this;
       if (!drag) {
-        const chart = this.chartAt(this.toAtlas(event.clientX, event.clientY));
-        if (chart !== this.hovered) {
+        const marker = this.markerAt(event.clientX, event.clientY);
+        const chart = marker ? null : this.chartAt(this.toAtlas(event.clientX, event.clientY));
+        if (chart !== this.hovered || marker?.vertex !== this.hoveredMarker?.vertex || marker?.chart !== this.hoveredMarker?.chart) {
           this.hovered = chart;
-          canvas.style.cursor = chart ? 'grab' : '';
+          this.hoveredMarker = marker;
+          canvas.style.cursor = marker ? 'crosshair' : chart ? 'grab' : '';
           this.draw();
         }
+        return;
+      }
+      if (drag.marker) {
+        // The corner goes to the pixel corner nearest the pointer, on the atlas.
+        const at = this.toAtlas(event.clientX, event.clientY);
+        const place = [
+          Math.max(0, Math.min(editor.atlas.width, Math.round(at.x))),
+          Math.max(0, Math.min(editor.atlas.height, Math.round(at.y))),
+        ];
+        if (place[0] === drag.place[0] && place[1] === drag.place[1]) return;
+        drag.place = place;
+        drag.moved = true;
+        editor.shapeCorner(drag.marker.chart.faces, drag.marker.vertex, place, false);
+        this.draw();
         return;
       }
       if (drag.pan) {
@@ -208,6 +288,15 @@ export class UVEditor {
       const { drag } = this;
       this.drag = null;
       if (!drag || drag.pan) return;
+      if (drag.marker) {
+        // Let go: the corner stays where it was dragged to, or, if the drag was broken off, goes back.
+        const { chart, vertex, x, y } = drag.marker;
+        const settled = event.type === 'pointerup' && drag.moved && (drag.place[0] !== x || drag.place[1] !== y);
+        if (settled) editor.shapeCorner(chart.faces, vertex, drag.place, true);
+        else editor.previewCharts(chart.faces, null);
+        this.draw();
+        return;
+      }
       canvas.style.cursor = this.hovered ? 'grab' : '';
       if (!drag.moved) {
         // A click: picks the chart, or with nothing under the pointer picks nothing.
@@ -320,7 +409,7 @@ export class UVEditor {
     const picked = new Set(this.pickedCharts());
     const outline = (chart, shift = [0, 0]) => {
       context.beginPath();
-      for (const polygon of chart.polygons) {
+      for (const polygon of this.polygons(chart)) {
         polygon.forEach(([x, y], k) => {
           const px = origin.x + (x + shift[0]) * zoom;
           const py = origin.y + (y + shift[1]) * zoom;
@@ -334,16 +423,29 @@ export class UVEditor {
       if (picked.has(chart)) continue;
       outline(chart);
       context.lineWidth = chart === this.hovered ? 2 : 1;
-      context.strokeStyle = chart === this.hovered ? theme.hovered : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
+      context.strokeStyle = chart === this.hovered ? theme.hovered : chart.shaped ? SHAPED : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
       context.stroke();
     }
-    const shift = this.drag?.moved ? this.drag.shift : [0, 0];
+    const shift = this.drag?.moved && this.drag.shift ? this.drag.shift : [0, 0]; // (a marker's drag shifts no chart)
     for (const chart of picked) {
       outline(chart, shift[0] || shift[1] ? editor.chartShift(chart, shift[0], shift[1]) : shift);
       context.fillStyle = 'rgba(80, 250, 123, 0.18)';
       context.fill();
       context.lineWidth = 2;
       context.strokeStyle = theme.box;
+      context.stroke();
+    }
+    // The corners, with the shape lock open: a round marker on each.
+    for (const marker of this.markers()) {
+      const hot = this.drag?.marker
+        ? this.drag.marker.vertex === marker.vertex && this.drag.marker.chart === marker.chart
+        : this.hoveredMarker?.vertex === marker.vertex && this.hoveredMarker?.chart === marker.chart;
+      context.beginPath();
+      context.arc(origin.x + marker.x * zoom, origin.y + marker.y * zoom, hot ? MARKER + 1.5 : MARKER, 0, Math.PI * 2);
+      context.fillStyle = hot ? theme.box : '#f8f8f2';
+      context.fill();
+      context.lineWidth = 1.5;
+      context.strokeStyle = '#191a21';
       context.stroke();
     }
   }

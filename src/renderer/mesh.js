@@ -438,6 +438,7 @@ export class EditableMesh {
         const merged = loop.filter((_, k) => stays[k]);
         if (face.uv) merged.uv = face.uv.filter((_, k) => stays[k]);
         if (face.pin) merged.pin = true;
+        if (face.shaped) merged.shaped = true;
         return merged;
       })
       .filter((face) => {
@@ -710,7 +711,25 @@ export class EditableMesh {
         // Both halves keep the winding of the original face.
         pieces.splice(index, 1, piece.slice(p, q + 1), [...piece.slice(q), ...piece.slice(0, p + 1)]);
       }
-      for (const piece of pieces) inheritUV(piece, face);
+      // The vertices cut into the face's edges get places on the atlas
+      // between those of the edges' ends, and the pieces their corners'.
+      if (face.uv) {
+        const places = new Map(face.map((vertex, k) => [vertex, face.uv[k]]));
+        loop.uv = loop.map((vertex, k) => {
+          if (places.has(vertex)) return places.get(vertex);
+          const a = loop[(k - 1 + loop.length) % loop.length];
+          const b = loop[(k + 1) % loop.length];
+          const from = places.get(a);
+          const to = places.get(b);
+          if (!from || !to) return null;
+          const whole = this.vertices[a].distanceTo(this.vertices[b]);
+          const t = whole > 0 ? this.vertices[a].distanceTo(this.vertices[vertex]) / whole : 0.5;
+          return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
+        });
+      }
+      if (face.pin) loop.pin = true;
+      if (face.shaped) loop.shaped = true;
+      for (const piece of pieces) inheritUV(piece, loop);
       this.faces[faceIndex] = pieces[0];
       for (const piece of pieces.slice(1)) this.faces.push(piece);
       if (pieces.length > 1) changed = true;
@@ -767,6 +786,7 @@ export class EditableMesh {
       const cap = this.faces[faceIndex].map((vertex) => copies.get(vertex));
       if (this.faces[faceIndex].uv) cap.uv = this.faces[faceIndex].uv;
       if (this.faces[faceIndex].pin) cap.pin = true;
+      if (this.faces[faceIndex].shaped) cap.shaped = true;
       this.faces[faceIndex] = cap;
     }
     this.faces.push(...sides);
@@ -914,6 +934,7 @@ export class EditableMesh {
         const renumbered = face.map((i) => remap.get(i));
         if (face.uv) renumbered.uv = face.uv;
         if (face.pin) renumbered.pin = true;
+        if (face.shaped) renumbered.shaped = true;
         return renumbered;
       });
     this.wires = this.wires
@@ -1099,7 +1120,9 @@ export const ATLAS = 'main';
 // `uv` - where the face's corners are on the texture atlas, in pixels: an
 // array in step with the loop, of [x, y] or null for a corner that has no
 // place yet (see unwrap.js, which gives them) - and `pin`, set when the user
-// has put the face there by hand, which the unwrap then leaves alone. They
+// has put the face there by hand, which the unwrap then leaves alone, and
+// `shaped`, set when the user has changed the shape the face has there, after
+// which its places are the user's altogether (see unwrap.js). They
 // are properties of the array itself, so a face that is merely moved keeps
 // them without anyone's care; code that makes a new array for an old face
 // carries them over with these.
@@ -1109,6 +1132,7 @@ export function cloneFace(face) {
   const copy = [...face];
   if (face.uv) copy.uv = face.uv.map((point) => (point ? [point[0], point[1]] : null));
   if (face.pin) copy.pin = true;
+  if (face.shaped) copy.shaped = true;
   return copy;
 }
 
@@ -1117,6 +1141,7 @@ export function cloneFace(face) {
 // `before` maps a vertex of the new loop to what it was in the old one.
 export function inheritUV(loop, source, before = (vertex) => vertex) {
   if (source.pin) loop.pin = true;
+  if (source.shaped) loop.shaped = true;
   if (!source.uv) return loop;
   const places = new Map(source.map((vertex, k) => [vertex, source.uv[k]]));
   loop.uv = loop.map((vertex) => {

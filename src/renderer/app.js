@@ -10,6 +10,7 @@ import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles } from './project.js';
 import { AtlasLink } from './atlas-link.js';
+import { UVEditor } from './uv-editor.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
 
@@ -19,6 +20,7 @@ const viewport = new Viewport(document.getElementById('viewport'));
 const editor = new Editor(viewport);
 new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
+const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
 new Outliner(document.getElementById('outliner-section'), editor);
@@ -32,7 +34,8 @@ const ACTIONS = {
     editor.frame();
     orthoViews.frame();
   },
-  'toggle-views': () => setViewsOpen(!orthoViews.open),
+  'toggle-views': () => setBottomPanel(orthoViews.open ? null : 'views'),
+  'toggle-uv': () => setBottomPanel(uvEditor.open ? null : 'uv'),
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
@@ -94,6 +97,7 @@ const hotkeys = new Hotkeys(
 
     { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.uv', group: 'Вид', label: 'Редактор UV', keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
     { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
     { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
     { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
@@ -464,7 +468,7 @@ const HOTKEY_TITLES = {
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
-  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '#focus-button': 'view.focus',
+  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#focus-button': 'view.focus',
   '[data-shading="orientation"]': 'view.orientation',
 };
 for (const selector of Object.keys(HOTKEY_TITLES)) {
@@ -835,17 +839,27 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   });
 }
 
-window.vertexDebug = { atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
+window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
 
 // The three-view panel; whether it is open is remembered between launches.
+// The bottom of the workspace holds one panel at a time: the three views
+// ('views'), the UV editor ('uv'), or none (null). Which is remembered
+// between launches.
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
-function setViewsOpen(open) {
-  orthoViews.toggle(open);
-  $('views-splitter').hidden = !open;
-  document.querySelector('[data-action="toggle-views"]').classList.toggle('active', open);
-  localStorage.setItem(VIEWS_OPEN_KEY, open ? '1' : '0');
+const BOTTOM_PANEL_KEY = 'vertex.bottomPanel';
+function setBottomPanel(panel) {
+  orthoViews.toggle(panel === 'views');
+  uvEditor.toggle(panel === 'uv');
+  $('views-splitter').hidden = !panel;
+  document.querySelector('[data-action="toggle-views"]').classList.toggle('active', panel === 'views');
+  document.querySelector('[data-action="toggle-uv"]').classList.toggle('active', panel === 'uv');
+  localStorage.setItem(VIEWS_OPEN_KEY, panel === 'views' ? '1' : '0');
+  localStorage.setItem(BOTTOM_PANEL_KEY, panel ?? '');
 }
-setViewsOpen(localStorage.getItem(VIEWS_OPEN_KEY) === '1');
+{
+  const saved = localStorage.getItem(BOTTOM_PANEL_KEY);
+  setBottomPanel(saved === 'uv' ? 'uv' : saved === 'views' || (saved === null && localStorage.getItem(VIEWS_OPEN_KEY) === '1') ? 'views' : null);
+}
 
 // The panel's height is changed by dragging its top edge. It is kept as a
 // share of the workspace, so it scales with the window.
@@ -859,6 +873,7 @@ function setViewsSize(share) {
   const max = Math.max(min, 1 - MAIN_VIEW_MIN_HEIGHT / height);
   share = Math.min(Math.max(share, min), max);
   $('ortho-views').style.flexBasis = `${share * 100}%`;
+  $('uv-editor').style.flexBasis = `${share * 100}%`;
   localStorage.setItem(VIEWS_SIZE_KEY, share);
 }
 {

@@ -434,6 +434,7 @@ export class EditableMesh {
         const stays = loop.map((vertex, k) => vertex !== loop[(k + 1) % loop.length]);
         const merged = loop.filter((_, k) => stays[k]);
         if (face.uv) merged.uv = face.uv.filter((_, k) => stays[k]);
+        if (face.pin) merged.pin = true;
         return merged;
       })
       .filter((face) => {
@@ -762,6 +763,7 @@ export class EditableMesh {
     for (const faceIndex of faceIndices) {
       const cap = this.faces[faceIndex].map((vertex) => copies.get(vertex));
       if (this.faces[faceIndex].uv) cap.uv = this.faces[faceIndex].uv;
+      if (this.faces[faceIndex].pin) cap.pin = true;
       this.faces[faceIndex] = cap;
     }
     this.faces.push(...sides);
@@ -908,6 +910,7 @@ export class EditableMesh {
       .map((face) => {
         const renumbered = face.map((i) => remap.get(i));
         if (face.uv) renumbered.uv = face.uv;
+        if (face.pin) renumbered.pin = true;
         return renumbered;
       });
     this.wires = this.wires
@@ -1088,14 +1091,17 @@ function edgeOverlay(color) {
 // A face is a loop: an array of vertex indices. The array may also carry
 // `uv` - where the face's corners are on the texture atlas, in pixels: an
 // array in step with the loop, of [x, y] or null for a corner that has no
-// place yet (see unwrap.js, which gives them). It is a property of the array
-// itself, so a face that is merely moved keeps it without anyone's care; code
-// that makes a new array for an old face carries it over with these.
+// place yet (see unwrap.js, which gives them) - and `pin`, set when the user
+// has put the face there by hand, which the unwrap then leaves alone. They
+// are properties of the array itself, so a face that is merely moved keeps
+// them without anyone's care; code that makes a new array for an old face
+// carries them over with these.
 
 // A copy of a face, with what it carries.
 export function cloneFace(face) {
   const copy = [...face];
   if (face.uv) copy.uv = face.uv.map((point) => (point ? [point[0], point[1]] : null));
+  if (face.pin) copy.pin = true;
   return copy;
 }
 
@@ -1103,6 +1109,7 @@ export function cloneFace(face) {
 // corner whose vertex is in the old face keeps its place, others have none.
 // `before` maps a vertex of the new loop to what it was in the old one.
 export function inheritUV(loop, source, before = (vertex) => vertex) {
+  if (source.pin) loop.pin = true;
   if (!source.uv) return loop;
   const places = new Map(source.map((vertex, k) => [vertex, source.uv[k]]));
   loop.uv = loop.map((vertex) => {

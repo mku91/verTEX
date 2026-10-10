@@ -18,6 +18,11 @@ import { quaternionOf } from './frames.js';
 // in `uv` (see mesh.js). A chart that has places already keeps its placement -
 // the texture stays where it was painted - and is moved only if it no longer
 // fits; a new chart is given free room, and the atlas grows when there is none.
+//
+// A chart the user has placed by hand is pinned (`pin` on its faces): it stays
+// where it was put whatever else is there - that is how several faces are
+// given the same picture - and only the charts that are not pinned keep out
+// of each other's way, and out of the pinned ones'.
 
 const SAME_PLANE = 1e-4; // how far apart two faces' planes may be, and their normals' cosine from 1
 // Every chart has a rim of this many pixels all round it, which is its own:
@@ -106,7 +111,7 @@ export function chartsOf(mesh, ppu) {
     const flat = new Map([...along].map(([vertex, [a, b]]) => [vertex, [tidy((a - left) * ppu), tidy((top - b) * ppu)]]));
     const width = Math.max(...[...flat.values()].map(([x]) => x));
     const height = Math.max(...[...flat.values()].map(([, y]) => y));
-    return { faces: members, object, normal, flat, width, height };
+    return { faces: members, object, normal, flat, width, height, pinned: members.some((i) => faces[i].pin) };
   });
 }
 
@@ -167,23 +172,36 @@ class Room {
     this.width = width;
     this.height = height;
     this.taken = new Uint8Array(width * height);
+    // Room that pinned charts lie on: not to be given out, but nobody is
+    // turned out of it either - a pinned chart lies on top of what is there.
+    this.held = new Uint8Array(width * height);
   }
 
-  // Whether the rectangle, with its rim, is inside and free.
-  free(x, y, w, h) {
-    if (x < PADDING || y < PADDING || x + w + PADDING > this.width || y + h + PADDING > this.height) return false;
+  // Whether the rectangle, with its rim, is on the atlas.
+  inside(x, y, w, h) {
+    return x >= PADDING && y >= PADDING && x + w + PADDING <= this.width && y + h + PADDING <= this.height;
+  }
+
+  // Whether the rectangle, with its rim, is inside and free: of the charts
+  // that keep out of each other's way and - unless it is a chart that is
+  // there already, which a pinned one lying on it does not turn out (`mine`) -
+  // of the pinned ones too.
+  free(x, y, w, h, mine = false) {
+    if (!this.inside(x, y, w, h)) return false;
     for (let row = y - PADDING; row < y + h + PADDING; row++) {
       for (let column = x - PADDING; column < x + w + PADDING; column++) {
-        if (this.taken[row * this.width + column]) return false;
+        const at = row * this.width + column;
+        if (this.taken[at] || (!mine && this.held[at])) return false;
       }
     }
     return true;
   }
 
-  // Takes the rectangle and its rim.
-  take(x, y, w, h) {
+  // Takes the rectangle and its rim, for a chart that keeps its room to itself or for a pinned one.
+  take(x, y, w, h, pinned = false) {
+    const room = pinned ? this.held : this.taken;
     for (let row = y - PADDING; row < y + h + PADDING; row++) {
-      this.taken.fill(1, row * this.width + x - PADDING, row * this.width + x + w + PADDING);
+      room.fill(1, row * this.width + x - PADDING, row * this.width + x + w + PADDING);
     }
   }
 
@@ -203,6 +221,7 @@ class Room {
     const grown = new Room(wider ? this.width * 2 : this.width, wider ? this.height : this.height * 2);
     for (let row = 0; row < this.height; row++) {
       grown.taken.set(this.taken.subarray(row * this.width, (row + 1) * this.width), row * grown.width);
+      grown.held.set(this.held.subarray(row * this.width, (row + 1) * this.width), row * grown.width);
     }
     return grown;
   }
@@ -222,9 +241,14 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
   const fresh = [];
   const moved = [];
 
-  for (const chart of charts) chart.placement = repack ? null : placementOf(chart, mesh);
-  // Those that have a place keep it, the best-attested first; the rest take what is left.
-  const order = [...charts].sort((a, b) => (b.placement?.votes ?? 0) - (a.placement?.votes ?? 0) || a.faces[0] - b.faces[0]);
+  for (const chart of charts) {
+    chart.placement = repack ? null : placementOf(chart, mesh);
+    if (repack) chart.pinned = false;
+  }
+  // The pinned first: theirs is the say. Then those that have a place, the
+  // best-attested first; the rest take what is left.
+  const order = [...charts].sort((a, b) => Number(b.pinned) - Number(a.pinned) ||
+    (b.placement?.votes ?? 0) - (a.placement?.votes ?? 0) || a.faces[0] - b.faces[0]);
   const settle = (chart, w, h) => {
     for (;;) {
       const spot = room.find(w, h);
@@ -238,7 +262,12 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
     const w = Math.max(1, Math.ceil((lay.turned ? chart.height : chart.width) - 1e-6));
     const h = Math.max(1, Math.ceil((lay.turned ? chart.width : chart.height) - 1e-6));
     let spot = chart.placement ? { x: chart.placement.x, y: chart.placement.y } : null;
-    if (spot && !room.free(spot.x, spot.y, w, h)) {
+    // A pinned chart stays put as long as it is on the atlas at all; one that
+    // has grown off its edge is on its own again.
+    if (spot && chart.pinned && !room.inside(spot.x, spot.y, w, h)) chart.pinned = false;
+    if (spot && chart.pinned) {
+      // (Nothing to find: it is where it is.)
+    } else if (spot && !room.free(spot.x, spot.y, w, h, true)) {
       // No room for it where it was: it moves, and takes its picture along.
       const from = spot;
       spot = settle(chart, w, h);
@@ -247,7 +276,7 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
       spot = settle(chart, w, h);
       fresh.push({ ...spot, w, h });
     }
-    room.take(spot.x, spot.y, w, h);
+    room.take(spot.x, spot.y, w, h, chart.pinned);
     chart.rect = { ...spot, w, h };
     chart.lay = chart.placement?.lay ?? 0;
   }
@@ -267,6 +296,9 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
         face.uv = uv;
         changed = true;
       }
+      // The whole chart is pinned or is not: a face cut into it takes after the rest.
+      if (chart.pinned) face.pin = true;
+      else delete face.pin;
     }
   }
   return { width: room.width, height: room.height, charts, fresh, moved, changed };

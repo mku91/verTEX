@@ -6,7 +6,7 @@ import { History } from './history.js';
 import { Mirror } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
 import { Atlas } from './atlas.js';
-import { unwrap, START_SIZE } from './unwrap.js';
+import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -884,11 +884,76 @@ export class Editor extends EventTarget {
   // Lays the faces out on the atlas as the model is now: every face gets its
   // place, or keeps the one it has. Returns whether anything is where it was
   // not. `repack` forgets the places and lays everything out anew.
-  layOut(repack = false) {
+  layOut(repack = false, sweep = true) {
     const result = unwrap(this.mesh, { ppu: this.ppu, width: this.atlas.width, height: this.atlas.height, repack });
     const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
-    this.atlas.apply(result, this.mesh);
+    this.atlas.apply(result, this.mesh, { sweep });
     return result.changed || resized;
+  }
+
+  // The charts on the atlas that hold any of the given faces - as the atlas
+  // has them: { rect, polygons, faces, pinned }.
+  chartsOfFaces(faces) {
+    const wanted = new Set(faces);
+    return this.atlas.charts.filter((chart) => chart.faces.some((face) => wanted.has(face)));
+  }
+
+  // Puts charts elsewhere on the atlas by hand - those that hold any of the
+  // given faces. Only the faces' places change, not the picture: this is how
+  // a face is given another picture, or several faces the same one.
+  //   { move: [dx, dy] }   by whole pixels (kept on the atlas)
+  //   { turn: 1 | -1 }     a quarter turn, clockwise or back, about the chart's top left room
+  //   { flip: 'h' | 'v' }  turned over, left to right or top to bottom
+  //   { auto: true }       given back to the unwrap, which finds it free room if it needs any
+  // A chart placed so is pinned: the unwrap leaves it where it is. One undo step.
+  placeCharts(faces, how) {
+    const charts = this.chartsOfFaces(faces);
+    if (charts.length === 0 || this.busy()) return false;
+    const before = this.snapshot();
+    let changed = false;
+    for (const chart of charts) {
+      const { rect } = chart;
+      const members = chart.faces.map((index) => this.mesh.faces[index]);
+      if (how.auto) {
+        for (const face of members) {
+          if (face.pin) changed = true;
+          delete face.pin;
+        }
+        continue;
+      }
+      let place;
+      if (how.move) {
+        // Whole pixels, and not off the atlas (its rim included).
+        const dx = Math.max(PADDING - rect.x, Math.min(this.atlas.width - PADDING - rect.w - rect.x, Math.round(how.move[0])));
+        const dy = Math.max(PADDING - rect.y, Math.min(this.atlas.height - PADDING - rect.h - rect.y, Math.round(how.move[1])));
+        place = ([x, y]) => [x + dx, y + dy];
+        if (dx === 0 && dy === 0 && members.every((face) => face.pin)) continue;
+      } else if (how.turn) {
+        // About the room's top left corner, which stays where it is; the room's sides change places.
+        place = how.turn > 0
+          ? ([x, y]) => [rect.x + (rect.h - (y - rect.y)), rect.y + (x - rect.x)]
+          : ([x, y]) => [rect.x + (y - rect.y), rect.y + (rect.w - (x - rect.x))];
+      } else if (how.flip === 'h') {
+        place = ([x, y]) => [rect.x + (rect.w - (x - rect.x)), y];
+      } else if (how.flip === 'v') {
+        place = ([x, y]) => [x, rect.y + (rect.h - (y - rect.y))];
+      } else {
+        continue;
+      }
+      for (const face of members) {
+        face.uv = face.uv.map((point) => place(point).map((value) => +value.toFixed(6)));
+        face.pin = true;
+      }
+      changed = true;
+    }
+    if (!changed) return false;
+    this.history.push(before);
+    // The pictures stay where they are: nothing is swept behind a chart that was moved.
+    this.layOut(false, false);
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
+    return true;
   }
 
   // What is wrong with the model, as [{ text }] - for now, faces that are not
@@ -3020,6 +3085,7 @@ export class Editor extends EventTarget {
       const loop = [...face];
       const uv = model.uvs?.[i];
       if (uv) loop.uv = uv.map((point) => (point ? [point[0], point[1]] : null));
+      if (model.pins?.includes(i)) loop.pin = true;
       return loop;
     });
     mesh.wires = model.wires.map((wire) => [...wire]);

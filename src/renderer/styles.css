@@ -507,6 +507,78 @@ body {
   display: none;
 }
 
+/* The UV editor takes the same place: a bar of its commands and the atlas under it. */
+#uv-editor {
+  flex: 0 0 40%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+#uv-editor[hidden] {
+  display: none;
+}
+
+.uv-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.uv-bar b {
+  margin-right: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+}
+
+.uv-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.uv-bar button:hover:enabled {
+  background: var(--hover);
+}
+
+.uv-bar button:disabled {
+  color: color-mix(in srgb, var(--text) 30%, transparent);
+  cursor: default;
+}
+
+.uv-bar i {
+  width: auto;
+  font-size: 12px;
+}
+
+.uv-status {
+  margin-left: 10px;
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#uv-editor canvas {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
 .ortho-view {
   position: relative;
   flex: 1;

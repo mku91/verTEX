@@ -141,6 +141,9 @@
       <button data-action="toggle-views" title="Три вида (B)">
         <i class="fa-solid fa-table-columns"></i>
       </button>
+      <button data-action="toggle-uv" title="Редактор UV: атлас с гранями, перестановка граней по картинке">
+        <i class="fa-solid fa-object-group"></i>
+      </button>
     </aside>
 
     <div id="workspace">
@@ -196,6 +199,31 @@
     </main>
     <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
     <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
+    <section id="uv-editor" hidden>
+      <div class="uv-bar">
+        <b>UV</b>
+        <button data-uv="turn-left" title="Повернуть выбранные лоскуты на 90° против часовой стрелки">
+          <i class="fa-solid fa-rotate-left"></i>
+        </button>
+        <button data-uv="turn-right" title="Повернуть выбранные лоскуты на 90° по часовой стрелке">
+          <i class="fa-solid fa-rotate-right"></i>
+        </button>
+        <button data-uv="flip-h" title="Отразить выбранные лоскуты слева направо">
+          <i class="fa-solid fa-left-right"></i>
+        </button>
+        <button data-uv="flip-v" title="Отразить выбранные лоскуты сверху вниз">
+          <i class="fa-solid fa-up-down"></i>
+        </button>
+        <button data-uv="auto" title="Вернуть выбранные лоскуты автоматической раскладке: закрепление снимается, и если место занято, лоскут переедет на свободное вместе с картинкой">
+          <i class="fa-solid fa-lock-open"></i>
+        </button>
+        <button data-uv="fit" title="Показать атлас целиком">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+        <span class="uv-status"></span>
+      </div>
+      <canvas title="ЛКМ — выбрать лоскут (Shift — добавить) · тянуть — переставить на другое место картинки · колесо — масштаб · ПКМ — сдвиг вида"></canvas>
+    </section>
     </div>
 
     <div id="panel-splitter" title="Потяните, чтобы изменить ширину панели; двойной клик — вернуть исходную"></div>

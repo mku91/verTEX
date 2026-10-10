@@ -154,8 +154,10 @@ export class Atlas extends EventTarget {
     this.dispatchEvent(new CustomEvent('change', { detail: { byUser } }));
   }
 
-  // Carries out what an unwrap asks for (see unwrap()). `mesh` is the mesh it was of.
-  apply(result, mesh) {
+  // Carries out what an unwrap asks for (see unwrap()). `mesh` is the mesh it
+  // was of. `sweep` off leaves the rooms that charts have left as they are: a
+  // chart moved by hand has left its picture behind on purpose.
+  apply(result, mesh, { sweep = true } = {}) {
     const { context } = this;
     let painted = result.width !== this.width || result.height !== this.height;
     this.resize(result.width, result.height);
@@ -167,7 +169,7 @@ export class Atlas extends EventTarget {
     // (A room is a chart's rectangle with its rim.)
     const withRim = ({ x, y, w, h }) => ({ x: x - PADDING, y: y - PADDING, w: w + 2 * PADDING, h: h + 2 * PADDING });
     const rooms = result.charts.map((chart) => withRim(chart.rect));
-    for (const chart of this.charts) {
+    for (const chart of sweep ? this.charts : []) {
       const rect = withRim(chart.rect);
       if (rooms.some((room) => room.x === rect.x && room.y === rect.y && room.w === rect.w && room.h === rect.h)) continue;
       const image = context.getImageData(rect.x, rect.y, rect.w, rect.h);
@@ -201,7 +203,7 @@ export class Atlas extends EventTarget {
       // The pixels the chart's faces show: what is the painter's in its room.
       const pixels = new Set();
       for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
-      return { rect: chart.rect, polygons, pixels };
+      return { rect: chart.rect, polygons, pixels, faces: chart.faces, pinned: chart.pinned };
     });
     if (this.template) {
       // New rooms, and those a chart has moved to: it moved because it grew,
@@ -277,6 +279,10 @@ export class Atlas extends EventTarget {
     let changed = false;
     const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     const CORNERS = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+    // What any face shows is the painter's: where charts lie over each other
+    // or side by side, no rim is put on another chart's pixels.
+    const shown = new Set();
+    for (const { pixels } of this.charts) for (const key of pixels) shown.add(key);
     for (const { pixels } of this.charts) {
       const rim = new Map(); // a rim pixel -> the chart pixel it copies
       for (const steps of [SIDES, CORNERS]) {
@@ -286,7 +292,7 @@ export class Atlas extends EventTarget {
             const px = x + dx;
             const py = y + dy;
             const beside = `${px},${py}`;
-            if (px < 0 || py < 0 || px >= width || py >= height || pixels.has(beside) || rim.has(beside)) continue;
+            if (px < 0 || py < 0 || px >= width || py >= height || shown.has(beside) || rim.has(beside)) continue;
             rim.set(beside, [x, y]);
           }
         }

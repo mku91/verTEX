@@ -5,7 +5,7 @@ const { registerAtlasFile } = require('./atlas-file.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
-const DEBUG_PORT = 9333;
+const DEBUG_PORT = 19333; // (not 9333: other programs on this machine take that one)
 if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', String(DEBUG_PORT));
 
 function createWindow() {

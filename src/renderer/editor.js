@@ -149,6 +149,7 @@ export class Editor extends EventTarget {
     };
     this.updateTopology();
     this.layOut(); // the first object's faces take their places on the atlas
+    this.view.updateUVs(); // (the view was built before they had any)
     this.target = new Set(this.mesh.vertices.keys());
 
     // How the drag code sees the main viewport; the orthographic views supply their own.

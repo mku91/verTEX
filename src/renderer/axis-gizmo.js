@@ -5,10 +5,10 @@ const AXIS_LENGTH = 34; // SVG units, see the viewBox in MARKUP
 const LOCK_LINE_LENGTH = 54;
 
 const CAPTIONS = {
-  free: '1 · Свободно',
-  x: '2 · Только X',
-  y: '3 · Только Y',
-  z: '4 · Только Z',
+  free: 'Свободно',
+  x: 'Только X',
+  y: 'Только Y',
+  z: 'Только Z',
 };
 
 const MARKUP = `

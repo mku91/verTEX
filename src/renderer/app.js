@@ -90,10 +90,16 @@ const hotkeys = new Hotkeys(
     { id: 'edit.undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+KeyZ', run: () => editor.undo() },
     { id: 'edit.redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+KeyY', run: () => editor.redo() },
 
-    { id: 'axis.free', group: 'Фиксация оси', label: 'Свободно', keys: 'Digit1', run: () => editor.setAxisLock('free') },
-    { id: 'axis.x', group: 'Фиксация оси', label: 'Ось X', keys: 'Digit2', run: () => editor.setAxisLock('x') },
-    { id: 'axis.y', group: 'Фиксация оси', label: 'Ось Y', keys: 'Digit3', run: () => editor.setAxisLock('y') },
-    { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Digit4', run: () => editor.setAxisLock('z') },
+    // The selection modes, in the order of their buttons. (An operation that
+    // cannot work in a mode has its button off, and its key does nothing.)
+    { id: 'mode.object', group: 'Режим выделения', label: 'Объект', keys: 'Digit1', run: () => pickMode('object') },
+    { id: 'mode.face', group: 'Режим выделения', label: 'Грань', keys: 'Digit2', run: () => pickMode('face') },
+    { id: 'mode.edge', group: 'Режим выделения', label: 'Ребро', keys: 'Digit3', run: () => pickMode('edge') },
+    { id: 'mode.vertex', group: 'Режим выделения', label: 'Вершина', keys: 'Digit4', run: () => pickMode('vertex') },
+    { id: 'axis.free', group: 'Фиксация оси', label: 'Свободно', keys: 'Shift+Digit1', run: () => editor.setAxisLock('free') },
+    { id: 'axis.x', group: 'Фиксация оси', label: 'Ось X', keys: 'Shift+Digit2', run: () => editor.setAxisLock('x') },
+    { id: 'axis.y', group: 'Фиксация оси', label: 'Ось Y', keys: 'Shift+Digit3', run: () => editor.setAxisLock('y') },
+    { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Shift+Digit4', run: () => editor.setAxisLock('z') },
 
     { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
@@ -699,6 +705,14 @@ function dropAxisHold() {
   for (const code of heldAxisKeys) spentAxisKeys.add(code);
   heldAxisKeys.length = 0;
   editor.holdAxis(null);
+}
+
+// A selection mode by its key: as by its button, which is off for a mode the
+// operation in progress cannot work in.
+function pickMode(mode) {
+  if (editor.operation && !OPERATION_MODES[editor.operation].includes(mode)) return false;
+  editor.setMode(mode);
+  return true;
 }
 
 // A new project is asked about first: how it is textured. Resolves to the

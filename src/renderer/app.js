@@ -850,6 +850,7 @@ const BOTTOM_PANEL_KEY = 'vertex.bottomPanel';
 function setBottomPanel(panel) {
   orthoViews.toggle(panel === 'views');
   uvEditor.toggle(panel === 'uv');
+  editor.setUVLook(panel === 'uv');
   $('views-splitter').hidden = !panel;
   document.querySelector('[data-action="toggle-views"]').classList.toggle('active', panel === 'views');
   document.querySelector('[data-action="toggle-uv"]').classList.toggle('active', panel === 'uv');

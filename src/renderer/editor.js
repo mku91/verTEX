@@ -62,6 +62,7 @@ export const PLACE_SIDES = {
   '-x': { axis: 'x', sign: -1 }, '+x': { axis: 'x', sign: 1 },
   '-z': { axis: 'z', sign: -1 }, '+z': { axis: 'z', sign: 1 },
 };
+const BLINK_PERIOD = 900; // ms, white to black and back, of a picked face's outline with the UV editor open
 const PLACE_RING = 13; // px, the radius of the ring that follows the pointer
 const PLACE_NORMAL = 92; // px, the length of the normal that comes out of it
 
@@ -124,6 +125,7 @@ export class Editor extends EventTarget {
     this.localAxes = false;
     // Texturing (see unwrap.js): the project's pixels per unit of length, and its atlas.
     this.ppu = 16;
+    this.uvLook = false; // the UV editor is open, see setUVLook()
     this.atlas = new Atlas();
     this.atlas.addEventListener('change', () => this.viewport.requestRender());
     // The place tool: what is being placed (see beginPlace()), and the side it lies on.
@@ -2465,17 +2467,48 @@ export class Editor extends EventTarget {
     const edges = (keys) => (mode === 'edge' ? keys.map((key) => this.elementVertices(key)) : []);
     const selected = [...this.picked];
     const hover = hovered === null ? [] : [hovered];
+    // With the UV editor open the picture on a face is what is looked at: a
+    // picked face is not tinted over, its outline blinks instead (see blink()).
+    const outlined = this.uvLook && mode === 'face' && !this.focus;
+    const outline = (keys) => keys.flatMap((key) => {
+      const face = this.mesh.faces[key];
+      return face.map((vertex, k) => [vertex, face[(k + 1) % face.length]]);
+    });
 
     // Vertex points would only get in the way of aiming at edges and faces.
     this.view.points.visible = mode === 'vertex' || this.focus;
     this.view.updateColors(this.selection, mode === 'vertex' && hovered !== null ? hovered : -1);
     this.view.setHighlight({
-      selectedFaces: faces(selected),
+      selectedFaces: outlined ? [] : faces(selected),
       hoveredFaces: faces(hover),
-      selectedEdges: edges(selected),
+      selectedEdges: outlined ? outline(selected) : edges(selected),
       hoveredEdges: edges(hover),
     });
+    this.blinking = outlined && selected.length > 0;
+    if (this.blinking) this.blink();
+    else this.view.shadeSelectedEdges(null);
     this.viewport.requestRender();
+  }
+
+  // Whether the UV editor is open: picked faces are then shown by a blinking
+  // outline, not by a tint (see refreshHighlight()).
+  setUVLook(on) {
+    if (on === this.uvLook) return;
+    this.uvLook = on;
+    this.refreshHighlight();
+  }
+
+  // Runs while faces are outlined so: the outline goes from white to black and back.
+  blink() {
+    if (this.blinkFrame) return;
+    const tick = (now) => {
+      this.blinkFrame = null;
+      if (!this.blinking) return;
+      this.view.shadeSelectedEdges(0.5 + 0.5 * Math.cos((now / BLINK_PERIOD) * Math.PI * 2));
+      this.viewport.requestRender();
+      this.blinkFrame = requestAnimationFrame(tick);
+    };
+    this.blinkFrame = requestAnimationFrame(tick);
   }
 
   // --- selection ---------------------------------------------------------

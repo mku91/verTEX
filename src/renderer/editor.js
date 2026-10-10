@@ -62,6 +62,7 @@ export const PLACE_SIDES = {
   '-x': { axis: 'x', sign: -1 }, '+x': { axis: 'x', sign: 1 },
   '-z': { axis: 'z', sign: -1 }, '+z': { axis: 'z', sign: 1 },
 };
+const BLINK_DARK = 0.05; // the darkest shade of that outline (linear: a dark grey on screen)
 const BLINK_PERIOD = 900; // ms, white to black and back, of a picked face's outline with the UV editor open
 const PLACE_RING = 13; // px, the radius of the ring that follows the pointer
 const PLACE_NORMAL = 92; // px, the length of the normal that comes out of it
@@ -2504,7 +2505,9 @@ export class Editor extends EventTarget {
     const tick = (now) => {
       this.blinkFrame = null;
       if (!this.blinking) return;
-      this.view.shadeSelectedEdges(0.5 + 0.5 * Math.cos((now / BLINK_PERIOD) * Math.PI * 2));
+      // From white down to a dark grey, not to black.
+      const wave = 0.5 + 0.5 * Math.cos((now / BLINK_PERIOD) * Math.PI * 2);
+      this.view.shadeSelectedEdges(BLINK_DARK + (1 - BLINK_DARK) * wave);
       this.viewport.requestRender();
       this.blinkFrame = requestAnimationFrame(tick);
     };

@@ -1189,6 +1189,16 @@ export class MeshView {
       hoveredEdges: edgeOverlay(COLOR_HOVERED),
     };
     this.overlays.hoveredFaces.renderOrder = 1;
+    // The edge overlays lie exactly on the wireframe's lines: pulled a little
+    // towards the viewer (they are drawn as strips, which can be), they cover
+    // those cleanly instead of flickering through them.
+    for (const name of ['selectedEdges', 'hoveredEdges']) {
+      const { material } = this.overlays[name];
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -2;
+      material.polygonOffsetUnits = -4;
+      this.overlays[name].renderOrder = 1;
+    }
     this.highlight = NO_HIGHLIGHT;
 
     // The polygon tool's outline in progress: its sides and its points, drawn

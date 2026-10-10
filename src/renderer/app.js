@@ -460,6 +460,7 @@ $('hotkeys-reset').addEventListener('click', () => {
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
   '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot',
+  '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '#focus-button': 'view.focus',
@@ -774,7 +775,7 @@ for (const type of ['keydown', 'keyup']) {
 }
 
 // Buttons must not take focus, or Space would press the last clicked one.
-for (const id of ['toolbar', 'modes', 'top-actions', 'shading', 'focus-button']) {
+for (const id of ['toolbar', 'modes', 'history-actions', 'top-actions', 'shading', 'focus-button']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault());
 }
 for (const control of gridControls) {
@@ -853,6 +854,85 @@ function setViewsSize(share) {
   setViewsSize(parseFloat(localStorage.getItem(VIEWS_SIZE_KEY)) || VIEWS_SIZE_DEFAULT);
 }
 
+// The selection's panels fold: a click on a panel's caption hides its fields,
+// another shows them again. Which are folded is remembered between launches.
+{
+  const FOLDED_KEY = 'vertex.foldedPanels';
+  let folded = [];
+  try {
+    folded = JSON.parse(localStorage.getItem(FOLDED_KEY)) ?? [];
+  } catch {
+    // Not a list: nothing is folded.
+  }
+  for (const id of ['dimensions', 'properties', 'rotation']) {
+    const panel = $(id);
+    const header = panel.querySelector('.properties-header');
+    const caret = document.createElement('i');
+    caret.className = 'fa-solid fa-caret-down panel-caret';
+    header.prepend(caret);
+    // The fields go into a body that can slide shut (see the styles).
+    const body = document.createElement('div');
+    body.className = 'panel-body';
+    const inner = document.createElement('div');
+    inner.append(...panel.querySelectorAll(':scope > label'));
+    body.append(inner);
+    panel.append(body);
+    const show = () => {
+      panel.classList.toggle('folded', folded.includes(id));
+      header.title = folded.includes(id) ? 'Развернуть' : 'Свернуть';
+      // Folded fields are out of reach of the keyboard too.
+      inner.inert = folded.includes(id);
+    };
+    header.addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+    header.addEventListener('click', (event) => {
+      if (event.target.closest('button')) return; // its own buttons do their own thing
+      folded = folded.includes(id) ? folded.filter((other) => other !== id) : [...folded, id];
+      localStorage.setItem(FOLDED_KEY, JSON.stringify(folded));
+      show();
+    });
+    show();
+  }
+}
+
+// The side panel's width, set by dragging its left edge and remembered between launches.
+const PANEL_WIDTH_KEY = 'vertex.panelWidth';
+const PANEL_WIDTH_DEFAULT = 240; // px
+const PANEL_MIN_WIDTH = 180;
+const VIEWPORT_MIN_WIDTH = 320; // px left to the views
+function setPanelWidth(width) {
+  const room = $('app').clientWidth - $('toolbar').offsetWidth - $('panel-splitter').offsetWidth - VIEWPORT_MIN_WIDTH;
+  width = Math.round(Math.min(Math.max(width, PANEL_MIN_WIDTH), Math.max(room, PANEL_MIN_WIDTH)));
+  $('app').style.setProperty('--panel-width', `${width}px`);
+  return width;
+}
+{
+  const splitter = $('panel-splitter');
+  let wanted = parseFloat(localStorage.getItem(PANEL_WIDTH_KEY)) || PANEL_WIDTH_DEFAULT; // what the user set
+  const set = (width) => {
+    wanted = setPanelWidth(width);
+    localStorage.setItem(PANEL_WIDTH_KEY, wanted);
+  };
+  // The pointer holds the middle of the strip; the panel starts at its right edge.
+  const follow = (event) => set($('app').getBoundingClientRect().right - event.clientX - splitter.offsetWidth / 2);
+  splitter.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitter.setPointerCapture(event.pointerId);
+    splitter.classList.add('dragging');
+    splitter.addEventListener('pointermove', follow);
+  });
+  const stop = () => {
+    splitter.classList.remove('dragging');
+    splitter.removeEventListener('pointermove', follow);
+  };
+  splitter.addEventListener('pointerup', stop);
+  splitter.addEventListener('pointercancel', stop);
+  splitter.addEventListener('dblclick', () => set(PANEL_WIDTH_DEFAULT));
+  // A narrower window squeezes the panel, a wider one gives it back what was set.
+  window.addEventListener('resize', () => setPanelWidth(wanted));
+  setPanelWidth(wanted);
+}
+
 // 532 -> "532 Б", 20480 -> "20 КБ", 1572864 -> "1.5 МБ".
 function formatBytes(bytes) {
   const units = ['Б', 'КБ', 'МБ', 'ГБ'];
@@ -919,6 +999,9 @@ function refresh() {
   showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('local-toggle').classList.toggle('active', editor.localAxes);
+  // Undo and redo: lit while there is a step to take.
+  $('undo-button').disabled = editor.history.undoStack.length === 0;
+  $('redo-button').disabled = editor.history.redoStack.length === 0;
   // A planet for the world's axes, a pin for the object's own.
   $('local-toggle').firstElementChild.className = `fa-solid ${editor.localAxes ? 'fa-location-dot' : 'fa-globe'}`;
   $('local-toggle').title = editor.localAxes

@@ -27,7 +27,15 @@
         <button data-mode="edge">Ребро</button>
         <button data-mode="vertex">Вершина</button>
       </div>
-      <div id="top-actions">
+      <div id="history-actions" class="top-actions">
+        <button id="undo-button" data-action="undo" title="Отменить" aria-label="Отменить">
+          <i class="fa-solid fa-arrow-rotate-left"></i>
+        </button>
+        <button id="redo-button" data-action="redo" title="Повторить" aria-label="Повторить">
+          <i class="fa-solid fa-arrow-rotate-right"></i>
+        </button>
+      </div>
+      <div id="top-actions" class="top-actions">
         <button id="cut-toggle" data-action="toggle-cut" title="Разрез: разрез объекта по линии на грани (K)" aria-label="Разрез">
           <i class="fa-solid fa-scissors"></i>
         </button>
@@ -175,7 +183,46 @@
           <button disabled title="Текстур и развёртки в программе пока нет">Текстуры <small>пока нет</small></button>
         </div>
       </div>
-      <div id="float-panels">
+      <div id="overlap-toast">
+        <div class="toast-timer"><i></i></div>
+        <p></p>
+        <div class="toast-buttons">
+          <button data-keep>Оставить</button>
+          <button data-merge>Соединить</button>
+        </div>
+      </div>
+      <div id="polygon-popup" hidden title="Плоскость полигона: клик по оси, которой она перпендикулярна"></div>
+      <div id="extrude-popup" hidden title="Куда выдавить ребро: клик по оси, по центру — авто"></div>
+    </main>
+    <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
+    <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
+    </div>
+
+    <div id="panel-splitter" title="Потяните, чтобы изменить ширину панели; двойной клик — вернуть исходную"></div>
+    <aside id="panel">
+      <section id="outliner-section">
+        <div class="outliner-header">
+          <h2>Сцена</h2>
+          <button id="add-object" title="Добавить объект"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <div id="add-menu" hidden>
+          <button data-primitive="cube">Куб…</button>
+          <button data-primitive="cone">Конус…</button>
+          <button data-primitive="cylinder">Цилиндр…</button>
+          <button data-primitive="sphere">Сфера…</button>
+          <button data-group>Группа</button>
+        </div>
+        <form id="add-form" hidden>
+          <h3></h3>
+          <div class="fields"></div>
+          <div class="form-buttons">
+            <button type="button" data-cancel>Отмена</button>
+            <button type="submit">Создать</button>
+          </div>
+        </form>
+        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх"></div>
+      </section>
+      <section id="float-panels">
       <div id="dimensions" hidden>
         <div class="properties-header">
           <p>Размер</p>
@@ -221,44 +268,6 @@
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
       </div>
-      </div>
-      <div id="overlap-toast">
-        <div class="toast-timer"><i></i></div>
-        <p></p>
-        <div class="toast-buttons">
-          <button data-keep>Оставить</button>
-          <button data-merge>Соединить</button>
-        </div>
-      </div>
-      <div id="polygon-popup" hidden title="Плоскость полигона: клик по оси, которой она перпендикулярна"></div>
-      <div id="extrude-popup" hidden title="Куда выдавить ребро: клик по оси, по центру — авто"></div>
-    </main>
-    <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
-    <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
-    </div>
-
-    <aside id="panel">
-      <section id="outliner-section">
-        <div class="outliner-header">
-          <h2>Сцена</h2>
-          <button id="add-object" title="Добавить объект"><i class="fa-solid fa-plus"></i></button>
-        </div>
-        <div id="add-menu" hidden>
-          <button data-primitive="cube">Куб…</button>
-          <button data-primitive="cone">Конус…</button>
-          <button data-primitive="cylinder">Цилиндр…</button>
-          <button data-primitive="sphere">Сфера…</button>
-          <button data-group>Группа</button>
-        </div>
-        <form id="add-form" hidden>
-          <h3></h3>
-          <div class="fields"></div>
-          <div class="form-buttons">
-            <button type="button" data-cancel>Отмена</button>
-            <button type="submit">Создать</button>
-          </div>
-        </form>
-        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх"></div>
       </section>
       <section id="stats">
         <h2 id="stats-title" title="Данные выделенных объектов; без выделения — всей сцены"></h2>

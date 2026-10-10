@@ -60,11 +60,44 @@ body {
 
 #app {
   display: grid;
-  grid-template: "topbar topbar topbar" 34px
-                 "toolbar viewport panel" 1fr
-                 "status status status" 24px
-                 / 44px 1fr 240px;
+  /* The side panel's width is set by the splitter next to it, see app.js. */
+  grid-template: "topbar topbar topbar topbar" 34px
+                 "toolbar viewport splitter panel" 1fr
+                 "status status status status" 24px
+                 / 44px 1fr 7px var(--panel-width, 240px);
   height: 100%;
+}
+
+/* Drag handle between the views and the side panel: a strip of its own,
+   like the one above the three views. */
+#panel-splitter {
+  position: relative;
+  grid-area: splitter;
+  background: var(--bg-raised);
+  cursor: ew-resize;
+}
+
+/* Three dots, one above the other. */
+#panel-splitter::after {
+  --dot: var(--text-dim);
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 21px;
+  margin: -10.5px 0 0 -2px;
+  background: radial-gradient(circle, var(--dot) 1.5px, transparent 2px) center top / 4px 7px repeat-y;
+}
+
+#panel-splitter:hover,
+#panel-splitter.dragging {
+  background: var(--text-dim);
+}
+
+#panel-splitter:hover::after,
+#panel-splitter.dragging::after {
+  --dot: var(--text);
 }
 
 #topbar {
@@ -87,7 +120,7 @@ body {
 }
 
 #modes,
-#top-actions {
+.top-actions {
   display: flex;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -95,7 +128,7 @@ body {
 }
 
 #modes button,
-#top-actions button {
+.top-actions button {
   padding: 3px 12px;
   border: 0;
   background: var(--bg);
@@ -105,11 +138,11 @@ body {
 }
 
 /* Icon buttons. */
-#top-actions button {
+.top-actions button {
   padding: 4px 9px;
 }
 
-#top-actions i {
+.top-actions i {
   display: block;
   flex: none;
   width: 18px;
@@ -121,7 +154,7 @@ body {
 /* Everything in the top bar is one height, whatever is inside: text, an
    icon, or an icon with a number. */
 #modes,
-#top-actions,
+.top-actions,
 .grid-toggle,
 .grid-control > button {
   box-sizing: border-box;
@@ -129,7 +162,7 @@ body {
 }
 
 #modes button,
-#top-actions button {
+.top-actions button {
   display: flex;
   align-items: center;
   height: 100%;
@@ -138,7 +171,7 @@ body {
 }
 
 #modes button + button,
-#top-actions button + button {
+.top-actions button + button {
   border-left: 1px solid var(--border);
 }
 
@@ -147,21 +180,21 @@ body {
   cursor: default;
 }
 
-#top-actions button:disabled {
+.top-actions button:disabled {
   color: color-mix(in srgb, var(--text) 35%, transparent);
   cursor: default;
 }
 
-#top-actions button:disabled:hover {
+.top-actions button:disabled:hover {
   background: var(--bg);
 }
 
 #modes button:hover:enabled,
-#top-actions button:hover {
+.top-actions button:hover {
   background: var(--hover);
 }
 
-#top-actions button.active {
+.top-actions button.active {
   background: var(--accent);
   color: var(--accent-text);
 }
@@ -437,17 +470,17 @@ body {
   cursor: ns-resize;
 }
 
-/* A rounded grip in the middle shows that the edge can be dragged. */
+/* Three dots in the middle show that the edge can be dragged. */
 #views-splitter::after {
+  --dot: var(--text-dim);
   content: "";
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 40px;
-  height: 3px;
-  margin: -1.5px 0 0 -20px;
-  border-radius: 2px;
-  background: var(--text-dim);
+  width: 21px;
+  height: 4px;
+  margin: -2px 0 0 -10.5px;
+  background: radial-gradient(circle, var(--dot) 1.5px, transparent 2px) left center / 7px 4px repeat-x;
 }
 
 #views-splitter:hover,
@@ -457,7 +490,7 @@ body {
 
 #views-splitter:hover::after,
 #views-splitter.dragging::after {
-  background: var(--text);
+  --dot: var(--text);
 }
 
 /* Bottom panel that shares the workspace with the main view; its height
@@ -566,14 +599,18 @@ body {
   flex-direction: column;
   grid-area: panel;
   overflow-y: auto;
-  background: var(--bg-raised);
-  border-left: 1px solid var(--border);
+  background: var(--bg-raised); /* one with the splitter's strip on its left */
 }
 
 /* The statistics sit at the bottom of the panel. */
 #panel #stats {
+  flex: none;
   margin-top: auto;
   border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+#panel #float-panels {
   border-bottom: 0;
 }
 
@@ -591,13 +628,20 @@ body {
   text-transform: uppercase;
 }
 
+/* Scrollbars in the side panel: thin and of the theme. */
+#panel,
+#outliner {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
+}
+
 /* The list of objects fills the panel above the statistics. */
 #outliner-section {
   position: relative; /* for the "+" menu */
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-height: 0;
+  min-height: 130px; /* in a low window the whole panel scrolls instead */
   border-bottom: 0;
 }
 
@@ -977,33 +1021,86 @@ body {
   border: 1.5px solid var(--text-dim);
 }
 
-/* Floating panel with the selection's position, in the viewport's corner. */
-/* The floating panels in the viewport's corner, one above the other. */
+/* The panels of the selection - its size, position and rotation - in the
+   side panel under the scene tree, one above the other. They take the room
+   they need; the tree above them takes the rest and scrolls. */
 #float-panels {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: 8px;
-  width: 238px;
+  gap: 12px;
+  border-top: 1px solid var(--border);
 }
 
-#dimensions,
-#rotation,
-#properties {
-  padding: 8px 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+/* Nothing selected: none of them is shown, and neither is their section. */
+#float-panels:not(:has(> div:not([hidden]))) {
+  display: none;
 }
 
-/* The caption, and the buttons that copy and paste the three numbers at once. */
+/* The caption, and the buttons that copy and paste the three numbers at once.
+   A click on it folds the panel: only this line is left of it. */
 .properties-header {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.panel-caret {
+  flex: none;
+  width: 12px;
+  margin: 0 4px 0 -2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  transition: transform 0.15s;
+}
+
+.properties-header:hover .panel-caret {
+  color: var(--text);
+}
+
+.folded .panel-caret {
+  transform: rotate(-90deg);
+}
+
+/* The fields slide shut and open: a grid row that goes from its content's
+   height to nothing, which a plain height cannot do. */
+.panel-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+.panel-body > div {
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity 0.2s;
+}
+
+.folded .panel-body {
+  grid-template-rows: 0fr;
+}
+
+.folded .panel-body > div {
+  opacity: 0;
+}
+
+.properties-header {
+  transition: margin-bottom 0.2s;
+}
+
+.folded .properties-header {
+  margin-bottom: 0;
+}
+
+.properties-header button {
+  transition: opacity 0.15s;
+}
+
+.folded .properties-header button {
+  opacity: 0;
+  pointer-events: none;
 }
 
 #dimensions p,
@@ -1252,7 +1349,7 @@ body {
 }
 
 .scrub-field .scrubbable {
-  padding-right: 24px;
+  padding-right: 38px;
 }
 
 .scrub-handle {
@@ -1260,7 +1357,7 @@ body {
   top: 1px;
   right: 1px;
   bottom: 1px;
-  width: 19px;
+  width: 32px;
   border-left: 1px solid var(--border);
   cursor: ns-resize;
   touch-action: none;
@@ -1294,7 +1391,7 @@ body {
 
 /* In the add form the field is narrow and fixed. */
 #add-form .scrub-field {
-  flex: 0 0 78px;
+  flex: 0 0 96px;
 }
 
 #add-form .scrub-field input {

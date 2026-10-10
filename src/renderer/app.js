@@ -879,24 +879,6 @@ $('atlas-repack').addEventListener('click', () => {
 for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
-{
-  // The project's pixels per unit of length.
-  const input = $('ppu-input');
-  const parse = () => parseInt(input.value, 10);
-  const apply = (value) => {
-    if (value === editor.ppu || !(value >= 1 && value <= 128)) return;
-    const faces = editor.mesh.faces.length;
-    if (faces && !window.confirm(`Изменить плотность на ${value} пикселей на единицу?\n\nВся развёртка будет построена заново, нарисованное на текстуре потеряется. Действие можно отменить.`)) return;
-    editor.setPPU(value);
-  };
-  input.addEventListener('change', () => {
-    apply(parse());
-    refresh();
-  });
-  input.addEventListener('keydown', (event) => {
-    if (event.code === 'Enter' || event.code === 'Escape') input.blur();
-  });
-}
 
 window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
 
@@ -1105,7 +1087,7 @@ function refresh() {
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('local-toggle').classList.toggle('active', editor.localAxes);
   // Texturing.
-  if (document.activeElement !== $('ppu-input')) $('ppu-input').value = editor.ppu;
+  $('ppu-value').textContent = editor.ppu; // chosen when the project was made
   $('atlas-size').textContent = `${editor.atlas.width} × ${editor.atlas.height}`;
   // Undo and redo: lit while there is a step to take.
   $('undo-button').disabled = editor.history.undoStack.length === 0;

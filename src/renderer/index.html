@@ -309,10 +309,9 @@
       </section>
       <section id="texture-section">
         <h2>Текстура</h2>
-        <label title="Сколько пикселей текстуры приходится на единицу длины. Одно значение на весь проект: пиксель везде одного размера. При смене вся развёртка строится заново, нарисованное теряется">
-          <span>Пикселей на единицу</span>
-          <input id="ppu-input" type="text" inputmode="numeric" spellcheck="false">
-        </label>
+        <div class="texture-line" title="Сколько пикселей текстуры приходится на единицу длины. Задаётся при создании проекта, одно значение на весь проект">
+          <span>Пикселей на единицу</span><b id="ppu-value"></b>
+        </div>
         <div class="texture-line" title="Размер атласа: он растёт сам, когда граням не хватает места">
           <span>Атлас</span><b id="atlas-size"></b>
         </div>

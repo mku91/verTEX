@@ -707,7 +707,6 @@ body {
   border-bottom: 0;
 }
 
-#texture-section label,
 .texture-line {
   display: flex;
   align-items: center;
@@ -715,26 +714,6 @@ body {
   gap: 8px;
   margin-bottom: 6px;
   color: var(--text-dim);
-}
-
-#texture-section label .scrub-field {
-  flex: 0 0 84px;
-}
-
-#texture-section input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-}
-
-#texture-section input:focus {
-  border-color: var(--accent);
-  outline: 0;
 }
 
 .texture-line b {

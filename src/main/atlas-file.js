@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 // The atlas as a file beside the project, for painting it in another program.
 //
@@ -14,11 +15,14 @@ const path = require('node:path');
 //                 `bytes` is the file if there is one, `newer` whether it was
 //                 saved after the project was
 //   atlas:write   { png?, guide? }   write what is given beside the project
-//   atlas:open    open the picture in the program the system has for it
+//   atlas:open    { program? } open the picture: in the given program (the
+//                 path of its executable - the user's external editor), or
+//                 in the one the system has for such files
+//   atlas:pick-program   ask for a program's file -> its path, or null
 //   atlas:reveal  show the picture in the file manager
 //   atlas:unlink  stop watching (a new project, one not saved yet)
 
-function registerAtlasFile({ ipcMain, shell, BrowserWindow }) {
+function registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow }) {
   const links = new WeakMap(); // window -> { picture, guide, watcher, written, timer }
 
   const drop = (win) => {
@@ -95,11 +99,40 @@ function registerAtlasFile({ ipcMain, shell, BrowserWindow }) {
     }
   });
 
-  ipcMain.handle('atlas:open', async (event) => {
+  ipcMain.handle('atlas:open', async (event, { program } = {}) => {
     const link = links.get(BrowserWindow.fromWebContents(event.sender));
     if (!link) return { error: 'the project has no file yet' };
-    const problem = await shell.openPath(link.picture);
-    return problem ? { error: problem } : { path: link.picture };
+    if (!program) {
+      const problem = await shell.openPath(link.picture);
+      return problem ? { error: problem } : { path: link.picture };
+    }
+    // The user's editor, started on its own: it outlives this window, and
+    // what it prints is nobody's to read.
+    return new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(program, [link.picture], { detached: true, stdio: 'ignore' });
+      } catch (error) {
+        resolve({ error: error.message });
+        return;
+      }
+      child.once('error', (error) => resolve({ error: error.message }));
+      child.once('spawn', () => {
+        child.unref();
+        resolve({ path: link.picture });
+      });
+    });
+  });
+
+  ipcMain.handle('atlas:pick-program', async (event) => {
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+      title: 'Программа для рисования',
+      properties: ['openFile'],
+      filters: process.platform === 'win32'
+        ? [{ name: 'Программы', extensions: ['exe'] }, { name: 'Все файлы', extensions: ['*'] }]
+        : [{ name: 'Все файлы', extensions: ['*'] }],
+    });
+    return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
   });
 
   ipcMain.handle('atlas:reveal', (event) => {

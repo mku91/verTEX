@@ -388,6 +388,7 @@
           <div class="settings-group">Редактор</div>
           <button data-page="controls">Управление</button>
           <button data-page="hotkeys">Хоткеи</button>
+          <button data-page="textures">Текстуры</button>
         </nav>
         <div class="settings-pages">
           <section data-page="appearance">
@@ -407,6 +408,15 @@
               <input type="range" id="zoom-smoothness" min="0" max="10" step="1">
               <output id="zoom-smoothness-value"></output>
             </label>
+          </section>
+          <section data-page="textures" hidden>
+            <label title="Программа, в которой открывается картинка атласа по кнопке «Рисовать»: путь к её исполняемому файлу. Пусто — та, которой система открывает такие файлы">
+              <span>Внешний редактор</span>
+              <input type="text" id="external-editor" spellcheck="false" placeholder="программа по умолчанию">
+              <button type="button" id="external-editor-pick">Обзор…</button>
+              <button type="button" id="external-editor-clear" title="Открывать программой по умолчанию">Сбросить</button>
+            </label>
+            <p class="settings-note">Кнопка «Рисовать» в панели «Текстура» откроет картинку атласа в этой программе. Сохранённое там сразу видно на модели.</p>
           </section>
           <section data-page="hotkeys" hidden>
             <div class="hotkeys-head">

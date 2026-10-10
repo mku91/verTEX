@@ -4,6 +4,12 @@
 // is written to the file. With it goes the guide, the faces' outlines.
 //
 // A project that has no file yet has nowhere to keep them: open() saves it first.
+//
+// The picture is opened in the user's external editor - the program whose
+// path is in the settings (EXTERNAL_EDITOR_KEY) - or, with none set, in
+// whatever the system opens such files with.
+export const EXTERNAL_EDITOR_KEY = 'vertex.externalEditor';
+
 export class AtlasLink extends EventTarget {
   constructor(editor, project, api) {
     super();
@@ -67,8 +73,14 @@ export class AtlasLink extends EventTarget {
   // Opens the picture in the program the system has for it; the project is saved first if it has no file.
   async open() {
     if (!(await this.ready())) return;
-    const result = await this.api.open();
-    if (result?.error) await this.project.api.alert('Не удалось открыть атлас', result.error);
+    const program = localStorage.getItem(EXTERNAL_EDITOR_KEY) || null;
+    const result = await this.api.open(program);
+    if (result?.error) {
+      await this.project.api.alert(
+        'Не удалось открыть атлас',
+        program ? `Программа из настроек не запустилась:\n${program}\n\n${result.error}` : result.error,
+      );
+    }
   }
 
   async reveal() {

@@ -15,7 +15,8 @@ contextBridge.exposeInMainWorld('vertex', {
   atlas: {
     link: (project) => ipcRenderer.invoke('atlas:link', { project }),
     write: (files) => ipcRenderer.invoke('atlas:write', files),
-    open: () => ipcRenderer.invoke('atlas:open'),
+    open: (program) => ipcRenderer.invoke('atlas:open', { program }),
+    pickProgram: () => ipcRenderer.invoke('atlas:pick-program'),
     reveal: () => ipcRenderer.invoke('atlas:reveal'),
     unlink: () => ipcRenderer.send('atlas:unlink'),
     onChanged: (callback) => ipcRenderer.on('atlas:changed', (_event, bytes) => callback(bytes)),

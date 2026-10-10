@@ -9,7 +9,7 @@ import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles } from './project.js';
-import { AtlasLink } from './atlas-link.js';
+import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
@@ -870,6 +870,24 @@ showProject();
 
 // Texturing: the atlas as a file beside the project, painted in another program.
 project.ask = askNewProject;
+
+// The settings' external editor: the program the atlas' picture is opened in.
+{
+  const input = $('external-editor');
+  const set = (program) => {
+    program = program.trim().replace(/^"(.*)"$/, '$1'); // a path pasted with its quotes
+    input.value = program;
+    if (program) localStorage.setItem(EXTERNAL_EDITOR_KEY, program);
+    else localStorage.removeItem(EXTERNAL_EDITOR_KEY);
+  };
+  input.value = localStorage.getItem(EXTERNAL_EDITOR_KEY) ?? '';
+  input.addEventListener('change', () => set(input.value));
+  $('external-editor-clear').addEventListener('click', () => set(''));
+  $('external-editor-pick').addEventListener('click', async () => {
+    const program = await window.vertex?.atlas?.pickProgram?.();
+    if (program) set(program);
+  });
+}
 const atlasLink = new AtlasLink(editor, project, window.vertex?.atlas);
 $('atlas-open').addEventListener('click', () => atlasLink.open());
 $('atlas-reveal').addEventListener('click', () => atlasLink.reveal());

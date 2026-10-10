@@ -28,7 +28,7 @@ function createWindow() {
 }
 
 const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow });
-registerAtlasFile({ ipcMain, shell, BrowserWindow });
+registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow });
 
 // Menu items talk to the renderer through a single 'menu' channel.
 const send = (action) => (_item, win) => win?.webContents.send('menu', action);

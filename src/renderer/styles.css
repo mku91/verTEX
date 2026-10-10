@@ -2112,6 +2112,43 @@ body {
   text-align: right;
 }
 
+.dialog input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.dialog input[type='text']:focus {
+  border-color: var(--accent);
+  outline: 0;
+}
+
+.dialog label > button {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dialog label > button:hover {
+  background: var(--hover);
+}
+
+.settings-note {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 .dialog select {
   flex: 1;
   padding: 4px 6px;

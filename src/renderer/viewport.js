@@ -43,6 +43,7 @@ export class Viewport {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color();
     this.focus = false;
+    this.preview = false; // see setPreview()
     this.backdrop = []; // grid and ground axes; dimmed in focus mode
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
@@ -194,7 +195,19 @@ export class Viewport {
     }
     this.scene.add(...this.backdrop);
     this.scene.background.set(background);
+    this.applyPreview();
     this.requestRender();
+  }
+
+  // The preview look: the model alone, on black - no floor, no axes.
+  setPreview(on) {
+    this.preview = on;
+    this.applyTheme(); // the background back in its colour, or black
+  }
+
+  applyPreview() {
+    for (const object of this.backdrop) object.visible = !this.preview;
+    if (this.preview) this.scene.background.set(0x000000);
   }
 
   // Focus look for modal operations: a darker background with a faint grid.

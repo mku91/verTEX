@@ -1455,12 +1455,20 @@ export class MeshView {
     this.applyLook();
   }
 
+  // The preview look: the model as it will be seen outside the editor - its
+  // surface, painted, and nothing drawn on it. On top of any shading.
+  setBare(on) {
+    this.bare = on;
+    this.applyLook();
+  }
+
   applyLook() {
-    const wireframe = this.focus || this.shading === 'wireframe';
+    const wireframe = !this.bare && (this.focus || this.shading === 'wireframe');
     this.light = wireframe;
     this.solid.visible = !wireframe; // still hit by picking rays when not drawn
+    this.wire.visible = !this.bare;
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
-    const map = this.shading === 'textured' && this.atlas ? this.atlas.texture : null;
+    const map = (this.bare || this.shading === 'textured') && this.atlas ? this.atlas.texture : null;
     const material = this.surface;
     if (material.map !== map) {
       material.map = map;
@@ -1469,7 +1477,7 @@ export class MeshView {
       this.updateSurfaceColors(); // the marker colours give way to the picture
     }
     for (const tint of Object.values(this.tints)) {
-      tint.visible = !this.focus && this.shading === 'orientation';
+      tint.visible = !this.bare && !this.focus && this.shading === 'orientation';
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
   }

@@ -1716,13 +1716,22 @@ body {
   right: 186px;
 }
 
-#focus-button.active {
+/* Left of it, the preview switch. */
+#preview-button {
+  position: absolute;
+  top: 10px;
+  right: 222px;
+}
+
+#focus-button.active,
+#preview-button.active {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
 }
 
-#focus-button i {
+#focus-button i,
+#preview-button i {
   display: block;
   flex: none;
   width: 18px;
@@ -1732,6 +1741,7 @@ body {
 }
 
 #focus-button,
+#preview-button,
 #shading-button {
   display: block;
   width: 30px;
@@ -1745,6 +1755,7 @@ body {
 }
 
 #focus-button:hover:not(.active),
+#preview-button:hover:not(.active),
 #shading-button:hover,
 #shading-button.active {
   background: var(--hover);

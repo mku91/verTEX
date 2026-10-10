@@ -42,6 +42,7 @@ const ACTIONS = {
   'toggle-snapping': () => setSnapping(!editor.snapGrid.enabled),
   'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
+  'toggle-preview': () => editor.setPreview(!editor.preview),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
@@ -105,6 +106,7 @@ const hotkeys = new Hotkeys(
     { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
     { id: 'view.uv', group: 'Вид', label: 'Редактор UV', keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
     { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
+    { id: 'view.preview', group: 'Вид', label: 'Просмотр', keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
     { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
     { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
     { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
@@ -474,7 +476,7 @@ const HOTKEY_TITLES = {
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
-  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#focus-button': 'view.focus',
+  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus',
   '[data-shading="orientation"]': 'view.orientation',
 };
 for (const selector of Object.keys(HOTKEY_TITLES)) {
@@ -838,7 +840,7 @@ for (const type of ['keydown', 'keyup']) {
 }
 
 // Buttons must not take focus, or Space would press the last clicked one.
-for (const id of ['toolbar', 'modes', 'history-actions', 'top-actions', 'shading', 'focus-button']) {
+for (const id of ['toolbar', 'modes', 'history-actions', 'top-actions', 'shading', 'focus-button', 'preview-button']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault());
 }
 for (const control of gridControls) {
@@ -1101,6 +1103,8 @@ function refresh() {
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('focus-button').classList.toggle('active', editor.focus);
+  $('preview-button').classList.toggle('active', editor.preview);
+  mirrorDisplay.group.visible = !editor.preview; // the mirror's planes are the editor's too
   showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('local-toggle').classList.toggle('active', editor.localAxes);

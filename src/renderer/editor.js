@@ -125,6 +125,7 @@ export class Editor extends EventTarget {
     // Texturing (see unwrap.js): the project's pixels per unit of length, and its atlas.
     this.ppu = 16;
     this.uvLook = false; // the UV editor is open, see setUVLook()
+    this.preview = false; // the model alone is shown, see setPreview()
     this.atlas = new Atlas();
     this.atlas.addEventListener('change', () => this.viewport.requestRender());
     // The place tool: what is being placed (see beginPlace()), and the side it lies on.
@@ -524,7 +525,7 @@ export class Editor extends EventTarget {
     const entry = this.pivotEntry();
     // The pivot tool needs an object to have a pivot; the others, something to move.
     const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0;
-    if (!mode || nothing || this.operation) {
+    if (!mode || nothing || this.operation || this.preview) {
       this.gizmo.detach();
     } else {
       // What belongs to a turned object is scaled along that object's own
@@ -750,7 +751,7 @@ export class Editor extends EventTarget {
   }
 
   updatePivotMarker() {
-    const entry = this.operation ? null : this.pivotEntry();
+    const entry = this.operation || this.preview ? null : this.pivotEntry();
     const children = entry === null ? [] : this.pivotChildren(entry);
     while (this.pivotRings.length < children.length) {
       const ring = new THREE.Sprite(this.pivotMarker.material);
@@ -1268,6 +1269,7 @@ export class Editor extends EventTarget {
         this.gizmoUsed = false;
         down = null;
         if (event.button !== 0) return;
+        if (this.preview) return; // only looked at: the press is the camera's
         // The pencil works through ordinary vertex drags, see sproutVertex().
         if (this.operation && this.operation !== 'pencil') {
           event.stopImmediatePropagation();
@@ -1311,6 +1313,7 @@ export class Editor extends EventTarget {
       { capture: true },
     );
     dom.addEventListener('pointermove', (event) => {
+      if (this.preview) return; // only looked at
       this.setFineSnap(event.ctrlKey); // in case the key event was missed
       if (this.cut) {
         this.moveCut(event.clientX, event.clientY);
@@ -2566,6 +2569,13 @@ export class Editor extends EventTarget {
       return face.map((vertex, k) => [vertex, face[(k + 1) % face.length]]);
     });
 
+    if (this.preview) {
+      // Nothing on the model but its surface.
+      this.view.points.visible = false;
+      this.view.setHighlight({ selectedFaces: [], hoveredFaces: [], selectedEdges: [], hoveredEdges: [] });
+      this.viewport.requestRender();
+      return;
+    }
     // Vertex points would only get in the way of aiming at edges and faces.
     this.view.points.visible = mode === 'vertex' || this.focus;
     this.view.updateColors(this.selection, mode === 'vertex' && hovered !== null ? hovered : -1);
@@ -2576,6 +2586,23 @@ export class Editor extends EventTarget {
       hoveredEdges: edges(hover),
     });
     this.viewport.requestRender();
+  }
+
+  // The preview: the main view shows the model as it will be seen outside the
+  // editor - painted, on black, with no floor, no edges or vertices, no
+  // selection, no gizmo. It is a look, and a look only: nothing is edited
+  // through the main view while it is on (the camera still turns).
+  setPreview(on) {
+    if (on === this.preview || this.busy()) return;
+    if (on) this.setOperation(null);
+    this.preview = on;
+    this.hovered = null;
+    this.viewport.renderer.domElement.style.cursor = '';
+    this.view.setBare(on);
+    this.viewport.setPreview(on);
+    this.refreshHighlight();
+    this.placeGizmo();
+    this.emitChange();
   }
 
   // Whether the UV editor is open: picked faces are then shown by their

@@ -20,7 +20,12 @@ import { quaternionOf } from './frames.js';
 // fits; a new chart is given free room, and the atlas grows when there is none.
 
 const SAME_PLANE = 1e-4; // how far apart two faces' planes may be, and their normals' cosine from 1
-const GAP = 1; // px kept free between charts
+// Every chart has a rim of this many pixels all round it, which is its own:
+// the atlas repeats the chart's edge pixels there (see Atlas.extrude()), so
+// that a renderer that blends neighbouring pixels at a face's edge blends in
+// more of the same and not another face or nothing. Charts are therefore two
+// rims apart, and one rim from the atlas' edge.
+export const PADDING = 1;
 const START_SIZE = 64; // px, an empty project's atlas
 const MAX_SIZE = 4096;
 
@@ -164,27 +169,28 @@ class Room {
     this.taken = new Uint8Array(width * height);
   }
 
-  // Whether the rectangle, with the gap round it, is inside and free.
+  // Whether the rectangle, with its rim, is inside and free.
   free(x, y, w, h) {
-    if (x < 0 || y < 0 || x + w > this.width || y + h > this.height) return false;
-    const x1 = Math.min(this.width, x + w + GAP);
-    const y1 = Math.min(this.height, y + h + GAP);
-    for (let row = Math.max(0, y - GAP); row < y1; row++) {
-      for (let column = Math.max(0, x - GAP); column < x1; column++) {
+    if (x < PADDING || y < PADDING || x + w + PADDING > this.width || y + h + PADDING > this.height) return false;
+    for (let row = y - PADDING; row < y + h + PADDING; row++) {
+      for (let column = x - PADDING; column < x + w + PADDING; column++) {
         if (this.taken[row * this.width + column]) return false;
       }
     }
     return true;
   }
 
+  // Takes the rectangle and its rim.
   take(x, y, w, h) {
-    for (let row = y; row < y + h; row++) this.taken.fill(1, row * this.width + x, row * this.width + x + w);
+    for (let row = y - PADDING; row < y + h + PADDING; row++) {
+      this.taken.fill(1, row * this.width + x - PADDING, row * this.width + x + w + PADDING);
+    }
   }
 
   // The first free place for a rectangle, row by row; null if there is none.
   find(w, h) {
-    for (let y = 0; y + h <= this.height; y++) {
-      for (let x = 0; x + w <= this.width; x++) {
+    for (let y = PADDING; y + h + PADDING <= this.height; y++) {
+      for (let x = PADDING; x + w + PADDING <= this.width; x++) {
         if (this.free(x, y, w, h)) return { x, y };
       }
     }

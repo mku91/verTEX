@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { START_SIZE } from './unwrap.js';
+import { START_SIZE, PADDING } from './unwrap.js';
 
 // The texture atlas: the one picture a project's model is painted with.
 //
@@ -12,6 +12,11 @@ import { START_SIZE } from './unwrap.js';
 //     own, every face in it outlined;
 //   - the guide: a picture of the same size with nothing but the faces'
 //     outlines, to lay over the atlas in the painting program.
+//
+// And it is kept safe from bleeding: every chart has a rim (see PADDING in
+// unwrap.js) in which its edge pixels are repeated outwards. That is done
+// here, after every change, and is not for painting: what is painted in a
+// rim is painted over.
 
 const OUTLINE = 0.72; // how much of the fill's brightness a template outline has
 
@@ -159,8 +164,11 @@ export class Atlas extends EventTarget {
     // Room that charts had and none has now is swept: what was painted there
     // is of faces that are gone or have moved away. (Outside the charts'
     // rooms nothing is touched: that is the painter's own.)
-    const rooms = result.charts.map((chart) => chart.rect);
-    for (const { rect } of this.charts) {
+    // (A room is a chart's rectangle with its rim.)
+    const withRim = ({ x, y, w, h }) => ({ x: x - PADDING, y: y - PADDING, w: w + 2 * PADDING, h: h + 2 * PADDING });
+    const rooms = result.charts.map((chart) => withRim(chart.rect));
+    for (const chart of this.charts) {
+      const rect = withRim(chart.rect);
       if (rooms.some((room) => room.x === rect.x && room.y === rect.y && room.w === rect.w && room.h === rect.h)) continue;
       const image = context.getImageData(rect.x, rect.y, rect.w, rect.h);
       let swept = false;
@@ -178,22 +186,30 @@ export class Atlas extends EventTarget {
         painted = true;
       }
     }
-    for (const { x, y, w, h } of result.fresh) context.clearRect(x, y, w, h);
+    for (const fresh of result.fresh) {
+      const { x, y, w, h } = withRim(fresh);
+      context.clearRect(x, y, w, h);
+    }
     result.moved.forEach(({ to, w, h }, k) => {
-      context.clearRect(to.x, to.y, w, h);
+      const room = withRim({ ...to, w, h });
+      context.clearRect(room.x, room.y, room.w, room.h);
       context.putImageData(lifted[k], to.x, to.y);
     });
     painted ||= result.moved.length > 0 || result.fresh.length > 0;
-    this.charts = result.charts.map((chart) => ({
-      rect: chart.rect,
-      polygons: chart.faces.map((i) => mesh.faces[i].uv),
-    }));
+    this.charts = result.charts.map((chart) => {
+      const polygons = chart.faces.map((i) => mesh.faces[i].uv);
+      // The pixels the chart's faces show: what is the painter's in its room.
+      const pixels = new Set();
+      for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
+      return { rect: chart.rect, polygons, pixels };
+    });
     if (this.template) {
       // New rooms, and those a chart has moved to: it moved because it grew,
       // and what it grew by is as bare as a new one.
       const within = (rect) => [...result.fresh, ...result.moved.map(({ to }) => to)].some((f) => f.x === rect.x && f.y === rect.y);
       for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart);
     }
+    if (this.extrude(false)) painted = true;
     if (painted) this.touch();
     // Where the faces are has changed, painted or not: the guide is another picture now.
     if (result.changed || painted) this.dispatchEvent(new Event('layout'));
@@ -245,7 +261,52 @@ export class Atlas extends EventTarget {
   // Paints the template over every chart again - where nothing is painted.
   paintTemplates() {
     for (const chart of this.charts) this.paintTemplate(chart);
+    this.extrude(false);
     this.touch();
+  }
+
+  // Repeats every chart's edge pixels outwards into its rim: a pixel next to
+  // the chart that no face shows takes the colour of the chart's pixel it
+  // touches - by a side if it can, by a corner otherwise. Returns whether the
+  // picture changed; `tell` says whether to announce it (see touch()).
+  extrude(tell = true) {
+    if (this.charts.length === 0) return false;
+    const { width, height } = this;
+    const image = this.context.getImageData(0, 0, width, height);
+    const { data } = image;
+    let changed = false;
+    const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const CORNERS = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+    for (const { pixels } of this.charts) {
+      const rim = new Map(); // a rim pixel -> the chart pixel it copies
+      for (const steps of [SIDES, CORNERS]) {
+        for (const key of pixels) {
+          const [x, y] = key.split(',').map(Number);
+          for (const [dx, dy] of steps) {
+            const px = x + dx;
+            const py = y + dy;
+            const beside = `${px},${py}`;
+            if (px < 0 || py < 0 || px >= width || py >= height || pixels.has(beside) || rim.has(beside)) continue;
+            rim.set(beside, [x, y]);
+          }
+        }
+      }
+      for (const [beside, [x, y]] of rim) {
+        const [px, py] = beside.split(',').map(Number);
+        const from = (y * width + x) * 4;
+        const to = (py * width + px) * 4;
+        for (let channel = 0; channel < 4; channel++) {
+          if (data[to + channel] === data[from + channel]) continue;
+          data[to + channel] = data[from + channel];
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return false;
+    this.context.putImageData(image, 0, 0);
+    if (tell) this.touch();
+    else this.kept = null;
+    return true;
   }
 
   // The guide: a canvas of the atlas' size, see-through but for the outlines of the faces.
@@ -288,7 +349,10 @@ export class Atlas extends EventTarget {
     this.context.clearRect(0, 0, this.width, this.height);
     this.context.drawImage(picture, 0, 0);
     picture.close();
-    this.touch(byUser);
+    // The painter's picture is taken as it is; its rims are ours to fill, and
+    // if that changed anything the file is to be written again.
+    const rimmed = this.extrude(false);
+    this.touch(byUser && !rimmed);
     return true;
   }
 }

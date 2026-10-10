@@ -327,13 +327,6 @@ export class UVEditor {
     }
     const shift = this.drag?.moved ? this.drag.shift : [0, 0];
     for (const chart of picked) {
-      if (shift[0] || shift[1]) {
-        // Where it is now, faintly, while it is being dragged away.
-        outline(chart);
-        context.lineWidth = 1;
-        context.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        context.stroke();
-      }
       outline(chart, shift[0] || shift[1] ? editor.chartShift(chart, shift[0], shift[1]) : shift);
       context.fillStyle = 'rgba(80, 250, 123, 0.18)';
       context.fill();

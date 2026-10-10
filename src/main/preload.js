@@ -11,10 +11,11 @@ contextBridge.exposeInMainWorld('vertex', {
     setState: (state) => ipcRenderer.send('project:state', state),
     close: () => ipcRenderer.send('project:close'),
   },
-  // The atlas as a file beside the project, see atlas-file.js.
+  // The atlas as working files on disk, see atlas-file.js.
   atlas: {
     link: (project) => ipcRenderer.invoke('atlas:link', { project }),
     write: (files) => ipcRenderer.invoke('atlas:write', files),
+    discard: () => ipcRenderer.invoke('atlas:discard'),
     open: (program) => ipcRenderer.invoke('atlas:open', { program }),
     pickProgram: () => ipcRenderer.invoke('atlas:pick-program'),
     reveal: () => ipcRenderer.invoke('atlas:reveal'),

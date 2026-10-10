@@ -288,7 +288,10 @@ export class Project extends EventTarget {
     if (!this.dirty) return true;
     const answer = await this.api.confirm(this.name);
     if (answer === 'save') return this.write(false);
-    return answer === 'discard';
+    if (answer !== 'discard') return false;
+    // What was not saved is thrown away - wherever else it is kept, too.
+    this.dispatchEvent(new Event('discard'));
+    return true;
   }
 
   // Writes the project; asks where if it has no file yet or `elsewhere` is

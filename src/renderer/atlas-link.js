@@ -1,9 +1,11 @@
-// Keeps the atlas as a file beside the project (see src/main/atlas-file.js),
-// so that it can be painted in another program while the model is open here:
-// what the painter saves shows on the model at once, and what the unwrap moves
-// is written to the file. With it goes the guide, the faces' outlines.
+// Keeps the atlas as working files on disk (see src/main/atlas-file.js, which
+// says where), so that it can be painted in another program while the model
+// is open here: what the painter saves shows on the model at once, and what
+// the unwrap moves is written to the file. With it goes the guide, the faces'
+// outlines.
 //
-// A project that has no file yet has nowhere to keep them: open() saves it first.
+// The files are a project's: one that has no file of its own yet has none,
+// and open() saves it first.
 //
 // The picture is opened in the user's external editor - the program whose
 // path is in the settings (EXTERNAL_EDITOR_KEY) - or, with none set, in
@@ -25,6 +27,8 @@ export class AtlasLink extends EventTarget {
     editor.atlas.addEventListener('change', (event) => this.queue(!event.detail.byUser, true));
     editor.atlas.addEventListener('layout', () => this.queue(false, true));
     project.addEventListener('change', () => this.follow());
+    // Unsaved changes thrown away: the picture painted and not saved goes with them.
+    project.addEventListener('discard', () => this.api.discard());
     this.api.onChanged((bytes) => editor.paintAtlas(bytes));
     this.follow();
   }

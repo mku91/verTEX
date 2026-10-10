@@ -1563,15 +1563,6 @@ export class MeshView {
     this.applyHighlight();
   }
 
-  // The colour of the outline of what is selected: a shade of grey from black
-  // (0) to white (1), for an outline that blinks; null gives it back the
-  // selection's own colour.
-  shadeSelectedEdges(shade) {
-    const { color } = this.overlays.selectedEdges.material;
-    if (shade === null) color.copy(COLOR_SELECTED);
-    else color.setScalar(shade);
-  }
-
   applyHighlight() {
     const { vertices } = this.mesh;
 

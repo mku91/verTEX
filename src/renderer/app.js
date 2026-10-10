@@ -701,6 +701,50 @@ function dropAxisHold() {
   editor.holdAxis(null);
 }
 
+// A new project is asked about first: how it is textured. Resolves to the
+// options for Editor.newProject(), or to null if the user thinks better of it.
+const NEW_PPU_KEY = 'vertex.newProjectPPU';
+function askNewProject() {
+  const dialog = $('new-project-dialog');
+  const form = dialog.querySelector('form');
+  form.elements.ppu.value = parseInt(localStorage.getItem(NEW_PPU_KEY), 10) || 16;
+  dialog.hidden = false;
+  form.elements.ppu.focus();
+  form.elements.ppu.select();
+  return new Promise((resolve) => {
+    const done = (options) => {
+      dialog.hidden = true;
+      form.removeEventListener('submit', submit);
+      form.querySelector('[data-cancel]').removeEventListener('click', cancel);
+      window.removeEventListener('keydown', escape, true);
+      resolve(options);
+    };
+    const submit = (event) => {
+      event.preventDefault();
+      const ppu = parseInt(form.elements.ppu.value, 10);
+      if (!(ppu >= 1 && ppu <= 128)) {
+        form.elements.ppu.focus();
+        form.elements.ppu.select();
+        return;
+      }
+      localStorage.setItem(NEW_PPU_KEY, ppu);
+      done({ ppu });
+    };
+    const cancel = () => done(null);
+    const escape = (event) => {
+      // The dialog owns the keyboard while it is open: the editor's shortcuts
+      // do not hear it, the form itself does (typing, Tab, Enter).
+      event.stopImmediatePropagation();
+      if (event.code !== 'Escape') return;
+      event.preventDefault();
+      cancel();
+    };
+    form.addEventListener('submit', submit);
+    form.querySelector('[data-cancel]').addEventListener('click', cancel);
+    window.addEventListener('keydown', escape, true);
+  });
+}
+
 window.addEventListener('keydown', (event) => {
   // The settings dialog owns the keyboard while it is open.
   if (!$('settings-dialog').hidden) {
@@ -811,6 +855,7 @@ project.addEventListener('change', showProject);
 showProject();
 
 // Texturing: the atlas as a file beside the project, painted in another program.
+project.ask = askNewProject;
 const atlasLink = new AtlasLink(editor, project, window.vertex?.atlas);
 $('atlas-open').addEventListener('click', () => atlasLink.open());
 $('atlas-reveal').addEventListener('click', () => atlasLink.reveal());

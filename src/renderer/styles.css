@@ -565,6 +565,22 @@ body {
   font-size: 12px;
 }
 
+/* A button with its name on it. */
+.uv-bar button.worded {
+  gap: 6px;
+  width: auto;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.uv-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
 .uv-status {
   margin-left: 10px;
   overflow: hidden;
@@ -1815,6 +1831,74 @@ body {
 
 #settings-dialog[hidden] {
   display: none;
+}
+
+/* A dialog that asks one thing, over the whole window. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal .choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.modal .choice input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.modal .choice span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modal .choice small {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.modal .choice.unavailable {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.modal .field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -6px 0 0 21px;
+  color: var(--text-dim);
+}
+
+.modal .field input {
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.modal .field input:focus {
+  border-color: var(--accent);
+  outline: 0;
 }
 
 .dialog {

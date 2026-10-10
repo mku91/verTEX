@@ -202,6 +202,13 @@
     <section id="uv-editor" hidden>
       <div class="uv-bar">
         <b>UV</b>
+        <button data-uv="add" class="worded" title="Положить выбранные объекты на атлас: их грани получат место на картинке">
+          <i class="fa-solid fa-plus"></i><span>Создать атлас</span>
+        </button>
+        <button data-uv="remove" title="Убрать выбранные объекты с атласа: их грани потеряют место на картинке, а нарисованное для них сотрётся (можно отменить)">
+          <i class="fa-solid fa-minus"></i>
+        </button>
+        <i class="uv-divider"></i>
         <button data-uv="turn-left" title="Повернуть выбранные лоскуты на 90° против часовой стрелки">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
@@ -342,6 +349,29 @@
   </div>
 
   <div id="warnings-list" hidden></div>
+
+  <div id="new-project-dialog" class="modal" hidden>
+    <form class="dialog">
+      <h2>Новый проект</h2>
+      <h3>Текстуры</h3>
+      <label class="choice">
+        <input type="radio" name="atlases" value="single" checked>
+        <span>Один атлас на проект<small>Вся модель красится одной картинкой, пиксель везде одного размера</small></span>
+      </label>
+      <label class="field" title="Сколько пикселей текстуры приходится на единицу длины. Потом можно поменять, но развёртка тогда строится заново">
+        <span>Пикселей на единицу</span>
+        <input name="ppu" type="text" inputmode="numeric" spellcheck="false" value="16">
+      </label>
+      <label class="choice unavailable" title="В программе этого пока нет">
+        <input type="radio" name="atlases" value="multi" disabled>
+        <span>Несколько атласов<small>пока нет</small></span>
+      </label>
+      <div class="form-buttons">
+        <button type="button" data-cancel>Отмена</button>
+        <button type="submit">Создать</button>
+      </div>
+    </form>
+  </div>
 
   <div id="settings-dialog" hidden>
     <div class="dialog settings">

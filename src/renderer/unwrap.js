@@ -19,6 +19,9 @@ import { quaternionOf } from './frames.js';
 // the texture stays where it was painted - and is moved only if it no longer
 // fits; a new chart is given free room, and the atlas grows when there is none.
 //
+// Nothing is laid out unasked: an object is put on the atlas by the user
+// (`atlas` on the object), and only then do its faces get places.
+//
 // A chart the user has placed by hand is pinned (`pin` on its faces): it stays
 // where it was put whatever else is there - that is how several faces are
 // given the same picture - and only the charts that are not pinned keep out
@@ -56,7 +59,9 @@ export function chartsOf(mesh, ppu) {
   const { faces, vertices, vertexObject, objects } = mesh;
   const normals = faces.map((_, i) => mesh.faceNormal(i));
   const offsets = faces.map((face, i) => normals[i].dot(vertices[face[0]]));
-  const sound = (i) => normals[i].lengthSq() > 0.5;
+  // Only the objects the user has put on the atlas are laid out on it.
+  const onAtlas = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
+  const sound = (i) => normals[i].lengthSq() > 0.5 && onAtlas.has(vertexObject[faces[i][0]]);
 
   // Faces that share an edge and a plane are one chart.
   const root = faces.map((_, i) => i);
@@ -282,6 +287,14 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
   }
 
   let changed = false;
+  // A face that is in no chart - its object is not on the atlas - has no place.
+  const placed = new Set(charts.flatMap((chart) => chart.faces));
+  mesh.faces.forEach((face, i) => {
+    if (placed.has(i) || (!face.uv && !face.pin)) return;
+    delete face.uv;
+    delete face.pin;
+    changed = true;
+  });
   for (const chart of charts) {
     const lay = LAYS[chart.lay];
     for (const i of chart.faces) {

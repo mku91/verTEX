@@ -70,11 +70,21 @@ export class UVEditor {
     if (size !== this.fitted && this.canvas.clientWidth > 0) this.fit();
     const charts = this.pickedCharts();
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (button.dataset.uv !== 'fit') button.disabled = charts.length === 0;
+      if (!['fit', 'add', 'remove'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
     }
     this.container.querySelector('[data-uv="auto"]').disabled = !charts.some((chart) => chart.pinned);
+    // Nothing is on the atlas unasked: the objects in hand are put there, or taken off.
+    const { objects } = this.editor.mesh;
+    const hand = this.editor.objectsInHand().map((index) => objects[index]);
+    const add = this.container.querySelector('[data-uv="add"]');
+    const started = objects.some((object) => object.atlas);
+    add.querySelector('span').textContent = started ? 'Добавить в атлас' : 'Создать атлас';
+    add.disabled = !hand.some((object) => !object.atlas);
+    this.container.querySelector('[data-uv="remove"]').disabled = !hand.some((object) => object.atlas);
     this.status.textContent = charts.length === 0
-      ? 'Клик по грани на атласе выбирает её лоскут'
+      ? started
+        ? 'Клик по грани на атласе выбирает её лоскут'
+        : 'Атлас пуст: выберите объект и нажмите «Создать атлас»'
       : charts.length === 1
         ? `${charts[0].rect.w} × ${charts[0].rect.h} px, место ${charts[0].rect.x}, ${charts[0].rect.y}${charts[0].pinned ? ' · закреплён' : ''}`
         : `Лоскутов: ${charts.length}`;
@@ -86,7 +96,9 @@ export class UVEditor {
     if (name === 'fit') {
       this.fit();
       this.draw();
-    } else if (name === 'turn-left') this.editor.placeCharts(faces, { turn: -1 });
+    } else if (name === 'add') this.editor.setOnAtlas(this.editor.objectsInHand(), true);
+    else if (name === 'remove') this.editor.setOnAtlas(this.editor.objectsInHand(), false);
+    else if (name === 'turn-left') this.editor.placeCharts(faces, { turn: -1 });
     else if (name === 'turn-right') this.editor.placeCharts(faces, { turn: 1 });
     else if (name === 'flip-h') this.editor.placeCharts(faces, { flip: 'h' });
     else if (name === 'flip-v') this.editor.placeCharts(faces, { flip: 'v' });

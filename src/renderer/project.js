@@ -52,7 +52,7 @@ function modelOf(editor) {
     pins: mesh.faces.map((face, i) => (face.pin ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas }) => {
       const frame = frames.get(id);
       const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
       // Inside a group that is not turned the angles are the entry's own, as they were set.
@@ -69,6 +69,7 @@ function modelOf(editor) {
         ...(pivot ? {} : { autoOrigin: true }),
         ...(mirror?.length ? { mirror: [...mirror] } : {}),
         ...(color ? { color } : {}), // a marker colour's id, see marker-colors.js
+        atlas: atlas ?? null, // the atlas the object is on (its id), or null: not textured
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -187,6 +188,7 @@ export function readProject(files) {
     const sound =
       object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
       (object.color === undefined || typeof object.color === 'string') &&
+      (object.atlas === undefined || object.atlas === null || typeof object.atlas === 'string') &&
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))
         : object.pivot === undefined || triple(object.pivot));
@@ -305,7 +307,10 @@ export class Project extends EventTarget {
   newProject() {
     return this.run(async () => {
       if (!(await this.mayDiscard())) return;
-      if (!this.editor.newProject()) return;
+      // What kind of project: asked by the window (see app.js), if it has a way to ask.
+      const options = this.ask ? await this.ask() : {};
+      if (!options) return;
+      if (!this.editor.newProject(options)) return;
       this.path = null;
       this.savedState = this.editor.history.id;
       this.report();

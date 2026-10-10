@@ -464,6 +464,8 @@ export class Mirror {
           made.parent = object.parent ?? null;
           if (object.hidden) made.hidden = true;
           if (object.color) made.color = object.color;
+          if (object.atlas) made.atlas = object.atlas;
+          else delete made.atlas;
           changed = true;
         }
         // Its pivot point and its turn: this object's, mirrored the way the piece is.

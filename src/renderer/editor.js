@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { EditableMesh, MeshView, edgeKey, cloneFace } from './mesh.js';
+import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
@@ -892,6 +892,38 @@ export class Editor extends EventTarget {
     const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
     this.atlas.apply(result, this.mesh, { sweep });
     return result.changed || resized;
+  }
+
+  // The objects in hand, as entries of the objects list (groups left out): in
+  // object mode those picked and what they hold, otherwise the ones the
+  // selection belongs to - or, with nothing selected, the one being edited.
+  objectsInHand() {
+    const { islands, islandOfVertex } = this.topology;
+    const entries = new Set();
+    if (this.mode === 'object') {
+      for (const picked of this.picked) for (const index of this.entriesUnder(picked)) entries.add(index);
+    } else {
+      for (const vertex of this.selection.size ? this.selection : this.target) entries.add(islandOfVertex[vertex]);
+    }
+    return [...entries].filter((index) => islands[index] && islands[index].kind !== 'group');
+  }
+
+  // Puts objects on the atlas, or takes them off it: their faces get places
+  // there (see unwrap.js), or lose them - and with them what was painted for
+  // them. One undo step.
+  setOnAtlas(entries, on) {
+    const objects = entries.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
+    if (objects.every((object) => Boolean(object.atlas) === on) || this.busy()) return false;
+    const before = this.snapshot();
+    for (const object of objects) {
+      if (on) object.atlas = ATLAS;
+      else delete object.atlas;
+    }
+    this.history.push(before);
+    this.rebuildView(); // lays the atlas out, and draws the faces with their pictures
+    this.placeGizmo();
+    this.emitChange();
+    return true;
   }
 
   // The charts on the atlas that hold any of the given faces - as the atlas
@@ -2934,11 +2966,11 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
-          rotation: rotation ? [...rotation] : null, color: color ?? null,
+          rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -2972,6 +3004,9 @@ export class Editor extends EventTarget {
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
       if (source.color) object.color = source.color;
+      // A copy of an object that is on the atlas is on it too, with its picture.
+      if (source.atlas) object.atlas = source.atlas;
+      else delete object.atlas;
       if (source.mirror) object.mirror = [...source.mirror];
       made.set(source.id, object);
     }
@@ -3156,7 +3191,12 @@ export class Editor extends EventTarget {
       return loop;
     });
     mesh.wires = model.wires.map((wire) => [...wire]);
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color }) => ({
+    // A project from before objects were put on the atlas one by one has every
+    // object there that has places on it.
+    const placedObjects = model.objects.some((object) => object.atlas !== undefined)
+      ? null
+      : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -3165,6 +3205,7 @@ export class Editor extends EventTarget {
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(typeof color === 'string' ? { color } : {}),
+      ...(atlas || placedObjects?.has(id) ? { atlas: ATLAS } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
@@ -3198,8 +3239,10 @@ export class Editor extends EventTarget {
   }
 
   // A fresh project: the starting cube and an empty history.
-  newProject() {
+  // `ppu` is the new project's pixels per unit of length.
+  newProject({ ppu = 16 } = {}) {
     const draft = new EditableMesh();
+    draft.autoAtlas = this.mesh.autoAtlas;
     draft.addCube();
     return this.loadProject({
       model: {
@@ -3209,6 +3252,7 @@ export class Editor extends EventTarget {
         objects: draft.objects,
         vertexObject: draft.vertexObject,
         nextObjectId: draft.nextObjectId,
+        ppu,
       },
       view: { camera: { position: [3.5, 3, 4.5], target: [0, 0.5, 0] } },
     });

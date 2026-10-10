@@ -103,6 +103,9 @@ export class EditableMesh {
   addObject(name, kind = 'mesh') {
     const id = this.nextObjectId++;
     this.objects.push({ id, name: this.freeName(name), parent: null, kind });
+    // Normally an object is put on the atlas by the user (`atlas` on it, see
+    // unwrap.js); `autoAtlas` puts every new one there at once.
+    if (this.autoAtlas && kind !== 'group') this.objects[this.objects.length - 1].atlas = ATLAS;
     return id;
   }
 
@@ -1086,6 +1089,10 @@ function edgeOverlay(color) {
   return new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ color, linewidth: 3 }));
 }
 
+// The id of the project's texture atlas, which an object that is on it has as
+// its `atlas`. There is one atlas now; the id is there for when there are more.
+export const ATLAS = 'main';
+
 // --- what a face carries ------------------------------------------------------
 //
 // A face is a loop: an array of vertex indices. The array may also carry
@@ -1169,8 +1176,13 @@ export class MeshView {
     // colour and back sides in another. They share the surface's geometry and
     // depth offset, so they cover it exactly; the surface itself stays as it is
     // for picking.
+    // The surface is drawn in two parts (see rebuild()): the faces that are on
+    // the atlas with `surface`, which the textured look gives the atlas'
+    // picture, and the rest with a material that never has one.
+    this.surface = this.solid.material;
+    this.solid.material = [this.surface, this.surface.clone()];
     const tint = (side) => {
-      const mesh = new THREE.Mesh(this.solid.geometry, this.solid.material.clone());
+      const mesh = new THREE.Mesh(this.solid.geometry, this.surface.clone());
       mesh.material.side = side;
       mesh.renderOrder = 0.5;
       mesh.visible = false;
@@ -1282,16 +1294,24 @@ export class MeshView {
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
     this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
-    this.faceTriangles.forEach((triangles, faceIndex) => {
-      if (hidden.has(faces[faceIndex][0])) return;
-      for (const triangle of triangles) {
-        this.triangleIndices.push(...triangle);
-        this.triangleFaces.push(faceIndex);
-      }
-    });
+    // First the faces that are on the atlas, then those that are not: the two
+    // parts are drawn with different materials (see applyLook()).
+    let painted = 0;
+    for (const onAtlas of [true, false]) {
+      this.faceTriangles.forEach((triangles, faceIndex) => {
+        if (hidden.has(faces[faceIndex][0]) || Boolean(faces[faceIndex].uv) !== onAtlas) return;
+        for (const triangle of triangles) {
+          this.triangleIndices.push(...triangle);
+          this.triangleFaces.push(faceIndex);
+        }
+      });
+      if (onAtlas) painted = this.triangleFaces.length;
+    }
     this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
 
     this.setPositions(this.solid, this.triangleIndices.length);
+    this.solid.geometry.addGroup(0, painted * 3, 0);
+    this.solid.geometry.addGroup(painted * 3, (this.triangleFaces.length - painted) * 3, 1);
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
     this.setPositions(this.wire, this.edgeIndices.length);
     this.setPositions(this.points, vertices.length);
@@ -1313,14 +1333,14 @@ export class MeshView {
   // after an object's colour changes; rebuild() and applyTheme() do it themselves.
   updateSurfaceColors() {
     const { faces, objects, vertexObject } = this.mesh;
-    const painted = Boolean(this.solid.material.map); // the atlas is the colour then
+    const painted = Boolean(this.surface.map); // the atlas is the colour then - of the faces that are on it
     const tints = new Map(objects.map((object) => {
       const hex = markerColor(object.color);
-      return [object.id, painted ? COLOR_WHITE : hex ? new THREE.Color(hex) : COLOR_SURFACE];
+      return [object.id, hex ? new THREE.Color(hex) : COLOR_SURFACE];
     }));
     const colors = new Float32Array(this.triangleFaces.length * 9);
     this.triangleFaces.forEach((face, triangle) => {
-      const tint = tints.get(vertexObject[faces[face][0]]) ?? (painted ? COLOR_WHITE : COLOR_SURFACE);
+      const tint = painted && faces[face].uv ? COLOR_WHITE : tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
       for (let corner = 0; corner < 3; corner++) tint.toArray(colors, triangle * 9 + corner * 3);
     });
     this.solid.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -1416,7 +1436,7 @@ export class MeshView {
     this.solid.visible = !wireframe; // still hit by picking rays when not drawn
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
     const map = this.shading === 'textured' && this.atlas ? this.atlas.texture : null;
-    const { material } = this.solid;
+    const material = this.surface;
     if (material.map !== map) {
       material.map = map;
       material.alphaTest = map ? 0.5 : 0;

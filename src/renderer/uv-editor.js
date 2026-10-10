@@ -408,12 +408,14 @@ export class UVEditor {
 
     // The faces: every chart's outlines; the pinned ones marked, the picked ones on top.
     const picked = new Set(this.pickedCharts());
-    const outline = (chart, shift = [0, 0]) => {
+    // (The faces' places are read as they are this moment: a chart being
+    // dragged is already where the drag has taken it, see previewCharts().)
+    const outline = (chart) => {
       context.beginPath();
       for (const polygon of this.polygons(chart)) {
         polygon.forEach(([x, y], k) => {
-          const px = origin.x + (x + shift[0]) * zoom;
-          const py = origin.y + (y + shift[1]) * zoom;
+          const px = origin.x + x * zoom;
+          const py = origin.y + y * zoom;
           if (k === 0) context.moveTo(px, py);
           else context.lineTo(px, py);
         });
@@ -427,9 +429,8 @@ export class UVEditor {
       context.strokeStyle = chart === this.hovered ? theme.hovered : chart.shaped ? SHAPED : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
       context.stroke();
     }
-    const shift = this.drag?.moved && this.drag.shift ? this.drag.shift : [0, 0]; // (a marker's drag shifts no chart)
     for (const chart of picked) {
-      outline(chart, shift[0] || shift[1] ? editor.chartShift(chart, shift[0], shift[1]) : shift);
+      outline(chart);
       context.fillStyle = 'rgba(80, 250, 123, 0.18)';
       context.fill();
       context.lineWidth = 2;

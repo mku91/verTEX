@@ -1133,6 +1133,8 @@ export function cloneFace(face) {
   if (face.uv) copy.uv = face.uv.map((point) => (point ? [point[0], point[1]] : null));
   if (face.pin) copy.pin = true;
   if (face.shaped) copy.shaped = true;
+  // Where the unwrap had it before the user took it in hand: where "auto" puts it back.
+  if (face.home) copy.home = face.home.map((point) => [point[0], point[1]]);
   return copy;
 }
 

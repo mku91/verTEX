@@ -988,6 +988,7 @@ export class Editor extends EventTarget {
         const face = this.mesh.faces[index];
         const corner = face.indexOf(vertex);
         if (!settle) this.chartPreview.set(face, face.uv);
+        if (settle && !face.pin && !face.home) face.home = face.uv; // taken in hand for the first time
         if (corner >= 0) face.uv = face.uv.map((point, k) => (k === corner ? [place[0], place[1]] : point));
         if (settle) {
           // The whole chart: its other faces keep their shape, but are not laid out apart from it.
@@ -1026,6 +1027,13 @@ export class Editor extends EventTarget {
       if (how.auto) {
         for (const face of members) {
           if (face.pin || face.shaped) changed = true;
+          // Back to where the unwrap had it, and to the picture that is there -
+          // its own. (If that is not known any more, it is laid out as a new one.)
+          if (face.pin || face.shaped) {
+            if (face.home?.length === face.length) face.uv = face.home;
+            else delete face.uv;
+          }
+          delete face.home;
           delete face.pin;
           delete face.shaped; // laid flat again: its shape is the unwrap's
         }
@@ -1049,6 +1057,7 @@ export class Editor extends EventTarget {
         continue;
       }
       for (const face of members) {
+        if (!face.pin && !face.home) face.home = face.uv; // taken in hand for the first time
         face.uv = face.uv.map((point) => place(point).map((value) => +value.toFixed(6)));
         face.pin = true;
       }

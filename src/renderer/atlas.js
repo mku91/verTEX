@@ -283,7 +283,12 @@ export class Atlas extends EventTarget {
     // or side by side, no rim is put on another chart's pixels.
     const shown = new Set();
     for (const { pixels } of this.charts) for (const key of pixels) shown.add(key);
-    for (const { pixels } of this.charts) {
+    // A chart that keeps its room to itself has its rim there. A pinned one
+    // lies where the user put it - on other charts, or on a picture that a
+    // chart has left - and has none: round it the picture it looks at goes on
+    // by itself, and that picture is not ours to paint on.
+    for (const { pixels, pinned } of this.charts) {
+      if (pinned) continue;
       const rim = new Map(); // a rim pixel -> the chart pixel it copies
       for (const steps of [SIDES, CORNERS]) {
         for (const key of pixels) {

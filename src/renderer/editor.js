@@ -898,6 +898,38 @@ export class Editor extends EventTarget {
     return this.atlas.charts.filter((chart) => chart.faces.some((face) => wanted.has(face)));
   }
 
+  // How far a chart can go by (dx, dy): whole pixels, and not off the atlas (its rim included).
+  chartShift(chart, dx, dy) {
+    const { rect } = chart;
+    return [
+      Math.max(PADDING - rect.x, Math.min(this.atlas.width - PADDING - rect.w - rect.x, Math.round(dx))),
+      Math.max(PADDING - rect.y, Math.min(this.atlas.height - PADDING - rect.h - rect.y, Math.round(dy))),
+    ];
+  }
+
+  // Shows on the model what moving those charts by (dx, dy) would look like,
+  // while they are being dragged: nothing is settled until placeCharts().
+  // `move` null puts the faces back as they are.
+  previewCharts(faces, move) {
+    if (this.chartPreview) {
+      for (const [face, uv] of this.chartPreview) face.uv = uv;
+      this.chartPreview = null;
+    }
+    if (move) {
+      this.chartPreview = new Map();
+      for (const chart of this.chartsOfFaces(faces)) {
+        const [dx, dy] = this.chartShift(chart, move[0], move[1]);
+        for (const index of chart.faces) {
+          const face = this.mesh.faces[index];
+          this.chartPreview.set(face, face.uv);
+          face.uv = face.uv.map(([x, y]) => [x + dx, y + dy]);
+        }
+      }
+    }
+    this.view.updateUVs();
+    this.viewport.requestRender();
+  }
+
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
   // given faces. Only the faces' places change, not the picture: this is how
   // a face is given another picture, or several faces the same one.
@@ -907,6 +939,7 @@ export class Editor extends EventTarget {
   //   { auto: true }       given back to the unwrap, which finds it free room if it needs any
   // A chart placed so is pinned: the unwrap leaves it where it is. One undo step.
   placeCharts(faces, how) {
+    if (this.chartPreview) this.previewCharts(faces, null);
     const charts = this.chartsOfFaces(faces);
     if (charts.length === 0 || this.busy()) return false;
     const before = this.snapshot();
@@ -923,9 +956,7 @@ export class Editor extends EventTarget {
       }
       let place;
       if (how.move) {
-        // Whole pixels, and not off the atlas (its rim included).
-        const dx = Math.max(PADDING - rect.x, Math.min(this.atlas.width - PADDING - rect.w - rect.x, Math.round(how.move[0])));
-        const dy = Math.max(PADDING - rect.y, Math.min(this.atlas.height - PADDING - rect.h - rect.y, Math.round(how.move[1])));
+        const [dx, dy] = this.chartShift(chart, how.move[0], how.move[1]);
         place = ([x, y]) => [x + dx, y + dy];
         if (dx === 0 && dy === 0 && members.every((face) => face.pin)) continue;
       } else if (how.turn) {

@@ -185,7 +185,11 @@ export class UVEditor {
         drag.lead = drag.charts.find((chart) => chart.faces.includes(drag.chart.faces[0])) ?? drag.charts[0];
         canvas.style.cursor = 'grabbing';
       }
-      drag.shift = this.snapped(drag, (event.clientX - drag.x) / this.zoom, (event.clientY - drag.y) / this.zoom);
+      const shift = this.snapped(drag, (event.clientX - drag.x) / this.zoom, (event.clientY - drag.y) / this.zoom);
+      if (shift[0] === drag.shift[0] && shift[1] === drag.shift[1]) return;
+      drag.shift = shift;
+      // The model shows it as it goes.
+      editor.previewCharts(this.pickedFaces(), shift);
       this.draw();
     });
     const release = (event) => {
@@ -199,6 +203,7 @@ export class UVEditor {
         return;
       }
       if (event.type === 'pointerup' && (drag.shift[0] || drag.shift[1])) editor.placeCharts(this.pickedFaces(), { move: drag.shift });
+      else editor.previewCharts(this.pickedFaces(), null);
       this.draw();
     };
     canvas.addEventListener('pointerup', release);
@@ -329,7 +334,7 @@ export class UVEditor {
         context.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         context.stroke();
       }
-      outline(chart, shift);
+      outline(chart, shift[0] || shift[1] ? editor.chartShift(chart, shift[0], shift[1]) : shift);
       context.fillStyle = 'rgba(80, 250, 123, 0.18)';
       context.fill();
       context.lineWidth = 2;

@@ -74,6 +74,45 @@ export class Mirror {
     return [...this.globalAxes].map((axis) => ({ axis, value: 0, local: false }));
   }
 
+  // Global: which object holds each object's image, as a Map of object id ->
+  // Map of (which sub-list of the planes, by its number in subsets()) -> the
+  // holder's id. The image of an object is the object whose vertices stand
+  // exactly where its own are mirrored to; of several objects standing in
+  // one another's place (copies not yet moved apart) the first has the first
+  // such image, the second the second. An object that is its own image, or
+  // has none yet, has no entry for those planes.
+  holders(vertices, vertexObject, objects) {
+    const result = new Map();
+    if (this.globalAxes.size === 0) return result;
+    const lists = subsets([...this.globalAxes].map((axis) => ({ axis, value: 0 })));
+    const points = new Map(); // object id -> where its vertices stand
+    for (const object of objects) {
+      if (object.kind !== 'group' && !object.mirror?.length) points.set(object.id, []);
+    }
+    vertices.forEach((p, i) => points.get(vertexObject[i])?.push(p));
+    const placeOf = (list) => list.map(keyOf).sort().join(';');
+    const places = new Map(); // object id -> its place
+    const standing = new Map(); // place -> the ids of the objects there, in order
+    for (const [id, own] of points) {
+      if (own.length === 0) continue;
+      const place = placeOf(own);
+      places.set(id, place);
+      if (!standing.has(place)) standing.set(place, []);
+      standing.get(place).push(id);
+    }
+    for (const [id, place] of places) {
+      const turn = standing.get(place).indexOf(id);
+      const held = new Map();
+      lists.forEach((some, n) => {
+        const mirrored = placeOf(points.get(id).map((p) => mirrorPoint(p, some)));
+        const holder = mirrored === place ? undefined : standing.get(mirrored)?.[turn];
+        if (holder !== undefined) held.set(n, holder);
+      });
+      result.set(id, held);
+    }
+    return result;
+  }
+
   // --- while vertices move ----------------------------------------------------
 
   // `old`: the vertices being moved, index -> where each was when the move
@@ -93,20 +132,38 @@ export class Mirror {
     // The vertices that are not moving, by where they stood when the move
     // began: the twins among them have moved along since the first call of
     // this move, so the index is made once per move (per `old`).
+    // (And the objects with a vertex that stays behind, `partly`; and whose
+    // image was whose as the move began, `held`, see holders().)
     if (this.stillFor !== old) {
       this.stillFor = old;
       this.still = new Map();
+      this.partly = new Set();
       mesh.vertices.forEach((vertex, i) => {
-        if (!old.has(i)) this.still.set(keyOf(vertex), i);
+        if (old.has(i)) return;
+        const key = keyOf(vertex);
+        if (!this.still.has(key)) this.still.set(key, []);
+        this.still.get(key).push(i);
+        this.partly.add(mesh.vertexObject[i]);
       });
+      this.held = this.holders(mesh.vertices.map((vertex, i) => old.get(i) ?? vertex), mesh.vertexObject, mesh.objects);
     }
-    const { still } = this;
+    const { still, partly, held } = this;
+    // The objects holding an object's images under global planes, or null.
+    const heldBy = (objectId, planes) => (planes.length && !planes[0].local ? held.get(objectId) ?? null : null);
     for (const [v, was] of old) {
-      const planes = planesOf(mesh.vertexObject[v]);
+      const objectId = mesh.vertexObject[v];
+      const planes = planesOf(objectId);
       const now = mesh.vertices[v];
-      for (const { axis, value } of planes) {
+      // An object moved whole is not held by the plane it stands on: holding
+      // some of its vertices would pull it out of shape.
+      if (!partly.has(objectId)) continue;
+      const images = heldBy(objectId, planes);
+      planes.forEach(({ axis, value }, k) => {
+        // Nor is one whose image under this plane is another object, which
+        // it only meets there: the vertex is not its own image.
+        if (images?.has((1 << k) - 1)) return;
         if (Math.abs(was[axis] - value) < EPS) now[axis] = value;
-      }
+      });
     }
     // Twins under one plane first: a vertex that is the twin of one moving
     // vertex under one plane and of another under two follows the first.
@@ -115,14 +172,18 @@ export class Mirror {
       for (const [v, was] of old) {
         const objectId = mesh.vertexObject[v];
         const planes = planesOf(objectId);
-        for (const some of subsets(planes)) {
-          if (some.length !== count) continue;
-          const w = still.get(keyOf(mirrorPoint(was, some)));
-          if (w === undefined || w === v || claimed.has(w)) continue;
-          if (planes[0].local && mesh.vertexObject[w] !== objectId) continue;
-          mesh.vertices[w].copy(mirrorPoint(mesh.vertices[v], some));
-          claimed.add(w);
-        }
+        const images = heldBy(objectId, planes);
+        subsets(planes).forEach((some, n) => {
+          if (some.length !== count) return;
+          // The twins are in the object that holds this image: another, or
+          // (its own image, or a local mirror) the object itself.
+          const holder = images?.get(n) ?? objectId;
+          for (const w of still.get(keyOf(mirrorPoint(was, some))) ?? []) {
+            if (claimed.has(w) || mesh.vertexObject[w] !== holder) continue;
+            mesh.vertices[w].copy(mirrorPoint(mesh.vertices[v], some));
+            claimed.add(w);
+          }
+        });
       }
     }
   }
@@ -154,6 +215,11 @@ export class Mirror {
     before.vertices.forEach((p, i) => {
       if (!afterKeys.has(keyOf(p))) touch(before.vertexObject[i], p);
     });
+    // A new object is all new, also one made in the place of another (a copy).
+    const known = new Set(before.objects.map((object) => object.id));
+    mesh.vertices.forEach((p, i) => {
+      if (!known.has(mesh.vertexObject[i])) touch(mesh.vertexObject[i], p);
+    });
     // A face as the cycle of its corners' positions, starting from the
     // smallest: the same face turned over reads differently.
     const cycleKey = (vertices, loop) => {
@@ -176,6 +242,7 @@ export class Mirror {
       }
     }
     if (touched.size === 0) return null;
+    const held = this.holders(before.vertices, before.vertexObject, before.objects); // whose image was whose
 
     let changed = false;
     // Vertex indices as they are now -> as they end up, through the removals.
@@ -198,6 +265,18 @@ export class Mirror {
         if (before.vertexObject[i] === objectId) gone.add(keyOf(p));
       });
       if (gone.size === 0) continue;
+      // The objects that held its images; or, not known, found by their place.
+      const holders = new Set(held.get(objectId)?.values());
+      for (const holder of holders) {
+        const own = new Set();
+        mesh.vertexObject.forEach((id, i) => {
+          if (id === holder) own.add(i);
+        });
+        if (own.size === 0) continue;
+        removed(mesh.removeVertices(own));
+        changed = true;
+      }
+      if (holders.size) continue;
       for (const some of subsets(planes)) {
         const imageKeys = new Set([...gone].map((key) => keyOf(mirrorPoint(pointOf(key), some))));
         // An object that is exactly that image goes.
@@ -215,18 +294,49 @@ export class Mirror {
       }
     }
 
+    // An object brought to stand exactly where its image stands - vertex on
+    // vertex - is its own image from then on: the two are one object, the
+    // image's goes.
+    const placeOf = (objectId) => mesh.vertices.filter((_, i) => mesh.vertexObject[i] === objectId).map(keyOf).sort().join(';');
+    for (const objectId of touched.keys()) {
+      const place = placeOf(objectId);
+      if (!place) continue;
+      for (const holder of new Set(held.get(objectId)?.values())) {
+        if (!held.has(holder) || placeOf(holder) !== place) continue;
+        const own = new Set();
+        mesh.vertexObject.forEach((id, i) => {
+          if (id === holder) own.add(i);
+        });
+        removed(mesh.removeVertices(own));
+        changed = true;
+        held.delete(holder);
+        for (const theirs of held.values()) {
+          for (const [n, id] of theirs) if (id === holder) theirs.delete(n);
+        }
+      }
+    }
+
+    // An object that holds the image of one already seen to is that image
+    // now: it is not made the source in its turn (its twins moved along, so
+    // it is touched too - and might choose another side).
+    const imaged = new Set();
     for (const [objectId, positions] of touched) {
       const index = mesh.objects.findIndex((object) => object.id === objectId);
-      if (index < 0) continue;
+      if (index < 0 || imaged.has(objectId)) continue;
+      for (const holder of held.get(objectId)?.values() ?? []) imaged.add(holder);
       const planes = this.planesFor(index);
       if (!planes.length) continue;
-      // The edited side: where most of the touched positions are, per plane.
+      // The edited side: where most of the touched positions are, per plane -
+      // those of what is there now, if that tells: an object taken across a
+      // plane is on the side it has come to, not the one it left.
+      const present = positions.filter((p) => !before.vertices.includes(p));
       const signs = {};
       for (const { axis, value } of planes) {
-        const vote = positions.reduce((sum, p) => sum + (p[axis] > value + EPS ? 1 : p[axis] < value - EPS ? -1 : 0), 0);
+        const count = (list) => list.reduce((sum, p) => sum + (p[axis] > value + EPS ? 1 : p[axis] < value - EPS ? -1 : 0), 0);
+        const vote = count(present) || count(positions);
         signs[axis] = vote < 0 ? -1 : 1;
       }
-      const result = this.reconcileObject(index, planes, signs, before, beforeIndex);
+      const result = this.reconcileObject(index, planes, signs, before, beforeIndex, held);
       if (result.changed) changed = true;
       if (result.remap) removed(result.remap);
     }
@@ -237,7 +347,7 @@ export class Mirror {
   // every combination of the planes are brought up to date, and what else
   // is on the other sides goes. Returns { changed, remap } - the remap of a
   // removal, if there was one.
-  reconcileObject(index, planes, signs, before, beforeIndex) {
+  reconcileObject(index, planes, signs, before, beforeIndex, held) {
     const { mesh } = this.editor;
     const object = mesh.objects[index];
     const id = object.id;
@@ -277,14 +387,33 @@ export class Mirror {
     const involved = new Set([id]);
     // Global: the objects that held this one's images before the edit are
     // brought up to date too, wherever the images have moved since.
+    // An image that was another object's stays that object's (`apart`: which
+    // of the `images`, by number -> whose, see holders()), also when the two
+    // have come to meet on the plane: objects do not grow into one of
+    // themselves. Where that is not known the images are found by their
+    // place - but never in an object that holds the image of another
+    // (`taken`), as one would be when this object is a copy of that other,
+    // standing where it stands.
+    const images = subsets(planes);
+    const apart = new Map();
+    const taken = new Set();
     if (!local) {
       const alive = new Set(mesh.objects.map((candidate) => candidate.id));
+      for (const [n, holder] of held.get(id) ?? []) {
+        if (!alive.has(holder)) continue;
+        apart.set(n, holder);
+        involved.add(holder);
+      }
+      for (const [other, theirs] of held) {
+        if (other !== id) for (const holder of theirs.values()) taken.add(holder);
+      }
       for (let i = 0; i < before.vertices.length; i++) {
         if (before.vertexObject[i] !== id) continue;
-        for (const some of subsets(planes)) {
-          const w = beforeIndex.get(keyOf(mirrorPoint(before.vertices[i], some)));
-          if (w !== undefined && alive.has(before.vertexObject[w])) involved.add(before.vertexObject[w]);
-        }
+        images.forEach((some, n) => {
+          if (apart.has(n)) return;
+          const owner = before.vertexObject[beforeIndex.get(keyOf(mirrorPoint(before.vertices[i], some)))];
+          if (owner !== undefined && alive.has(owner) && !taken.has(owner)) involved.add(owner);
+        });
       }
     }
 
@@ -294,10 +423,11 @@ export class Mirror {
       if (!positions.has(key)) positions.set(key, []);
       positions.get(key).push(i);
     });
-    const findAt = (p) => {
+    const findAt = (p, owner) => {
       const there = positions.get(keyOf(p));
       if (!there) return undefined;
-      return there.find((i) => mesh.vertexObject[i] === id) ?? (local ? undefined : there[0]);
+      if (owner !== undefined) return there.find((i) => mesh.vertexObject[i] === owner);
+      return there.find((i) => mesh.vertexObject[i] === id) ?? (local ? undefined : there.find((i) => !taken.has(mesh.vertexObject[i])));
     };
     const faceByKey = new Map(mesh.faces.map((f, k) => [sortedKey(f), k]));
     const wireByKey = new Map(mesh.wires.map((w, k) => [sortedKey(w), k]));
@@ -315,19 +445,21 @@ export class Mirror {
       });
     };
 
-    for (const some of subsets(planes)) {
+    for (const [n, some] of images.entries()) {
       // A vertex's image under these planes: itself when it lies on them, a
-      // vertex already at the mirrored position, or a new one.
+      // vertex already at the mirrored position, or a new one. In an image
+      // that is another object, always a vertex of that object.
+      const owner = apart.get(n);
       const image = new Map();
       const imageOf = (v) => {
         if (image.has(v)) return image.get(v);
         const p = mesh.vertices[v];
         const target = mirrorPoint(p, some);
         let w = v;
-        if (keyOf(target) !== keyOf(p)) {
-          w = findAt(target);
+        if (owner !== undefined || keyOf(target) !== keyOf(p)) {
+          w = findAt(target, owner);
           if (w === undefined) {
-            w = mesh.addVertex(target.x, target.y, target.z, id);
+            w = mesh.addVertex(target.x, target.y, target.z, owner ?? id);
             const key = keyOf(target);
             if (!positions.has(key)) positions.set(key, []);
             positions.get(key).push(w);

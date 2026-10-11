@@ -340,6 +340,56 @@ export class Atlas extends EventTarget {
     return canvas;
   }
 
+  // The picture with what the faces show of it carried outwards (texture
+  // extrusion, or edge padding), on a canvas of its own: the pixels just
+  // outside the faces' pieces take the colour of the nearest pixel inside,
+  // `depth` pixels deep - less where two pieces are nearer than that, each
+  // then getting its half of what lies between. A program that smooths the
+  // texture, or shows it from afar at a smaller size, mixes in the pixels
+  // next to a face's own; this makes those pixels the face's colour.
+  // `polygons` are the faces' places on the atlas, each a list of [x, y].
+  extruded(polygons, depth) {
+    const { width, height } = this;
+    const image = this.context.getImageData(0, 0, width, height);
+    const { data } = image;
+    let taken = new Uint8Array(width * height); // the pixels that have their colour
+    for (const polygon of polygons) {
+      for (const key of facePixels(polygon)) {
+        const [x, y] = key.split(',').map(Number);
+        if (x >= 0 && y >= 0 && x < width && y < height) taken[y * width + x] = 1;
+      }
+    }
+    // A pixel's colour comes from beside it rather than from a corner: straight neighbours first.
+    const around = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+    for (let step = 0; step < depth; step++) {
+      const from = data.slice(); // a ring grows from the one before, not from itself
+      const next = taken.slice();
+      let grown = false;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (taken[y * width + x]) continue;
+          const [dx, dy] = around.find(([ax, ay]) => {
+            const nx = x + ax;
+            const ny = y + ay;
+            return nx >= 0 && ny >= 0 && nx < width && ny < height && taken[ny * width + nx];
+          }) ?? [];
+          if (dx === undefined) continue;
+          const source = ((y + dy) * width + x + dx) * 4;
+          data.set(from.subarray(source, source + 4), (y * width + x) * 4);
+          next[y * width + x] = 1;
+          grown = true;
+        }
+      }
+      if (!grown) break;
+      taken = next;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').putImageData(image, 0, 0);
+    return canvas;
+  }
+
   // The picture (or another canvas) as the bytes of a PNG file.
   async png(canvas = this.canvas) {
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));

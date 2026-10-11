@@ -3,6 +3,7 @@ const path = require('node:path');
 const { registerProjectIo } = require('./project-io.js');
 const { registerAtlasFile } = require('./atlas-file.js');
 const { registerRecent } = require('./recent.js');
+const { registerExportIo } = require('./export-io.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
@@ -31,6 +32,7 @@ function createWindow() {
 const recent = registerRecent({ ipcMain, file: path.join(app.getPath('userData'), 'recent.json') });
 const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow, recent });
 registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow });
+registerExportIo({ ipcMain, dialog, BrowserWindow });
 
 // Menu items talk to the renderer through a single 'menu' channel.
 const send = (action) => (_item, win) => win?.webContents.send('menu', action);
@@ -47,6 +49,14 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
         { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
+        { type: 'separator' },
+        {
+          label: 'Экспорт',
+          submenu: [
+            { label: 'FBX…', click: send('export-fbx') },
+            { label: 'glTF…', click: send('export-gltf') },
+          ],
+        },
         { type: 'separator' },
         { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
         { type: 'separator' },

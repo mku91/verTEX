@@ -397,6 +397,21 @@
     </form>
   </div>
 
+  <div id="export-dialog" class="modal" hidden>
+    <form class="dialog">
+      <h2>Экспорт</h2>
+      <h3>Текстура</h3>
+      <label class="choice" title="Нужно, если там, куда пойдёт модель, текстура сглаживается или уменьшается на расстоянии. Картинка в самом проекте не меняется">
+        <input type="checkbox" name="extrude">
+        <span>Экструдирование текстур<small>Крайние пиксели каждого лоскута продлеваются наружу, в пустые места атласа, чтобы на швах модели не проступали чужие цвета</small></span>
+      </label>
+      <div class="form-buttons">
+        <button type="button" data-cancel>Отмена</button>
+        <button type="submit">Экспортировать</button>
+      </div>
+    </form>
+  </div>
+
   <div id="settings-dialog" hidden>
     <div class="dialog settings">
       <div class="settings-head">

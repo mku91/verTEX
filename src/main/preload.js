@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('vertex', {
     setState: (state) => ipcRenderer.send('project:state', state),
     close: () => ipcRenderer.send('project:close'),
   },
+  // Writing an exported model, see export-io.js.
+  export: {
+    pick: (name, kinds) => ipcRenderer.invoke('export:pick', { name, kinds }),
+    write: (path, bytes, beside) => ipcRenderer.invoke('export:write', { path, bytes, beside }),
+  },
   // The projects worked on lately, see recent.js.
   recent: {
     list: () => ipcRenderer.invoke('recent:list'),

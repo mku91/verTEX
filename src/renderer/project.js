@@ -35,7 +35,7 @@ const UNTITLED = 'Без названия';
 const round = (value) => +value.toFixed(6);
 
 // The scene as plain data.
-function modelOf(editor) {
+export function modelOf(editor) {
   const { mesh } = editor;
   // Every entry's frame in the world: where its pivot point is, how it is turned.
   const frames = new Map(mesh.objects.map((object, index) => [

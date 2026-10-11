@@ -8,7 +8,9 @@ import { Outliner } from './outliner.js';
 import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
-import { Project, projectFiles } from './project.js';
+import { Project, projectFiles, modelOf } from './project.js';
+import { fbxOf } from './fbx.js';
+import { gltfOf } from './gltf.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
 import { MirrorDisplay } from './mirror-display.js';
@@ -55,6 +57,8 @@ const ACTIONS = {
   'project-save': () => project.save(),
   'project-save-as': () => project.saveAs(),
   'project-close': () => project.close(), // the window wants to close
+  'export-fbx': () => exportModel('fbx'),
+  'export-gltf': () => exportModel('gltf'),
   new: () => project.newProject(), // the menu of a program not yet restarted
   undo: () => editor.undo(),
   redo: () => editor.redo(),
@@ -891,6 +895,97 @@ project.picture = () => {
     canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
   });
 };
+
+// Asks how the model is to be exported: gives { extrude } - whether the
+// atlas' picture goes out with its pieces carried outwards, see
+// Atlas.extruded() - or null if the user thinks better of it. The answer is
+// remembered for the next time.
+const EXPORT_EXTRUDE_KEY = 'vertex.exportExtrude';
+const EXTRUDE_DEPTH = 4; // pixels
+function askExport(title) {
+  const dialog = $('export-dialog');
+  const form = dialog.querySelector('form');
+  dialog.querySelector('h2').textContent = title;
+  form.elements.extrude.checked = localStorage.getItem(EXPORT_EXTRUDE_KEY) === '1';
+  dialog.hidden = false;
+  form.querySelector('[type=submit]').focus();
+  return new Promise((resolve) => {
+    const done = (options) => {
+      dialog.hidden = true;
+      form.removeEventListener('submit', submit);
+      form.querySelector('[data-cancel]').removeEventListener('click', cancel);
+      window.removeEventListener('keydown', escape, true);
+      resolve(options);
+    };
+    const submit = (event) => {
+      event.preventDefault();
+      const extrude = form.elements.extrude.checked;
+      localStorage.setItem(EXPORT_EXTRUDE_KEY, extrude ? '1' : '0');
+      done({ extrude });
+    };
+    const cancel = () => done(null);
+    const escape = (event) => {
+      // As in askNewProject(): the dialog owns the keyboard while it is open.
+      event.stopImmediatePropagation();
+      if (event.code !== 'Escape') return;
+      event.preventDefault();
+      cancel();
+    };
+    form.addEventListener('submit', submit);
+    form.querySelector('[data-cancel]').addEventListener('click', cancel);
+    window.addEventListener('keydown', escape, true);
+  });
+}
+
+// File -> Export. FBX: the model as an .fbx file, and the atlas' picture as a
+// .png of the same name beside it (see fbx.js). glTF: one file with the
+// picture in it, a .glb or - if the user picks that - a .gltf (see gltf.js).
+const EXPORTS = {
+  fbx: { title: 'Экспорт в FBX', kinds: [{ name: 'Autodesk FBX', extension: 'fbx' }] },
+  gltf: {
+    title: 'Экспорт в glTF',
+    kinds: [{ name: 'glTF, один двоичный файл', extension: 'glb' }, { name: 'glTF, текстовый', extension: 'gltf' }],
+  },
+};
+let exporting = false;
+async function exportModel(format) {
+  const api = window.vertex?.export;
+  if (!api) {
+    window.alert('Экспорт заработает после перезапуска программы.');
+    return;
+  }
+  if (exporting || editor.busy()) return;
+  exporting = true;
+  try {
+    const model = modelOf(editor);
+    const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(model.objects.find((other) => other.id === object.parent)));
+    const meshes = model.objects.filter((object) => object.kind !== 'group' && !hidden(object));
+    if (!model.faces.some((face) => meshes.some((object) => object.id === model.vertexObject[face[0]]))) {
+      await window.vertex.project.alert('Нечего экспортировать', 'В сцене нет ни одной видимой грани.');
+      return;
+    }
+    const options = await askExport(EXPORTS[format].title);
+    if (!options) return;
+    const target = await api.pick(project.name, EXPORTS[format].kinds);
+    if (!target) return;
+    const { atlas } = editor;
+    const places = editor.mesh.faces.filter((face) => face.uv?.every(Boolean)).map((face) => face.uv);
+    const picture = meshes.some((object) => object.atlas)
+      ? await atlas.png(options.extrude ? atlas.extruded(places, EXTRUDE_DEPTH) : atlas.canvas)
+      : null;
+    let result;
+    if (format === 'fbx') {
+      const texture = `${target.name}.png`;
+      result = await api.write(target.path, fbxOf(model, { name: target.name, texture }), picture ? { [texture]: picture } : {});
+    } else {
+      const triangles = (face) => editor.mesh.triangulate(face);
+      result = await api.write(target.path, gltfOf(model, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
+    }
+    if (result.error) await window.vertex.project.alert('Не удалось экспортировать модель', result.error);
+  } finally {
+    exporting = false;
+  }
+}
 
 // The welcome screen, up until a project is made or opened; meanwhile the
 // menu and the keyboard do only what makes sense without one.

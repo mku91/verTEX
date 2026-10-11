@@ -1105,6 +1105,34 @@ function pointsMaterial() {
   });
 }
 
+// Keeps a face's pixels from showing its neighbours' on the atlas along the
+// face's edges. Two things would let them through, and each is seen to in
+// the surface's own shader:
+//   - the picture is smoothed by multisampling, and a pixel only partly
+//     covered by a face is shaded at its middle, which may be off the face:
+//     the place on the atlas is then worked out past the face's edge. So it
+//     is taken at a point that is on the face (`centroid`);
+//   - a face's corners stand on the lines between the atlas' pixels, where
+//     the nearest pixel is as well the one outside. So the place is kept
+//     half a pixel inside the bounds of the face's piece of the atlas
+//     (`uvBox`, see MeshView.updateUVs()) - within the same pixels, so
+//     nothing looks different for it.
+function keepInsideFaces(material) {
+  material.onBeforeCompile = (shader) => {
+    const centroid = (chunk) => chunk.replace('varying vec2 vMapUv;', 'centroid varying vec2 vMapUv;');
+    const box = (declaration) => `\n#ifdef USE_MAP\n${declaration}flat varying vec4 vUvBox;\n#endif\n`;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <uv_pars_vertex>', centroid(THREE.ShaderChunk.uv_pars_vertex) + box('attribute vec4 uvBox;\n'))
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\nvUvBox = uvBox;\n#endif\n');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <uv_pars_fragment>', centroid(THREE.ShaderChunk.uv_pars_fragment) + box(''))
+      .replace(
+        '#include <map_fragment>',
+        THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, clamp( vMapUv, vUvBox.xy, vUvBox.zw ) )'),
+      );
+  };
+}
+
 // Thick lines: plain GL lines are always one pixel wide.
 function edgeOverlay(color) {
   return new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ color, linewidth: 3 }));
@@ -1206,6 +1234,7 @@ export class MeshView {
     // picture, and the rest with a material that never has one.
     this.surface = this.solid.material;
     this.solid.material = [this.surface, this.surface.clone()];
+    keepInsideFaces(this.surface);
     const tint = (side) => {
       const mesh = new THREE.Mesh(this.solid.geometry, this.surface.clone());
       mesh.material.side = side;
@@ -1373,15 +1402,35 @@ export class MeshView {
 
   // Tells the surface where each of its corners is on the atlas, from the
   // faces' `uv` (pixels, y down) - call when those or the atlas' size change.
+  // And the bounds of each face's piece of the atlas, half a pixel in from
+  // its outermost corners (`uvBox`, as min u, min v, max u, max v): what the
+  // surface keeps to, see keepInsideFaces().
   updateUVs() {
     const { faces } = this.mesh;
     const width = this.atlas?.width || 1;
     const height = this.atlas?.height || 1;
     const uvs = new Float32Array(this.triangleFaces.length * 6);
+    const boxes = new Float32Array(this.triangleFaces.length * 12);
+    // From `low` to `high` (pixels), half a pixel in; of less than a pixel, its middle.
+    const inside = (low, high) => (high - low > 1 ? [low + 0.5, high - 0.5] : [(low + high) / 2, (low + high) / 2]);
+    const boxOf = new Map(); // face -> its bounds
+    const bounds = (face) => {
+      if (!boxOf.has(face)) {
+        let box = [0, 0, 1, 1]; // a face with a corner that has no place yet: the whole atlas
+        if (face.uv.every(Boolean)) {
+          const [left, right] = inside(Math.min(...face.uv.map((place) => place[0])), Math.max(...face.uv.map((place) => place[0])));
+          const [top, bottom] = inside(Math.min(...face.uv.map((place) => place[1])), Math.max(...face.uv.map((place) => place[1])));
+          box = [left / width, 1 - bottom / height, right / width, 1 - top / height];
+        }
+        boxOf.set(face, box);
+      }
+      return boxOf.get(face);
+    };
     this.triangleFaces.forEach((faceIndex, triangle) => {
       const face = faces[faceIndex];
       if (!face.uv) return;
       for (let corner = 0; corner < 3; corner++) {
+        boxes.set(bounds(face), triangle * 12 + corner * 4);
         const place = face.uv[face.indexOf(this.triangleIndices[triangle * 3 + corner])];
         if (!place) continue;
         uvs[triangle * 6 + corner * 2] = place[0] / width;
@@ -1389,6 +1438,7 @@ export class MeshView {
       }
     });
     this.solid.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    this.solid.geometry.setAttribute('uvBox', new THREE.BufferAttribute(boxes, 4));
   }
 
   setPositions(object, count) {

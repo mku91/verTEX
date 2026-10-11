@@ -263,10 +263,15 @@ export class Outliner {
       const colorLabel = document.createElement('button');
       colorLabel.innerHTML = '<span>Цвет метки</span><i class="fa-solid fa-chevron-right"></i>';
       colorItem.append(colorLabel, colors);
+      // Joining: the picked objects into this one, when it is one of them.
+      const joined = [index, ...whole.filter((other) => other !== index)].filter(
+        (other) => editor.topology.islands[other].kind !== 'group',
+      );
       menu.replaceChildren(
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
+        item('Объединить в один объект', () => editor.joinObjects(joined), island.kind !== 'group' && joined.length > 1),
         item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
       );

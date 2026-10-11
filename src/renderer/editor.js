@@ -3041,6 +3041,35 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
+  // Joins objects (indices in the objects list; groups among them are passed
+  // over) into the first: one object with that one's name, pivot point and
+  // turn, holding what they all held - nothing is welded. Under a global
+  // mirror their images, where those are objects of their own, are joined
+  // likewise, so that the one object has one image.
+  joinObjects(indices) {
+    const { mesh } = this;
+    const objects = [...new Set(indices)].map((index) => mesh.objects[index]).filter((object) => object && object.kind !== 'group');
+    if (objects.length < 2 || this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    this.history.push(this.snapshot());
+    const [kept, ...gone] = objects;
+    const held = this.mirror.holders(mesh.vertices, mesh.vertexObject, mesh.objects);
+    const leaving = new Set(objects.map((object) => object.id)); // the kept one's id stays, the others go
+    for (const object of gone) {
+      for (const [n, image] of held.get(object.id) ?? []) {
+        const into = held.get(kept.id)?.get(n) ?? kept.id;
+        if (leaving.has(image) || image === into) continue;
+        mesh.mergeObjects(into, image);
+        leaving.add(image);
+      }
+      // What is on the atlas stays there.
+      if (object.atlas && !kept.atlas) kept.atlas = object.atlas;
+      mesh.mergeObjects(kept.id, object.id);
+    }
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
   // Everything under the given entries of the objects list, the hidden
   // included: the vertices, and the ids of the groups.
   contents(indices) {

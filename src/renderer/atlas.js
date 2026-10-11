@@ -116,6 +116,7 @@ export class Atlas extends EventTarget {
   reset(width = START_SIZE, height = START_SIZE) {
     this.canvas.width = width;
     this.canvas.height = height;
+    this.texture.dispose(); // a texture of another size is another texture
     this.charts = [];
     this.touch();
   }

@@ -310,6 +310,7 @@ export class Editor extends EventTarget {
     const center = scaling ? this.scaleCenter() : null; // in the coordinates of those axes
     if (this.gizmo.mode === 'translate') this.snapPivot();
     if (scaling) {
+      this.scaleByPull(center);
       // No turning inside out: a scale drag stops at zero.
       const { scale } = this.pivot;
       for (const axis of ['x', 'y', 'z']) scale[axis] = Math.max(0, scale[axis]);
@@ -350,6 +351,39 @@ export class Editor extends EventTarget {
     this.mirror.moves(this.dragStartPositions);
     this.view.updatePositions();
     this.emitChange();
+  }
+
+  // Sets the scale gizmo's factors by how far the handle has been pulled, in
+  // place of TransformControls' own (the pointer's distance from the gizmo
+  // over the distance it was taken at - a handle is always taken close by, so
+  // a large selection ran away from the pointer). Along each axis of the
+  // handle the side of the selection farther from `center` moves as far as
+  // the pointer does; the middle handle scales all round by the pointer's way
+  // up and to the right, the longest side moving as far.
+  scaleByPull(center) {
+    const handle = (this.gizmo.axis ?? '').toLowerCase();
+    const { scale } = this.pivot;
+    const size = this.scaleBox.getSize(new THREE.Vector3());
+    const reference = Math.max(size.x, size.y, size.z, 0.5) / 2; // for a flat selection, as in scaleFlat()
+    const reach = (axis) => {
+      const far = Math.max(this.scaleBox.max[axis] - center[axis], center[axis] - this.scaleBox.min[axis]);
+      return far > 1e-9 ? far : reference;
+    };
+    const pulled = this.gizmo.pointEnd.clone().sub(this.gizmo.pointStart);
+    if (handle.length === 3) {
+      const outward = new THREE.Vector3(1, 1, 0).transformDirection(this.gizmo.camera.matrixWorld);
+      scale.setScalar(1 + pulled.dot(outward) / Math.max(reach('x'), reach('y'), reach('z')));
+      return;
+    }
+    const grabbed = this.gizmo.pointStart.clone(); // which side of the gizmo the handle stands on
+    if (this.scaleTurn) {
+      const back = this.scaleTurn.clone().invert();
+      pulled.applyQuaternion(back);
+      grabbed.applyQuaternion(back);
+    }
+    for (const axis of ['x', 'y', 'z']) {
+      scale[axis] = handle.includes(axis) ? 1 + ((grabbed[axis] >= 0 ? 1 : -1) * pulled[axis]) / reach(axis) : 1;
+    }
   }
 
   // --- scaling through zero and back --------------------------------------------

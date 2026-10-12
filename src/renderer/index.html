@@ -400,6 +400,11 @@
   <div id="export-dialog" class="modal" hidden>
     <form class="dialog">
       <h2>Экспорт</h2>
+      <h3>Модель</h3>
+      <label class="field" title="Во сколько раз модель в файле больше, чем в редакторе: 2 — вдвое больше, 0.5 — вдвое меньше. Единица длины в файле — метр. Проект не меняется">
+        <span>Масштаб</span>
+        <input name="scale" type="text" inputmode="decimal" spellcheck="false" value="1">
+      </label>
       <h3>Текстура</h3>
       <label class="choice" title="Нужно, если там, куда пойдёт модель, текстура сглаживается или уменьшается на расстоянии. Картинка в самом проекте не меняется">
         <input type="checkbox" name="extrude">

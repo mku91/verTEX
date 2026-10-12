@@ -8,7 +8,7 @@ import { Outliner } from './outliner.js';
 import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
-import { Project, projectFiles, modelOf } from './project.js';
+import { Project, projectFiles, modelOf, scaledModel } from './project.js';
 import { fbxOf } from './fbx.js';
 import { gltfOf } from './gltf.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
@@ -896,17 +896,20 @@ project.picture = () => {
   });
 };
 
-// Asks how the model is to be exported: gives { extrude } - whether the
-// atlas' picture goes out with its pieces carried outwards, see
-// Atlas.extruded() - or null if the user thinks better of it. The answer is
-// remembered for the next time.
+// Asks how the model is to be exported: gives { scale, extrude } - how many
+// times its size the model is to be in the file (see scaledModel()), and
+// whether the atlas' picture goes out with its pieces carried outwards, see
+// Atlas.extruded() - or null if the user thinks better of it. The answers
+// are remembered for the next time.
 const EXPORT_EXTRUDE_KEY = 'vertex.exportExtrude';
+const EXPORT_SCALE_KEY = 'vertex.exportScale';
 const EXTRUDE_DEPTH = 4; // pixels
 function askExport(title) {
   const dialog = $('export-dialog');
   const form = dialog.querySelector('form');
   dialog.querySelector('h2').textContent = title;
   form.elements.extrude.checked = localStorage.getItem(EXPORT_EXTRUDE_KEY) === '1';
+  form.elements.scale.value = Number(localStorage.getItem(EXPORT_SCALE_KEY)) > 0 ? localStorage.getItem(EXPORT_SCALE_KEY) : '1';
   dialog.hidden = false;
   form.querySelector('[type=submit]').focus();
   return new Promise((resolve) => {
@@ -919,9 +922,17 @@ function askExport(title) {
     };
     const submit = (event) => {
       event.preventDefault();
+      // (A comma for the point, as it is written here.)
+      const scale = Number(form.elements.scale.value.trim().replace(',', '.'));
+      if (!(scale >= 0.001 && scale <= 1000)) {
+        form.elements.scale.focus();
+        form.elements.scale.select();
+        return;
+      }
       const extrude = form.elements.extrude.checked;
       localStorage.setItem(EXPORT_EXTRUDE_KEY, extrude ? '1' : '0');
-      done({ extrude });
+      localStorage.setItem(EXPORT_SCALE_KEY, String(scale));
+      done({ scale, extrude });
     };
     const cancel = () => done(null);
     const escape = (event) => {
@@ -973,13 +984,14 @@ async function exportModel(format) {
     const picture = meshes.some((object) => object.atlas)
       ? await atlas.png(options.extrude ? atlas.extruded(places, EXTRUDE_DEPTH) : atlas.canvas)
       : null;
+    const sized = options.scale === 1 ? model : scaledModel(model, options.scale);
     let result;
     if (format === 'fbx') {
       const texture = `${target.name}.png`;
-      result = await api.write(target.path, fbxOf(model, { name: target.name, texture }), picture ? { [texture]: picture } : {});
+      result = await api.write(target.path, fbxOf(sized, { name: target.name, texture }), picture ? { [texture]: picture } : {});
     } else {
       const triangles = (face) => editor.mesh.triangulate(face);
-      result = await api.write(target.path, gltfOf(model, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
+      result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
     }
     if (result.error) await window.vertex.project.alert('Не удалось экспортировать модель', result.error);
   } finally {

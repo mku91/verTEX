@@ -2063,6 +2063,12 @@ body {
   color: var(--text-dim);
 }
 
+/* A field that stands by itself, not under a choice: in line with the headings. */
+#export-dialog .field {
+  margin: 0;
+  color: var(--text);
+}
+
 .modal .field input {
   width: 70px;
   padding: 3px 6px;

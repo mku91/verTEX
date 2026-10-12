@@ -85,6 +85,19 @@ export function modelOf(editor) {
   };
 }
 
+// A model (as modelOf() gives it) so many times its size: the vertices, each
+// in its object's frame, and the entries' places are that many times farther
+// from where they are counted from; nothing is turned, and the picture is
+// the same. What an export at another size is made of.
+export function scaledModel(model, times) {
+  const scaled = (triple) => triple.map((value) => round(value * times));
+  return {
+    ...model,
+    vertices: model.vertices.map(scaled),
+    objects: model.objects.map((object) => ({ ...object, position: scaled(object.position) })),
+  };
+}
+
 // The entries of a project file for the editor's scene, as { name: text }.
 export function projectFiles(editor) {
   const { camera, orbit } = editor.viewport;

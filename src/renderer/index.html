@@ -124,6 +124,30 @@
 
       <hr>
 
+      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Alt+щелчок берёт цвет (Q)">
+        <i class="fa-solid fa-paintbrush"></i>
+      </button>
+      <button id="paint-color" title="Цвет и палитра"><span></span></button>
+      <button data-tool="pipette" title="Пипетка: взять цвет с модели или с развёртки. С любым инструментом рисования то же делает Alt+щелчок (I)">
+        <i class="fa-solid fa-eye-dropper"></i>
+      </button>
+      <button data-tool="fill" title="Заливка: закрасить область одного цвета. На модели — в пределах лоскута грани, на развёртке — по всей картинке (E)">
+        <i class="fa-solid fa-fill-drip"></i>
+      </button>
+      <div id="shape-tools" class="tool-group">
+        <button id="shape-tool" title="Фигуры: растянуть от нажатия до отпускания. Нажатие открывает выбор фигуры">
+          <i class="fa-regular fa-square"></i>
+        </button>
+        <div class="tool-flyout" hidden>
+          <button data-shape="rect" data-filled="0" title="Прямоугольник (M)"><i class="fa-regular fa-square"></i></button>
+          <button data-shape="rect" data-filled="1" title="Закрашенный прямоугольник"><i class="fa-solid fa-square"></i></button>
+          <button data-shape="ellipse" data-filled="0" title="Эллипс (O)"><i class="fa-regular fa-circle"></i></button>
+          <button data-shape="ellipse" data-filled="1" title="Закрашенный эллипс"><i class="fa-solid fa-circle"></i></button>
+        </div>
+      </div>
+
+      <hr>
+
       <button data-action="make-face" title="Создать грань через выделенные вершины или рёбра; из двух вершин — ребро (Ctrl+D)">
         <i class="fa-solid fa-square-plus"></i>
       </button>
@@ -395,6 +419,25 @@
         <button type="submit">Создать</button>
       </div>
     </form>
+  </div>
+
+  <div id="color-popup" hidden>
+    <div class="color-field" title="Оттенок: левее — бледнее, ниже — темнее"><i></i></div>
+    <div class="color-hue" title="Тон"><i></i></div>
+    <div class="color-values">
+      <label class="color-hex"><span>#</span><input name="hex" type="text" spellcheck="false" maxlength="7"></label>
+      <label><span>R</span><input name="r" type="text" inputmode="numeric" spellcheck="false" maxlength="3"></label>
+      <label><span>G</span><input name="g" type="text" inputmode="numeric" spellcheck="false" maxlength="3"></label>
+      <label><span>B</span><input name="b" type="text" inputmode="numeric" spellcheck="false" maxlength="3"></label>
+    </div>
+    <div class="color-palette-bar">
+      <span class="color-palette-name"></span>
+      <button type="button" data-palette="add" title="Добавить цвет кисти в палитру"><i class="fa-solid fa-plus"></i></button>
+      <button type="button" data-palette="import" title="Загрузить палитру из файла: Aseprite (.aseprite, .ase), GIMP (.gpl), .pal, .hex, .act или картинка .png. Заменяет текущую"><i class="fa-solid fa-folder-open"></i></button>
+      <button type="button" data-palette="reset" title="Вернуть палитру по умолчанию"><i class="fa-solid fa-rotate-left"></i></button>
+    </div>
+    <div class="color-swatches"></div>
+    <input type="file" hidden>
   </div>
 
   <div id="export-dialog" class="modal" hidden>

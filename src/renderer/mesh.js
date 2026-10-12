@@ -1117,21 +1117,52 @@ function pointsMaterial() {
 //     half a pixel inside the bounds of the face's piece of the atlas
 //     (`uvBox`, see MeshView.updateUVs()) - within the same pixels, so
 //     nothing looks different for it.
-function keepInsideFaces(material) {
+// The same shader draws what the brush needs to see on the model (`texels`,
+// the uniforms: see MeshView.setTexelGrid() and setTexelHover()): the lines
+// between the atlas' pixels, and a frame round the one the brush is on.
+// Both are in the colour that tells against what is under them.
+function keepInsideFaces(material, texels) {
   material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, texels);
     const centroid = (chunk) => chunk.replace('varying vec2 vMapUv;', 'centroid varying vec2 vMapUv;');
     const box = (declaration) => `\n#ifdef USE_MAP\n${declaration}flat varying vec4 vUvBox;\n#endif\n`;
     shader.vertexShader = shader.vertexShader
       .replace('#include <uv_pars_vertex>', centroid(THREE.ShaderChunk.uv_pars_vertex) + box('attribute vec4 uvBox;\n'))
       .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\nvUvBox = uvBox;\n#endif\n');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <uv_pars_fragment>', centroid(THREE.ShaderChunk.uv_pars_fragment) + box(''))
+      .replace(
+        '#include <uv_pars_fragment>',
+        centroid(THREE.ShaderChunk.uv_pars_fragment) + box('') + 'uniform vec2 atlasSize;\nuniform float texelGrid;\nuniform vec2 texelHover;\n',
+      )
       .replace(
         '#include <map_fragment>',
-        THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, clamp( vMapUv, vUvBox.xy, vUvBox.zw ) )'),
+        THREE.ShaderChunk.map_fragment.replace('texture2D( map, vMapUv )', 'texture2D( map, clamp( vMapUv, vUvBox.xy, vUvBox.zw ) )') + TEXELS_FRAGMENT,
       );
   };
 }
+
+const TEXELS_FRAGMENT = /* glsl */ `
+#ifdef USE_MAP
+  {
+    // Where on the atlas this is, in its pixels (y down, as the picture has it).
+    vec2 texelPlace = vec2( vMapUv.x, 1.0 - vMapUv.y ) * atlasSize;
+    vec2 texelKept = clamp( vMapUv, vUvBox.xy, vUvBox.zw );
+    vec2 texelOwn = floor( vec2( texelKept.x, 1.0 - texelKept.y ) * atlasSize );
+    // How far the nearest line between two pixels is, in pixels of the screen.
+    vec2 texelWide = max( fwidth( texelPlace ), vec2( 1e-6 ) );
+    vec2 texelEdge = min( fract( texelPlace ), 1.0 - fract( texelPlace ) ) / texelWide;
+    float texelLine = min( texelEdge.x, texelEdge.y );
+    vec3 texelMark = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) > 0.35 ? vec3( 0.0 ) : vec3( 1.0 );
+    // The grid: thin lines, gone where the pixels are too small on the screen to tell apart.
+    float texelShown = texelGrid * smoothstep( 3.0, 6.0, 1.0 / max( texelWide.x, texelWide.y ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, texelMark, 0.2 * texelShown * ( 1.0 - smoothstep( 0.0, 1.0, texelLine ) ) );
+    // The pixel under the brush: a frame just inside it.
+    if ( all( equal( texelOwn, texelHover ) ) ) {
+      diffuseColor.rgb = mix( diffuseColor.rgb, texelMark, 0.95 * ( 1.0 - smoothstep( 1.5, 2.5, texelLine ) ) );
+    }
+  }
+#endif
+`;
 
 // Thick lines: plain GL lines are always one pixel wide.
 function edgeOverlay(color) {
@@ -1234,7 +1265,13 @@ export class MeshView {
     // picture, and the rest with a material that never has one.
     this.surface = this.solid.material;
     this.solid.material = [this.surface, this.surface.clone()];
-    keepInsideFaces(this.surface);
+    // What the brush is shown by on the surface, see keepInsideFaces().
+    this.texels = {
+      atlasSize: { value: new THREE.Vector2(1, 1) },
+      texelGrid: { value: 0 },
+      texelHover: { value: new THREE.Vector2(-1, -1) },
+    };
+    keepInsideFaces(this.surface, this.texels);
     const tint = (side) => {
       const mesh = new THREE.Mesh(this.solid.geometry, this.surface.clone());
       mesh.material.side = side;
@@ -1409,6 +1446,7 @@ export class MeshView {
     const { faces } = this.mesh;
     const width = this.atlas?.width || 1;
     const height = this.atlas?.height || 1;
+    this.texels.atlasSize.value.set(width, height);
     const uvs = new Float32Array(this.triangleFaces.length * 6);
     const boxes = new Float32Array(this.triangleFaces.length * 12);
     // From `low` to `high` (pixels), half a pixel in; of less than a pixel, its middle.
@@ -1510,6 +1548,16 @@ export class MeshView {
   setBare(on) {
     this.bare = on;
     this.applyLook();
+  }
+
+  // The lines between the atlas' pixels, drawn on the painted surface or not.
+  setTexelGrid(on) {
+    this.texels.texelGrid.value = on ? 1 : 0;
+  }
+
+  // The pixel of the atlas ({ x, y }) that is framed on the surface; null for none.
+  setTexelHover(pixel) {
+    this.texels.texelHover.value.set(pixel ? pixel.x : -1, pixel ? pixel.y : -1);
   }
 
   applyLook() {

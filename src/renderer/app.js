@@ -11,6 +11,7 @@ import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles, modelOf, scaledModel } from './project.js';
 import { fbxOf } from './fbx.js';
 import { gltfOf } from './gltf.js';
+import { ColorPopup } from './color-popup.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
 import { MirrorDisplay } from './mirror-display.js';
@@ -79,6 +80,11 @@ const hotkeys = new Hotkeys(
     { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
+    { id: 'tool.paint', group: 'Рисование', label: 'Кисть', keys: 'KeyQ', run: () => editor.setTool('paint') },
+    { id: 'tool.pipette', group: 'Рисование', label: 'Пипетка', keys: 'KeyI', run: () => editor.setTool('pipette') },
+    { id: 'tool.fill', group: 'Рисование', label: 'Заливка', keys: 'KeyE', run: () => editor.setTool('fill') },
+    { id: 'tool.rect', group: 'Рисование', label: 'Прямоугольник', keys: 'KeyM', run: () => editor.setTool('rect') },
+    { id: 'tool.ellipse', group: 'Рисование', label: 'Эллипс', keys: 'KeyO', run: () => editor.setTool('ellipse') },
 
     { id: 'op.place', group: 'Режимы', label: 'Разместить', keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'KeyK', run: () => ACTIONS['toggle-cut']() },
@@ -179,6 +185,54 @@ const $ = (id) => document.getElementById(id);
 for (const button of toolButtons) {
   button.addEventListener('click', () => editor.setTool(button.dataset.tool));
 }
+
+// The painting tools (see Editor.paintPress()). Their colour, and whether
+// shapes are drawn whole, are the user's from one launch to the next.
+const PAINT_COLOR_KEY = 'vertex.paintColor';
+const hexOf = (color) => `#${color.slice(0, 3).map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+const colorOf = (hex) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).concat(255);
+const SHAPE_FILL_KEY = 'vertex.shapeFilled';
+editor.setShapeFilled(localStorage.getItem(SHAPE_FILL_KEY) === '1');
+
+// The shapes are one button: it shows the shape last taken, and a press on
+// it takes that shape in hand and opens the row of them all - the rectangle
+// and the ellipse, each in outline and filled - to take another from.
+const SHAPE_KEY = 'vertex.shape';
+let shape = localStorage.getItem(SHAPE_KEY) === 'ellipse' ? 'ellipse' : 'rect'; // the one the button stands for
+const shapeFlyout = document.querySelector('#shape-tools .tool-flyout');
+const openShapes = (open) => {
+  shapeFlyout.hidden = !open;
+};
+$('shape-tool').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+$('shape-tool').addEventListener('click', () => {
+  editor.setTool(shape);
+  openShapes(shapeFlyout.hidden);
+});
+for (const button of shapeFlyout.querySelectorAll('button')) {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', () => {
+    editor.setShapeFilled(button.dataset.filled === '1');
+    editor.setTool(button.dataset.shape);
+    openShapes(false);
+  });
+}
+// A press anywhere else closes the row, and so does Esc.
+window.addEventListener('pointerdown', (event) => {
+  if (!shapeFlyout.hidden && !$('shape-tools').contains(event.target)) openShapes(false);
+}, true);
+window.addEventListener('keydown', (event) => {
+  if (event.code !== 'Escape' || shapeFlyout.hidden) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  openShapes(false);
+}, true);
+if (/^#[0-9a-f]{6}$/.test(localStorage.getItem(PAINT_COLOR_KEY) ?? '')) editor.setPaintColor(colorOf(localStorage.getItem(PAINT_COLOR_KEY)));
+const colorPopup = new ColorPopup({
+  button: $('paint-color'),
+  popup: $('color-popup'),
+  editor,
+  alert: (message, detail) => (window.vertex?.project ? window.vertex.project.alert(message, detail) : window.alert(`${message}\n\n${detail}`)),
+});
 for (const button of modeButtons) {
   button.addEventListener('click', () => editor.setMode(button.dataset.mode));
 }
@@ -477,7 +531,9 @@ $('hotkeys-reset').addEventListener('click', () => {
 // Buttons name their keys in their tooltips; the keys there follow the settings.
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
-  '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot',
+  '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot', '[data-tool="paint"]': 'tool.paint',
+  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill',
+  '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
@@ -1191,6 +1247,19 @@ function refresh() {
   for (const button of toolButtons) {
     button.classList.toggle('active', button.dataset.tool === tool);
   }
+  // The shapes' button: the picture of the shape it stands for - the one in
+  // hand, or the one that last was - and lit while a shape is in hand.
+  if (tool === 'rect' || tool === 'ellipse') shape = tool;
+  $('shape-tool').classList.toggle('active', tool === shape);
+  $('shape-tool').firstElementChild.className = `${editor.shapeFilled ? 'fa-solid' : 'fa-regular'} ${shape === 'rect' ? 'fa-square' : 'fa-circle'}`;
+  for (const button of shapeFlyout.querySelectorAll('button')) {
+    button.classList.toggle('active', tool === button.dataset.shape && editor.shapeFilled === (button.dataset.filled === '1'));
+  }
+  localStorage.setItem(SHAPE_KEY, shape);
+  localStorage.setItem(SHAPE_FILL_KEY, editor.shapeFilled ? '1' : '0');
+  // (No colour at all - the brush rubbing out - is not kept: the next launch starts with a colour.)
+  if (editor.paintColor[3]) localStorage.setItem(PAINT_COLOR_KEY, hexOf(editor.paintColor));
+  $('viewport').classList.toggle('painting', editor.painting && !editor.preview);
   for (const button of modeButtons) {
     button.classList.toggle('active', button.dataset.mode === mode);
     // An operation switches off the modes it can't work in.

@@ -5,7 +5,7 @@ import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
-import { Atlas } from './atlas.js';
+import { Atlas, facePixels, shapePixels } from './atlas.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 
@@ -16,7 +16,14 @@ export const TOOLS = {
   rotate: 'rotate',
   scale: 'scale',
   pivot: 'translate', // moves the pivot point of the selected object, not the object
+  // The painting tools: they work on the atlas' picture, through the model (see pressPaint()).
+  paint: null, // the brush: a pixel at a time
+  pipette: null, // takes the colour of a pixel
+  fill: null, // floods an area of one colour
+  rect: null, // draws a rectangle out
+  ellipse: null, // and an ellipse
 };
+export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'rect', 'ellipse'];
 
 const PIVOT_MARKER_SIZE = 18; // px
 const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected group holds
@@ -108,6 +115,10 @@ export class Editor extends EventTarget {
     this.drag = null;
     this.box = null; // Shift+drag selection box in the main view, in client pixels
     this.shading = 'solid'; // how the object is drawn, see MeshView.setShading()
+    this.paintColor = [0, 0, 0, 255]; // the brush's colour, as [r, g, b, a]
+    this.stroke = null; // a stroke of the brush, or a shape being drawn out, see paintPress()
+    this.shapeFilled = false; // the shape tools draw the whole shape, not its outline
+    this.paintHover = null; // the pixel of the atlas the brush is on ({ x, y }), or null
     this.focus = false; // the focus look, see setFocus()
     // Modal operation, 'cut', 'extrude' or 'pencil': a state with its own look
     // and its own meaning of LMB, on top of whatever tool is active.
@@ -785,7 +796,7 @@ export class Editor extends EventTarget {
   }
 
   updatePivotMarker() {
-    const entry = this.operation || this.preview ? null : this.pivotEntry();
+    const entry = this.operation || this.preview || this.painting ? null : this.pivotEntry();
     const children = entry === null ? [] : this.pivotChildren(entry);
     while (this.pivotRings.length < children.length) {
       const ring = new THREE.Sprite(this.pivotMarker.material);
@@ -1313,6 +1324,14 @@ export class Editor extends EventTarget {
           else this.pressPolygon(event.clientX, event.clientY);
           return;
         }
+        // A painting tool works where it is on the model; off it, the press is the camera's.
+        if (this.painting) {
+          if (this.pressPaint(event)) {
+            event.stopImmediatePropagation();
+            dom.setPointerCapture(event.pointerId);
+          }
+          return;
+        }
         // A gizmo handle under the cursor takes the press; otherwise the element does.
         if (this.overGizmo()) return;
         // The pivot tool works on the pivot point alone: nothing of the model
@@ -1365,6 +1384,12 @@ export class Editor extends EventTarget {
         this.movePlace(event.clientX, event.clientY);
         return;
       }
+      if (this.stroke) {
+        // A missed release ends the stroke where it was.
+        if (event.buttons & 1) this.paintTo(event.clientX, event.clientY);
+        else this.endPaint();
+        return;
+      }
       if (this.box) {
         // A missed release applies the box as it is.
         if (event.buttons & 1) this.stretchBox(event.clientX, event.clientY);
@@ -1376,15 +1401,21 @@ export class Editor extends EventTarget {
       if (this.drag) this.dragTo(event.clientX, event.clientY);
       else if (event.buttons === 0) {
         // The gizmo's own hover handler has already run for this event.
-        const idle = this.overGizmo() || this.tool === 'pivot'; // see pointerdown
+        const idle = this.overGizmo() || this.tool === 'pivot' || this.painting; // see pointerdown
         this.setHovered(idle ? null : this.pickElement(event.clientX, event.clientY));
+        if (this.painting) this.setPaintHover(this.paintPixelAt(event.clientX, event.clientY));
       }
     });
     dom.addEventListener('pointerleave', () => {
+      if (!this.stroke) this.setPaintHover(null);
       if (!this.drag) this.setHovered(null);
     });
     dom.addEventListener('pointerup', (event) => {
       if (event.button !== 0) return;
+      if (this.stroke) {
+        this.endPaint();
+        return;
+      }
       if (this.box) {
         this.finishBox();
         return;
@@ -1399,9 +1430,172 @@ export class Editor extends EventTarget {
       if (travel <= CLICK_TOLERANCE) this.clearSelection();
     });
     dom.addEventListener('pointercancel', () => {
+      this.endPaint();
       this.cancelBox();
       this.cancelDrag();
     });
+  }
+
+  // --- painting on the model -----------------------------------------------------
+  //
+  // The picture is the atlas'; the model is what it is painted through. The
+  // pointer's ray finds a face and the place on it, the face's places on the
+  // atlas say which pixel of the picture that is, and the tool in hand does
+  // its work there (see PAINT_TOOLS). The UV editor does the same on the
+  // atlas itself, through paintPress() and paintDrag(). What a press and the
+  // drag after it do is one undo step.
+
+  // Whether a painting tool is in hand.
+  get painting() {
+    return PAINT_TOOLS.includes(this.tool);
+  }
+
+  // Where on the atlas the pointer is: { pixel: { x, y }, face } - the face of
+  // the model it is on, by its number; null where it is not on a face that is
+  // on the atlas.
+  paintHitAt(clientX, clientY) {
+    this.pointerRay(clientX, clientY);
+    const [hit] = this.raycaster.intersectObject(this.view.solid, false);
+    // (The surface is drawn in two parts, see MeshView: the first is what is on the atlas.)
+    if (!hit?.uv || hit.face.materialIndex !== 0) return null;
+    const index = this.view.triangleFaces[hit.faceIndex];
+    const face = this.mesh.faces[index];
+    if (!face?.uv?.every(Boolean)) return null;
+    // Within the face's own piece of the picture: right on its edge the
+    // place may come out a hair into the next pixel, which is a neighbour's.
+    const within = (value, axis) => {
+      const low = Math.floor(Math.min(...face.uv.map((place) => place[axis])) + 1e-6);
+      const high = Math.ceil(Math.max(...face.uv.map((place) => place[axis])) - 1e-6) - 1;
+      return Math.min(Math.max(Math.floor(value), low), Math.max(low, high));
+    };
+    return { pixel: { x: within(hit.uv.x * this.atlas.width, 0), y: within((1 - hit.uv.y) * this.atlas.height, 1) }, face: index };
+  }
+
+  paintPixelAt(clientX, clientY) {
+    return this.paintHitAt(clientX, clientY)?.pixel ?? null;
+  }
+
+  // The pixels that belong with a face on the atlas, as a Set of "x,y": its
+  // chart's - the faces that lie there as one piece - or, where the charts
+  // are not known, its own. On the model a fill or a shape keeps to them: the
+  // pixel next to a chart's edge is some other face's, or nobody's.
+  paintMask(face) {
+    const [chart] = this.chartsOfFaces([face]);
+    return chart?.pixels ? new Set(chart.pixels) : facePixels(this.mesh.faces[face].uv);
+  }
+
+  // A press on the model with a painting tool. Returns whether the press was
+  // the tool's - on the model - at all.
+  pressPaint(event) {
+    if (this.busy()) return false;
+    const hit = this.paintHitAt(event.clientX, event.clientY);
+    if (!hit) return false;
+    const kept = this.tool === 'paint' ? null : this.paintMask(hit.face);
+    if (this.paintPress(hit.pixel, kept, event.altKey)) {
+      this.stroke.x = event.clientX;
+      this.stroke.y = event.clientY;
+    }
+    return true;
+  }
+
+  // A press with the tool in hand on a pixel of the atlas, wherever it was
+  // found - on the model or in the UV editor. `mask` (a Set of "x,y", or
+  // null) is what a fill or a shape must keep to. With Alt any tool takes the
+  // colour instead, as the pipette does. Returns whether a drag is to follow:
+  // the brush's stroke (strokePixel()) or a shape drawn out (paintDrag()),
+  // ended by endPaint().
+  paintPress(pixel, mask, alt) {
+    if (this.busy() || !this.painting) return false;
+    if (alt || this.tool === 'pipette') {
+      this.setPaintColor(this.atlas.colorAt(pixel.x, pixel.y));
+      return false;
+    }
+    this.stroke = { before: this.snapshot(), changed: false, tool: this.tool, mask, from: { ...pixel }, base: null };
+    if (this.tool === 'fill') {
+      this.stroke.changed = this.atlas.paintPixels(this.atlas.floodPixels(pixel.x, pixel.y, mask), this.paintColor);
+      this.endPaint();
+      return false;
+    }
+    if (this.tool === 'rect' || this.tool === 'ellipse') {
+      this.stroke.base = this.atlas.taken();
+      this.paintDrag(pixel);
+      return true;
+    }
+    this.strokePixel(pixel.x, pixel.y);
+    return true;
+  }
+
+  // The brush's stroke takes in a pixel.
+  strokePixel(x, y) {
+    if (this.stroke && !this.stroke.base && this.atlas.paintPixel(x, y, this.paintColor)) this.stroke.changed = true;
+  }
+
+  // A shape being drawn out reaches to a pixel: it is drawn anew, from the
+  // pixel of the press to this one, on the picture as it was before.
+  paintDrag(pixel) {
+    const { stroke } = this;
+    if (!stroke?.base || !pixel) return;
+    const pixels = shapePixels(stroke.tool, stroke.from, pixel, this.shapeFilled)
+      .filter(([x, y]) => !stroke.mask || stroke.mask.has(`${x},${y}`));
+    this.atlas.putBack(stroke.base);
+    stroke.changed = this.atlas.paintPixels(pixels, this.paintColor);
+  }
+
+  // The drag goes on to where the pointer is now, on the model. The brush
+  // paints the way there too, point by point: the pointer is told of only now
+  // and then, and a quick stroke would come out dotted.
+  paintTo(clientX, clientY) {
+    const { stroke } = this;
+    if (!stroke) return;
+    const pixel = this.paintPixelAt(clientX, clientY);
+    if (stroke.base) {
+      this.paintDrag(pixel);
+    } else {
+      const steps = Math.min(Math.ceil(Math.hypot(clientX - stroke.x, clientY - stroke.y)), 400);
+      for (let step = 1; step <= steps; step++) {
+        const on = this.paintPixelAt(
+          stroke.x + ((clientX - stroke.x) * step) / steps,
+          stroke.y + ((clientY - stroke.y) * step) / steps,
+        );
+        if (on) this.strokePixel(on.x, on.y);
+      }
+      stroke.x = clientX;
+      stroke.y = clientY;
+    }
+    this.setPaintHover(pixel);
+  }
+
+  endPaint() {
+    const { stroke } = this;
+    if (!stroke) return;
+    this.stroke = null;
+    if (!stroke.changed) return;
+    this.history.push(stroke.before);
+    this.emitChange();
+  }
+
+  // The pixel the tool is on, wherever it is looked at from - the model
+  // frames it, the UV editor too. Tells of it with a 'painthover' event.
+  setPaintHover(pixel) {
+    if ((pixel?.x ?? -1) === (this.paintHover?.x ?? -1) && (pixel?.y ?? -1) === (this.paintHover?.y ?? -1)) return;
+    this.paintHover = pixel ? { ...pixel } : null;
+    this.view.setTexelHover(this.paintHover);
+    this.viewport.requestRender();
+    this.dispatchEvent(new Event('painthover'));
+  }
+
+  // The colour painted with, as [r, g, b, a] (0..255).
+  setPaintColor(color) {
+    if (color.every((value, channel) => value === this.paintColor[channel])) return;
+    this.paintColor = [...color];
+    this.emitChange();
+  }
+
+  // Whether the shape tools draw the whole of a shape, or its outline only.
+  setShapeFilled(on) {
+    if (on === this.shapeFilled) return;
+    this.shapeFilled = on;
+    this.emitChange();
   }
 
   // --- modal operations --------------------------------------------------
@@ -2603,8 +2797,8 @@ export class Editor extends EventTarget {
       return face.map((vertex, k) => [vertex, face[(k + 1) % face.length]]);
     });
 
-    if (this.preview) {
-      // Nothing on the model but its surface.
+    if (this.preview || this.painting) {
+      // Nothing on the model but its surface: looked at, or painted on.
       this.view.points.visible = false;
       this.view.setHighlight({ selectedFaces: [], hoveredFaces: [], selectedEdges: [], hoveredEdges: [] });
       this.viewport.requestRender();
@@ -2632,11 +2826,19 @@ export class Editor extends EventTarget {
     this.preview = on;
     this.hovered = null;
     this.viewport.renderer.domElement.style.cursor = '';
-    this.view.setBare(on);
+    this.applyBare();
     this.viewport.setPreview(on);
     this.refreshHighlight();
     this.placeGizmo();
     this.emitChange();
+  }
+
+  // The surface alone, painted, with nothing drawn on it: in the preview, and
+  // under the brush - which also has the atlas' pixels marked out on it.
+  applyBare() {
+    this.view.setBare(this.preview || this.painting);
+    this.view.setTexelGrid(this.painting && !this.preview);
+    if (!this.painting || this.preview) this.setPaintHover(null);
   }
 
   // A picture of the model as the preview shows it - alone, painted, on black -
@@ -2645,7 +2847,7 @@ export class Editor extends EventTarget {
   picture(width, height) {
     const look = (on) => {
       this.preview = on;
-      this.view.setBare(on);
+      this.applyBare();
       this.viewport.setPreview(on);
       this.refreshHighlight();
       this.placeGizmo();
@@ -2830,7 +3032,15 @@ export class Editor extends EventTarget {
       if (this.mode !== 'object') return;
       if (owners.size === 1) this.select([...owners][0], false);
     }
+    // A painting tool picks nothing up, and no operation goes on beside it.
+    if (PAINT_TOOLS.includes(tool)) {
+      if (this.busy()) return;
+      if (this.operation) this.setOperation(null);
+      this.setHovered(null);
+    }
     this.tool = tool;
+    this.applyBare();
+    this.refreshHighlight();
     this.placeGizmo();
     this.emitChange();
   }
@@ -3484,6 +3694,7 @@ export class Editor extends EventTarget {
   busy() {
     return (
       Boolean(this.drag?.start) ||
+      Boolean(this.stroke) ||
       Boolean(this.pivotDrag?.before) ||
       this.gizmo.dragging ||
       this.extrude !== null ||

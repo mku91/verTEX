@@ -14,6 +14,11 @@ import { theme, onThemeChange } from './theme.js';
 // faces have on the atlas - stretches them, which nothing else does - so
 // that their edges can be made to lie along the pixels' edges.
 //
+// With a painting tool in hand (see Editor.paintPress()) it is the picture
+// that is worked on here, not the charts: the brush paints the pixel under
+// it, any pixel of the atlas, and a drag paints a line of them; the fill and
+// the shapes have the whole picture to themselves; Alt takes the colour.
+//
 //   LMB on a chart       pick it (Shift adds); the faces are selected in the scene too
 //   LMB drag             move the picked charts, by whole pixels
 //   wheel                zoom at the pointer
@@ -50,6 +55,7 @@ export class UVEditor {
 
     new ResizeObserver(() => this.draw()).observe(this.canvas);
     editor.addEventListener('change', () => this.update());
+    editor.addEventListener('painthover', () => this.draw());
     editor.atlas.addEventListener('change', () => this.draw());
     editor.atlas.addEventListener('layout', () => this.update());
     onThemeChange(() => this.draw());
@@ -78,6 +84,9 @@ export class UVEditor {
     // A new size of atlas is looked at whole again.
     const size = `${atlas.width}x${atlas.height}`;
     if (size !== this.fitted && this.canvas.clientWidth > 0) this.fit();
+    // The brush's pointer, while the brush is in hand.
+    const { painting } = this.editor;
+    if (painting !== (this.canvas.style.cursor === 'crosshair')) this.canvas.style.cursor = painting ? 'crosshair' : '';
     const charts = this.pickedCharts();
     for (const button of this.container.querySelectorAll('[data-uv]')) {
       if (!['fit', 'add', 'remove', 'shape', 'regenerate'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
@@ -147,6 +156,14 @@ export class UVEditor {
   toAtlas(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
     return { x: (clientX - rect.left - this.origin.x) / this.zoom, y: (clientY - rect.top - this.origin.y) / this.zoom };
+  }
+
+  // The pixel of the atlas at a point of the canvas, as { x, y }; null off the atlas.
+  pixelAt(clientX, clientY) {
+    const at = this.toAtlas(clientX, clientY);
+    const pixel = { x: Math.floor(at.x), y: Math.floor(at.y) };
+    const { atlas } = this.editor;
+    return pixel.x >= 0 && pixel.y >= 0 && pixel.x < atlas.width && pixel.y < atlas.height ? pixel : null;
   }
 
   // A chart's faces on the atlas as they are this moment (a drag in progress changes them).
@@ -232,6 +249,12 @@ export class UVEditor {
         return;
       }
       if (editor.busy()) return;
+      if (editor.painting) {
+        // Here the picture is worked on as a picture: a fill or a shape has the whole of it.
+        const pixel = this.pixelAt(event.clientX, event.clientY);
+        if (pixel && editor.paintPress(pixel, null, event.altKey)) this.drag = { paint: true, last: pixel };
+        return;
+      }
       // A corner's marker first: it lies on the chart it belongs to.
       const marker = this.markerAt(event.clientX, event.clientY);
       if (marker) {
@@ -244,6 +267,25 @@ export class UVEditor {
     });
     canvas.addEventListener('pointermove', (event) => {
       const { drag } = this;
+      if (editor.painting && !drag?.pan) {
+        const pixel = this.pixelAt(event.clientX, event.clientY);
+        canvas.style.cursor = 'crosshair';
+        if (drag?.paint && editor.stroke?.base) {
+          editor.paintDrag(pixel); // a shape drawn out
+        } else if (drag?.paint && pixel) {
+          // Every pixel on the way from the last one: a quick stroke is told of only now and then.
+          const steps = Math.max(Math.abs(pixel.x - drag.last.x), Math.abs(pixel.y - drag.last.y));
+          for (let step = 1; step <= steps; step++) {
+            editor.strokePixel(
+              Math.round(drag.last.x + ((pixel.x - drag.last.x) * step) / steps),
+              Math.round(drag.last.y + ((pixel.y - drag.last.y) * step) / steps),
+            );
+          }
+          drag.last = pixel;
+        }
+        editor.setPaintHover(pixel);
+        return;
+      }
       if (!drag) {
         const marker = this.markerAt(event.clientX, event.clientY);
         const chart = marker ? null : this.chartAt(this.toAtlas(event.clientX, event.clientY));
@@ -294,7 +336,8 @@ export class UVEditor {
     const release = (event) => {
       const { drag } = this;
       this.drag = null;
-      if (!drag || drag.pan) return;
+      if (drag?.paint) editor.endPaint();
+      if (!drag || drag.pan || drag.paint) return;
       if (drag.marker) {
         // Let go: the corner stays where it was dragged to, or, if the drag was broken off, goes back.
         const { chart, vertex, x, y } = drag.marker;
@@ -317,6 +360,7 @@ export class UVEditor {
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('pointerleave', () => {
+      if (editor.painting && !this.drag) editor.setPaintHover(null);
       if (this.drag || !this.hovered) return;
       this.hovered = null;
       this.draw();
@@ -413,7 +457,9 @@ export class UVEditor {
     context.strokeRect(origin.x - 0.5, origin.y - 0.5, w + 1, h + 1);
 
     // The faces: every chart's outlines; the pinned ones marked, the picked ones on top.
-    const picked = new Set(this.pickedCharts());
+    // (Under the brush none is shown as picked: its tint would lie over the colours being put on.)
+    const { painting } = editor;
+    const picked = new Set(painting ? [] : this.pickedCharts());
     // (The faces' places are read as they are this moment: a chart being
     // dragged is already where the drag has taken it, see previewCharts().)
     const outline = (chart) => {
@@ -431,8 +477,9 @@ export class UVEditor {
     for (const chart of atlas.charts) {
       if (picked.has(chart)) continue;
       outline(chart);
-      context.lineWidth = chart === this.hovered ? 2 : 1;
-      context.strokeStyle = chart === this.hovered ? theme.hovered : chart.shaped ? SHAPED : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
+      const hovered = chart === this.hovered && !painting;
+      context.lineWidth = hovered ? 2 : 1;
+      context.strokeStyle = hovered ? theme.hovered : chart.shaped ? SHAPED : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
       context.stroke();
     }
     for (const chart of picked) {
@@ -443,8 +490,18 @@ export class UVEditor {
       context.strokeStyle = theme.box;
       context.stroke();
     }
+    // The pixel the brush is on - here or on the model: a frame round it, dark in light.
+    if (painting && editor.paintHover) {
+      const x = origin.x + editor.paintHover.x * zoom;
+      const y = origin.y + editor.paintHover.y * zoom;
+      context.lineWidth = 1;
+      context.strokeStyle = '#191a21';
+      context.strokeRect(x - 1.5, y - 1.5, zoom + 3, zoom + 3);
+      context.strokeStyle = '#f8f8f2';
+      context.strokeRect(x - 0.5, y - 0.5, zoom + 1, zoom + 1);
+    }
     // The corners, with the shape lock open: a round marker on each.
-    for (const marker of this.markers()) {
+    for (const marker of painting ? [] : this.markers()) {
       const hot = this.drag?.marker
         ? this.drag.marker.vertex === marker.vertex && this.drag.marker.chart === marker.chart
         : this.hoveredMarker?.vertex === marker.vertex && this.hoveredMarker?.chart === marker.chart;

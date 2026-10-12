@@ -83,6 +83,31 @@ function outlineOf(pixels) {
   return edge;
 }
 
+// The pixels of a shape drawn from one pixel to another ({ x, y } each, the
+// corners of the box it stands in): a rectangle or an ellipse, the whole of
+// it or its outline only. As [x, y] each.
+export function shapePixels(kind, from, to, filled) {
+  const left = Math.min(from.x, to.x);
+  const right = Math.max(from.x, to.x);
+  const top = Math.min(from.y, to.y);
+  const bottom = Math.max(from.y, to.y);
+  // An ellipse: the pixels whose middles are within it.
+  const cx = (left + right + 1) / 2;
+  const cy = (top + bottom + 1) / 2;
+  const within = (x, y) =>
+    x >= left && x <= right && y >= top && y <= bottom &&
+    (kind !== 'ellipse' || ((x + 0.5 - cx) / ((right - left + 1) / 2)) ** 2 + ((y + 0.5 - cy) / ((bottom - top + 1) / 2)) ** 2 <= 1);
+  const pixels = [];
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      if (!within(x, y)) continue;
+      // The outline: what has a neighbour, by a side, that is not of the shape.
+      if (filled || !within(x - 1, y) || !within(x + 1, y) || !within(x, y - 1) || !within(x, y + 1)) pixels.push([x, y]);
+    }
+  }
+  return pixels;
+}
+
 // A colour for a chart, told by where it is: the same chart keeps its colour.
 function tint(rect) {
   const hue = ((rect.x * 47 + rect.y * 89 + rect.w * 13) % 360) / 360;
@@ -338,6 +363,85 @@ export class Atlas extends EventTarget {
     }
     context.putImageData(image, 0, 0);
     return canvas;
+  }
+
+  // The colour of a pixel, as [r, g, b, a] (0..255).
+  colorAt(x, y) {
+    return [...this.context.getImageData(x, y, 1, 1).data];
+  }
+
+  // Gives a pixel a colour ([r, g, b, a], 0..255) - the brush's work, see
+  // Editor.paintTo(). Returns whether the picture changed.
+  paintPixel(x, y, color) {
+    if (!(x >= 0 && y >= 0 && x < this.width && y < this.height)) return false;
+    const pixel = this.context.getImageData(x, y, 1, 1);
+    if (color.every((value, channel) => value === pixel.data[channel])) return false;
+    pixel.data.set(color);
+    this.context.putImageData(pixel, x, y);
+    this.touch();
+    return true;
+  }
+
+  // Gives a list of pixels ([x, y] each) a colour, as one change. Returns
+  // whether the picture changed.
+  paintPixels(pixels, color) {
+    const inside = pixels.filter(([x, y]) => x >= 0 && y >= 0 && x < this.width && y < this.height);
+    if (inside.length === 0) return false;
+    const left = Math.min(...inside.map(([x]) => x));
+    const top = Math.min(...inside.map(([, y]) => y));
+    const width = Math.max(...inside.map(([x]) => x)) - left + 1;
+    const height = Math.max(...inside.map(([, y]) => y)) - top + 1;
+    const image = this.context.getImageData(left, top, width, height);
+    let changed = false;
+    for (const [x, y] of inside) {
+      const at = ((y - top) * width + (x - left)) * 4;
+      if (color.every((value, channel) => value === image.data[at + channel])) continue;
+      image.data.set(color, at);
+      changed = true;
+    }
+    if (!changed) return false;
+    this.context.putImageData(image, left, top);
+    this.touch();
+    return true;
+  }
+
+  // The picture as it is this moment, to be put back with putBack() - what a
+  // shape being drawn out is tried on, again and again. (Unlike pixels() and
+  // setPixels(), which are the document's: these leave the charts alone.)
+  taken() {
+    return this.context.getImageData(0, 0, this.width, this.height);
+  }
+
+  putBack(image) {
+    this.context.putImageData(image, 0, 0);
+    this.touch();
+  }
+
+  // The pixels a flood from (x, y) reaches: those of exactly its colour that
+  // hang together with it by their sides. `mask` - a Set of "x,y" - keeps the
+  // flood to those pixels; without one it has the whole picture.
+  floodPixels(x, y, mask = null) {
+    const { width, height } = this;
+    if (!(x >= 0 && y >= 0 && x < width && y < height)) return [];
+    const { data } = this.context.getImageData(0, 0, width, height);
+    const first = (y * width + x) * 4;
+    const same = (at) => data[at] === data[first] && data[at + 1] === data[first + 1] && data[at + 2] === data[first + 2] && data[at + 3] === data[first + 3];
+    const seen = new Uint8Array(width * height);
+    const found = [];
+    const open = [[x, y]];
+    seen[y * width + x] = 1;
+    while (open.length) {
+      const [px, py] = open.pop();
+      found.push([px, py]);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = px + dx;
+        const ny = py + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height || seen[ny * width + nx]) continue;
+        seen[ny * width + nx] = 1;
+        if (same((ny * width + nx) * 4) && (!mask || mask.has(`${nx},${ny}`))) open.push([nx, ny]);
+      }
+    }
+    return found;
   }
 
   // The picture with what the faces show of it carried outwards (texture

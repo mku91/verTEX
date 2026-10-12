@@ -7,7 +7,9 @@ const { registerExportIo } = require('./export-io.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
-const DEBUG_PORT = 19333; // (not 9333: other programs on this machine take that one)
+// A second copy, started to try something out beside the one being worked in,
+// is given a port of its own (VERTEX_DEBUG_PORT): the two must not be mistaken.
+const DEBUG_PORT = Number(process.env.VERTEX_DEBUG_PORT) || 19333; // (not 9333: other programs on this machine take that one)
 if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', String(DEBUG_PORT));
 
 function createWindow() {

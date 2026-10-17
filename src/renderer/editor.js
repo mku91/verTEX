@@ -1263,17 +1263,28 @@ export class Editor extends EventTarget {
   // How the faces of these objects (entries of the objects list, groups left
   // out) are lit: flat (`angle` null), or smooth over the edges where faces
   // meet at less than `angle` degrees (see normals.js). One undo step.
-  setSmoothing(indices, angle) {
+  // With `record` off it is only shown, as the angle's field is dragged:
+  // commitSmoothing() makes the drag one undo step.
+  setSmoothing(indices, angle, record = true) {
     const objects = indices.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
     angle = angle === null ? null : Math.min(180, Math.max(1, Math.round(angle)));
     if (objects.every((object) => (object.smooth ?? null) === angle) || this.busy()) return;
-    this.history.push(this.snapshot());
+    if (record) this.history.push(this.snapshot());
     for (const object of objects) {
       if (angle === null) delete object.smooth;
       else object.smooth = angle;
     }
     this.view.updateNormals();
     this.viewport.requestRender();
+    this.emitChange();
+  }
+
+  // The end of a drag of the smoothing's angle (see setSmoothing()): one
+  // undo step, back to `before`, if any object's smoothing changed.
+  commitSmoothing(before) {
+    const was = new Map(before.objects.map((object) => [object.id, object.smooth ?? null]));
+    if (this.mesh.objects.every((object) => (object.smooth ?? null) === (was.get(object.id) ?? null))) return;
+    this.history.push(before);
     this.emitChange();
   }
 
@@ -3660,27 +3671,30 @@ export class Editor extends EventTarget {
     this.select(index, additive);
   }
 
-  // Where a new object goes when something is selected: up against the
-  // selection, on its side that faces the camera. Returns { point, axis, sign }
-  // - the point of the selection the object touches and the side of it the
-  // object stands on - or null with nothing selected (the object then stays
-  // at the origin). The side is that of a selected face's normal, or else the
-  // one towards the camera, in both cases rounded to the nearest axis so that
-  // the object stands square to the grid.
-  primitiveAnchor() {
-    if (this.selection.size === 0) return null;
+  // Where a new object goes, if it is to be put up against the selection
+  // (`side`; null: it is not, and stays at the origin): on the side of the
+  // selection given as { axis, sign } - or, with 'auto', on that of a
+  // selected face's normal, or else the one towards the camera, rounded to
+  // the nearest axis so that the object stands square to the grid. Returns
+  // { point, axis, sign } - the point of the selection the object touches
+  // and the side of it the object stands on - or null.
+  primitiveAnchor(side = null) {
+    if (!side || this.selection.size === 0) return null;
     const box = this.selectionBox();
     const point = box.getCenter(new THREE.Vector3());
-    const toward = this.viewport.camera.position.clone().sub(point);
-    if (this.mode === 'face') {
-      const normal = new THREE.Vector3();
-      for (const face of this.picked) normal.add(this.mesh.faceNormal(face));
-      // Whichever side of the faces the camera is on.
-      if (normal.lengthSq() > 1e-6) toward.copy(normal.dot(toward) < 0 ? normal.negate() : normal);
+    let { axis, sign } = side === 'auto' ? {} : side;
+    if (side === 'auto') {
+      const toward = this.viewport.camera.position.clone().sub(point);
+      if (this.mode === 'face') {
+        const normal = new THREE.Vector3();
+        for (const face of this.picked) normal.add(this.mesh.faceNormal(face));
+        // Whichever side of the faces the camera is on.
+        if (normal.lengthSq() > 1e-6) toward.copy(normal.dot(toward) < 0 ? normal.negate() : normal);
+      }
+      axis = ['x', 'y', 'z'].reduce((best, candidate) =>
+        Math.abs(toward[candidate]) > Math.abs(toward[best]) ? candidate : best);
+      sign = toward[axis] < 0 ? -1 : 1;
     }
-    const axis = ['x', 'y', 'z'].reduce((best, candidate) =>
-      Math.abs(toward[candidate]) > Math.abs(toward[best]) ? candidate : best);
-    const sign = toward[axis] < 0 ? -1 : 1;
     point[axis] = sign > 0 ? box.max[axis] : box.min[axis];
     return { point, axis, sign };
   }
@@ -3700,10 +3714,10 @@ export class Editor extends EventTarget {
   // Shows, as a wireframe in the scene, the object addPrimitive() would make
   // with these arguments; a null kind takes the preview away. Nothing is added
   // to the model.
-  previewPrimitive(kind, options = {}) {
+  previewPrimitive(kind, options = {}, side = null) {
     const draft = new EditableMesh();
     const made = kind && buildPrimitive(draft, kind, options);
-    if (made) this.attachPrimitive(draft, made, this.primitiveAnchor());
+    if (made) this.attachPrimitive(draft, made, this.primitiveAnchor(side));
     this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
     this.viewport.requestRender();
   }
@@ -3947,14 +3961,14 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
-  // Adds a new object at the origin and selects it: 'cube', 'cone'
-  // ({ sides, size }), 'cylinder' ({ sides, size, height }) or 'sphere'
-  // ({ segments, size }).
-  addPrimitive(kind, options = {}) {
+  // Adds a new object and selects it: 'cube', 'cone' ({ sides, size }),
+  // 'cylinder' ({ sides, size, height }) or 'sphere' ({ segments, size }) -
+  // at the origin, or with `side` up against the selection (see primitiveAnchor()).
+  addPrimitive(kind, options = {}, side = null) {
     if (this.busy()) return;
     this.previewPrimitive(null);
     const before = this.snapshot();
-    const anchor = this.primitiveAnchor(); // from the selection as it is now
+    const anchor = this.primitiveAnchor(side); // from the selection as it is now
     const vertices = buildPrimitive(this.mesh, kind, options);
     if (!vertices) return;
     this.attachPrimitive(this.mesh, vertices, anchor);

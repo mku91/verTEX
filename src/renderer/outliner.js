@@ -10,6 +10,18 @@ const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row become
 // Ctrl combinations that still work in the fields of the modal form.
 const CLIPBOARD_KEYS = new Set(['KeyA', 'KeyC', 'KeyV', 'KeyX', 'KeyZ', 'KeyY']);
 
+// Where a new object may be put up against the selection: automatically (a
+// selected face's side, or the one towards the camera), or on a side chosen.
+const SIDES = [
+  { id: 'auto', label: 'Авто', title: 'Сторона выделенных граней, или та, что к камере' },
+  { id: 'x+', label: 'X+', axis: 'x', sign: 1 },
+  { id: 'x-', label: 'X−', axis: 'x', sign: -1 },
+  { id: 'y+', label: 'Y+', axis: 'y', sign: 1 },
+  { id: 'y-', label: 'Y−', axis: 'y', sign: -1 },
+  { id: 'z+', label: 'Z+', axis: 'z', sign: 1 },
+  { id: 'z-', label: 'Z−', axis: 'z', sign: -1 },
+];
+
 // Parameters asked for before a primitive is made: field id, label, default
 // and limits. A kind without fields is made at once.
 const PRIMITIVES = {
@@ -387,9 +399,14 @@ export class Outliner {
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const options = this.formOptions();
+      const side = this.attachSide();
       this.closeForm();
-      this.editor.addPrimitive(form.dataset.kind, options);
+      this.editor.addPrimitive(form.dataset.kind, options, side);
     });
+    // Put up against the selection, or not; and on which side. Off at every
+    // launch (it is not always wanted); what was chosen stays while the program runs.
+    this.attach = false;
+    this.side = 'auto';
     // The wireframe in the scene follows the fields.
     form.addEventListener('input', () => this.showPreview());
     form.addEventListener('keydown', (event) => {
@@ -413,6 +430,7 @@ export class Outliner {
           }
           return;
         }
+        if (event.code === 'Space') return; // Space + RMB pans the view: the camera is free (see below)
         event.stopImmediatePropagation();
         event.preventDefault();
         if (type !== 'keydown') return;
@@ -423,15 +441,23 @@ export class Outliner {
     // Keys typed in a field stay in the form.
     form.addEventListener('keydown', (event) => event.stopPropagation());
     form.addEventListener('keyup', (event) => event.stopPropagation());
-    // And so does the pointer: an invisible sheet over the rest of the window
-    // takes presses, drags and the wheel. The scene stays visible through it,
-    // for the preview's sake.
-    this.blocker = document.createElement('div');
-    this.blocker.className = 'modal-blocker';
-    this.blocker.hidden = true;
-    document.body.append(this.blocker);
-    for (const type of ['pointerdown', 'mousedown', 'wheel', 'contextmenu']) {
-      this.blocker.addEventListener(type, (event) => event.preventDefault(), { passive: false });
+    // And so does the pointer - all but the camera's: over the main view RMB
+    // turns it, MMB (and Space + RMB) moves it, and the wheel brings it
+    // nearer, so that the preview can be looked at from every side. Every
+    // other press - picking, editing, the gizmo, painting, the panels, the
+    // UV editor - is stopped before anything else hears of it.
+    const view = this.editor.viewport.renderer.domElement;
+    const guard = (event) => {
+      if (form.hidden || form.contains(event.target)) return;
+      const camera = event.target === view &&
+        (event.type === 'wheel' || event.type === 'contextmenu' ||
+          (event.type === 'pointerdown' || event.type === 'mousedown' || event.type === 'pointerup' || event.type === 'mouseup') && event.button !== 0);
+      if (camera) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    };
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'wheel', 'contextmenu']) {
+      window.addEventListener(type, guard, { capture: true, passive: false });
     }
   }
 
@@ -447,8 +473,74 @@ export class Outliner {
     return options;
   }
 
+  // The side the new object is to be put up against the selection on, as
+  // primitiveAnchor() takes it; null if it is not to be.
+  attachSide() {
+    if (!this.attach || this.editor.selection.size === 0) return null;
+    const side = SIDES.find((each) => each.id === this.side);
+    return side.axis ? { axis: side.axis, sign: side.sign } : 'auto';
+  }
+
   showPreview() {
-    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions());
+    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions(), this.attachSide());
+  }
+
+  // The form's part that says where the object goes: a box - up against the
+  // selected object, or not - and, only while it is ticked, a row of the
+  // sides it may go on, which slides open and shut with it.
+  attachRow() {
+    const selected = this.editor.selection.size > 0;
+    const block = document.createElement('div');
+    block.className = 'attach';
+    const label = document.createElement('label');
+    label.className = 'choice';
+    label.title = selected ? 'Новый объект встанет вплотную к выделенному, на выбранной стороне' : 'Ничего не выделено: объект появится в начале координат';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = this.attach && selected;
+    box.disabled = !selected;
+    const caption = document.createElement('span');
+    caption.textContent = 'Прижать к выделенному';
+    label.append(box, caption);
+    const sides = document.createElement('div');
+    sides.className = 'sides';
+    // (In a body that slides, as the folding panels' do: see the styles.)
+    const slide = document.createElement('div');
+    slide.className = 'sides-slide';
+    const inner = document.createElement('div');
+    inner.append(sides);
+    slide.append(inner);
+    const open = () => {
+      block.classList.toggle('open', box.checked);
+      inner.inert = !box.checked; // out of reach of the keyboard while shut
+    };
+    const show = () => {
+      for (const button of sides.children) button.classList.toggle('active', button.dataset.side === this.side);
+      open();
+      this.showPreview();
+    };
+    for (const side of SIDES) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.side = side.id;
+      button.textContent = side.label;
+      if (side.axis) button.classList.add(`axis-${side.axis}`);
+      button.title = side.title ?? `Со стороны ${side.label} выделенного объекта`;
+      button.addEventListener('mousedown', (event) => event.preventDefault()); // the keyboard stays where it is
+      button.addEventListener('click', () => {
+        this.side = side.id;
+        show();
+      });
+      sides.append(button);
+    }
+    box.addEventListener('change', () => {
+      this.attach = box.checked;
+      show();
+    });
+    block.append(label, slide);
+    for (const button of sides.children) button.classList.toggle('active', button.dataset.side === this.side);
+    open();
+    return block;
   }
 
   // Shows the parameters of a primitive; submitting the form makes the object.
@@ -483,9 +575,9 @@ export class Outliner {
         label.append(caption, scrub);
         return label;
       }),
+      this.attachRow(),
     );
     form.hidden = false;
-    this.blocker.hidden = false;
     this.showPreview();
     const first = form.querySelector('input');
     first.focus();
@@ -495,7 +587,6 @@ export class Outliner {
   closeForm() {
     if (this.form.hidden) return;
     this.form.hidden = true;
-    this.blocker.hidden = true;
     this.editor.previewPrimitive(null);
     document.activeElement?.blur(); // give the keyboard back to the editor shortcuts
   }

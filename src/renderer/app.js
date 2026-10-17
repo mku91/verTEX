@@ -219,6 +219,23 @@ $('smooth-angle').addEventListener('change', (event) => {
   if (angle > 0) editor.setSmoothing(editor.objectsInHand(), angle);
   else refresh(); // not an angle: the one there was comes back
 });
+// Its handle, like every number field's: dragged up and down, a degree a
+// step; the whole drag is one undo step.
+{
+  let beforeScrub = null;
+  scrubbable($('smooth-angle'), {
+    read: () => parseFloat($('smooth-angle').value.replace(',', '.')),
+    write: (angle) => {
+      $('smooth-angle').value = angle;
+      editor.setSmoothing(editor.objectsInHand(), angle, false);
+    },
+    begin: () => { beforeScrub = editor.snapshot(); },
+    end: () => editor.commitSmoothing(beforeScrub),
+    whole: true,
+    min: 1,
+    max: 180,
+  });
+}
 
 // The painting tools (see Editor.paintPress()). Their colour, and whether
 // shapes are drawn whole, are the user's from one launch to the next.

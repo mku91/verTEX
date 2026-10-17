@@ -1108,6 +1108,31 @@ function pointsMaterial() {
   });
 }
 
+// A mask the size of the atlas, one byte a pixel, rows from the top: what
+// is marked in it the surface shows in another colour (see MeshView.setPaintLine()).
+function lineMask(width, height) {
+  const texture = new THREE.DataTexture(new Uint8Array(width * height), width, height, THREE.RedFormat);
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// Gives a material of one's own the surface's way with the atlas (see
+// keepInsideFaces()) - each face keeping to its own pixels - with nothing
+// of the brush's drawn on it: for pictures made of the model, such as the
+// sprites (see sprite-render.js). `atlasSize` is a Vector2 the caller keeps
+// up to date. Returns the material.
+export function keepToFaces(material, atlasSize) {
+  keepInsideFaces(material, {
+    atlasSize: { value: atlasSize },
+    texelGrid: { value: 0 },
+    texelHover: { value: new THREE.Vector2(-1, -1) },
+    lineMask: { value: lineMask(1, 1) },
+    lineColor: { value: new THREE.Vector4() },
+  });
+  return material;
+}
+
 // Keeps a face's pixels from showing its neighbours' on the atlas along the
 // face's edges. Two things would let them through, and each is seen to in
 // the surface's own shader:
@@ -1125,15 +1150,6 @@ function pointsMaterial() {
 // between the atlas' pixels, a frame round the one the brush is on, and the
 // pixels of the line it would paint (see MeshView.setPaintLine()).
 // Both are in the colour that tells against what is under them.
-// A mask the size of the atlas, one byte a pixel, rows from the top: what
-// is marked in it the surface shows in another colour (see MeshView.setPaintLine()).
-function lineMask(width, height) {
-  const texture = new THREE.DataTexture(new Uint8Array(width * height), width, height, THREE.RedFormat);
-  texture.unpackAlignment = 1;
-  texture.needsUpdate = true;
-  return texture;
-}
-
 function keepInsideFaces(material, texels) {
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, texels);

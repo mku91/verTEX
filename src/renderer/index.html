@@ -103,6 +103,9 @@
           </div>
         </div>
       </div>
+      <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
+        <i class="fa-solid fa-camera"></i><span>Рендер</span>
+      </button>
     </header>
 
     <aside id="toolbar">
@@ -535,6 +538,91 @@
       </div>
     </div>
   </div>
+
+  <!-- The sprite render (see render-mode.js): the sheet on the left, its settings on the right. -->
+  <section id="render-mode" hidden>
+    <div class="render-head">
+      <h2>Рендер спрайтов</h2>
+      <span class="render-size"></span>
+      <button data-render="close" title="Вернуться к модели (Esc)">Закрыть</button>
+    </div>
+    <div class="render-body">
+      <div class="render-preview">
+        <div class="render-player">
+          <canvas></canvas>
+          <div class="player-bar">
+            <button type="button" data-player="previous" title="Предыдущий кадр"><i class="fa-solid fa-backward-step"></i></button>
+            <button type="button" data-player="play" title="Пуск / пауза"><i class="fa-solid fa-pause"></i></button>
+            <button type="button" data-player="next" title="Следующий кадр"><i class="fa-solid fa-forward-step"></i></button>
+            <label title="Кадров в секунду"><input type="text" name="fps" inputmode="numeric" spellcheck="false"><span>кадр/с</span></label>
+            <span class="player-frame"></span>
+          </div>
+        </div>
+        <div class="render-sheet" title="Щелчок по кадру — показать его наверху · колесо — масштаб, правая или средняя кнопка — сдвинуть">
+          <canvas></canvas>
+        </div>
+        <p class="render-empty" hidden>Нечего рендерить: в сцене нет видимых граней</p>
+      </div>
+      <form class="render-settings" autocomplete="off">
+        <h3>Камера</h3>
+        <label title="Сколько сторон, с которых снята модель: кадров в листе"><span>Направлений</span><input type="text" name="directions" inputmode="numeric"></label>
+        <label title="Поворот модели в первом кадре, в градусах; дальше — равными шагами против часовой стрелки, если смотреть сверху"><span>Начальный угол</span><input type="text" name="start" inputmode="numeric"></label>
+        <label title="0 — сбоку, 26.57 — «изометрия» пиксель-арта 2:1, 90 — сверху"><span>Наклон камеры</span><input type="text" name="elevation" inputmode="decimal"></label>
+        <h3>Кадр</h3>
+        <label title="Пикселей спрайта на пиксель атласа: при 1 пиксели модели становятся пикселями спрайта"><span>Масштаб</span><input type="text" name="scale" inputmode="numeric"></label>
+        <label><span>Ширина, px</span><input type="text" name="width" inputmode="numeric"></label>
+        <label><span>Высота, px</span><input type="text" name="height" inputmode="numeric"></label>
+        <button type="button" data-render="fit" title="Наименьший размер кадра, в который модель помещается со всех сторон">Подобрать по модели</button>
+        <h3>Лист</h3>
+        <div class="render-layout" title="Как кадры лягут на лист: в одну строку, не больше N столбцов (строк сколько понадобится) или не больше N строк (столбцов сколько понадобится)">
+          <button type="button" data-layout="row">В строку</button>
+          <button type="button" data-layout="columns">Столбцы</button>
+          <button type="button" data-layout="rows">Строки</button>
+        </div>
+        <div class="render-count"><div><label><span>Столбцов, не больше</span><input type="text" name="count" inputmode="numeric"></label></div></div>
+        <label title="Пикселей между кадрами"><span>Отступ, px</span><input type="text" name="padding" inputmode="numeric"></label>
+        <h3>Свет</h3>
+        <div class="render-light">
+          <button type="button" data-light="none" title="Чистые цвета текстуры, без теней — затенение уже нарисовано в пикселях">Нет</button>
+          <button type="button" data-light="camera" title="Как в редакторе: свет со стороны зрителя, одинаковый во всех кадрах">Камера</button>
+          <button type="button" data-light="custom" title="Свет с выбранной стороны, неподвижный в мире: при повороте модели видны освещённая и теневая стороны">Настраиваемый</button>
+        </div>
+        <div class="render-custom"><div>
+          <div class="light-dials">
+            <figure title="Вид сбоку: высота источника над горизонтом. Солнце можно перетаскивать">
+              <canvas data-dial="elevation"></canvas>
+              <figcaption>Высота</figcaption>
+            </figure>
+            <figure title="Вид сверху: с какой стороны светит; треугольник внизу — сторона камеры первого кадра. Солнце можно перетаскивать">
+              <canvas data-dial="azimuth"></canvas>
+              <figcaption>Сторона</figcaption>
+            </figure>
+          </div>
+          <label title="0 — спереди (со стороны первого кадра), 90 — справа, 180 — сзади, 270 — слева"><span>Азимут, °</span><input type="text" name="lightAzimuth" inputmode="numeric"></label>
+          <label title="0 — сбоку, по горизонту; 90 — прямо сверху"><span>Высота, °</span><input type="text" name="lightElevation" inputmode="numeric"></label>
+          <label><span>Сила</span><input type="text" name="lightStrength" inputmode="decimal"></label>
+        </div></div>
+        <div class="render-blend"><div>
+          <div class="render-blend-buttons" title="Как свет переходит в тень">
+            <button type="button" data-blend="smooth" title="Плавно, как есть">Плавное</button>
+            <button type="button" data-blend="steps" title="Ступенями яркости, без переходов между ними — как в рисованном пиксель-арте. У гранёных объектов грани сводятся к стольким оттенкам, у сглаженных свет ложится полосами">Ступенчатое</button>
+          </div>
+          <div class="render-steps"><div>
+            <label title="Сколько ступеней яркости от света до тени"><span>Ступеней</span><input type="text" name="steps" inputmode="numeric"></label>
+            <label class="choice" title="Переходы между ступенями — шахматкой из пикселей двух соседних ступеней, как в пиксель-арте (упорядоченный дизеринг, матрица Байера 4×4). Только там, где свет переходит из ступени в ступень по скруглённой поверхности"><input type="checkbox" name="dither"><span>Дизеринг</span></label>
+            <div class="render-dither-faces"><div>
+              <label class="choice" title="Шахматкой заливается весь свет между ступенями — и плоская грань целиком, если её освещённость между ними"><input type="checkbox" name="ditherFaces"><span>Грани целиком</span></label>
+            </div></div>
+          </div></div>
+        </div></div>
+        <label class="choice" title="Ширина и высота листа — 64, 128, 256…, как требуют многие движки: справа и снизу добавляется прозрачное поле, кадры остаются на своих местах"><input type="checkbox" name="pot"><span>Размер — степень двойки</span></label>
+        <label class="choice" title="Рядом с PNG — JSON с местом и углом каждого кадра (формат TexturePacker / Aseprite)"><input type="checkbox" name="json"><span>JSON с кадрами</span></label>
+        <div class="form-buttons">
+          <button type="button" data-render="save">Сохранить PNG…</button>
+        </div>
+      </form>
+    </div>
+  </section>
 
   <script type="module" src="app.js"></script>
 </body>

@@ -70,7 +70,7 @@ export class Viewport {
     this.lit = false;
     this.litSubject = null; // () => THREE.Sphere: what is lit, for the sun to be placed by
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoftShadowMap is gone from three: it fell back to this anyway)
     this.sun = new THREE.DirectionalLight(0xfff4e0, SUN_INTENSITY);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);

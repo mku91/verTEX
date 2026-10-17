@@ -61,6 +61,7 @@ function buildMenu() {
             { label: 'glTF…', click: send('export-gltf') },
           ],
         },
+        { label: 'Рендер спрайтов…', click: send('render-sprites') },
         { type: 'separator' },
         { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
         { type: 'separator' },

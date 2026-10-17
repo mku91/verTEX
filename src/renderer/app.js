@@ -18,6 +18,7 @@ import { PipetteLoupe } from './pipette-loupe.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
 import { Welcome } from './welcome.js';
+import { RenderMode } from './render-mode.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -63,6 +64,7 @@ const ACTIONS = {
   'project-close': () => project.close(), // the window wants to close
   'export-fbx': () => exportModel('fbx'),
   'export-gltf': () => exportModel('gltf'),
+  'render-sprites': () => renderMode.show(),
   new: () => project.newProject(), // the menu of a program not yet restarted
   undo: () => editor.undo(),
   redo: () => editor.redo(),
@@ -1124,6 +1126,15 @@ async function exportModel(format) {
 const WELCOME_ACTIONS = ['project-new', 'project-open', 'project-close', 'new', 'settings'];
 const WELCOME_HOTKEYS = ['file.new', 'file.open', 'view.settings'];
 const welcome = new Welcome($('welcome'), project, window.vertex?.recent);
+
+// The sprite render: the model into a PNG sprite sheet (see render-mode.js),
+// written where the user says, as an export is.
+const renderMode = new RenderMode($('render-mode'), editor, {
+  pick: window.vertex?.export?.pick,
+  write: window.vertex?.export?.write,
+  name: () => project.name,
+  alert: (message, detail) => window.vertex?.project.alert(message, detail),
+});
 
 // Texturing: the atlas as a file beside the project, painted in another program.
 

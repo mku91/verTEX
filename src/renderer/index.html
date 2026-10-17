@@ -199,6 +199,9 @@
         </button>
       </div>
       <div id="axis-gizmo" title="Фиксация перемещения вершины: Shift+1 — свободно, Shift+2 — X, Shift+3 — Y, Shift+4 — Z"></div>
+      <button id="light-button" data-action="toggle-light" title="Свет: модель освещена как в игре — солнце с тенями на модели и на полу и рассеянный свет неба. Повернув камеру, видно освещённую и теневую стороны">
+        <i class="fa-solid fa-sun"></i>
+      </button>
       <button id="preview-button" data-action="toggle-preview" title="Просмотр: только модель с текстурой на чёрном фоне, без сетки, рёбер, вершин и выделения — как она будет выглядеть после экспорта">
         <i class="fa-solid fa-eye"></i>
       </button>
@@ -343,6 +346,12 @@
         <label class="flag" title="Снято — грани видны только с лицевой стороны, как их рисует большинство игровых движков: изнутри замкнутого объекта сквозь него видно то, что за ним. Уходит и в экспорт">
           <input type="checkbox" id="back-faces">
           <span>Изнанка граней</span>
+        </label>
+        <label class="flag" title="Снято — грани освещены ровно, каждое ребро видно. Стоит — свет плавно перетекает через рёбра, где грани сходятся под углом меньше указанного, а более острые рёбра остаются резкими. Уходит и в экспорт">
+          <input type="checkbox" id="smooth-shading">
+          <span>Сглаживание</span>
+          <input type="text" id="smooth-angle" class="angle" inputmode="numeric" spellcheck="false" title="Рёбра острее этого угла (в градусах) не сглаживаются">
+          <span class="unit">°</span>
         </label>
       </div>
       </section>

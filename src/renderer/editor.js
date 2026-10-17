@@ -210,6 +210,13 @@ export class Editor extends EventTarget {
     onThemeChange(() => this.applyTheme());
   }
 
+  // The light preview: the model lit as in a game, see Viewport.setLit().
+  setLit(on) {
+    this.viewport.litSubject = () => this.view.solid.geometry.boundingSphere;
+    this.viewport.setLit(on);
+    this.emitChange();
+  }
+
   // 'solid' | 'wireframe' | 'orientation', see MeshView.setShading().
   setShading(mode) {
     this.shading = mode;
@@ -1249,6 +1256,23 @@ export class Editor extends EventTarget {
       else delete object.color;
     }
     this.view.updateSurfaceColors();
+    this.viewport.requestRender();
+    this.emitChange();
+  }
+
+  // How the faces of these objects (entries of the objects list, groups left
+  // out) are lit: flat (`angle` null), or smooth over the edges where faces
+  // meet at less than `angle` degrees (see normals.js). One undo step.
+  setSmoothing(indices, angle) {
+    const objects = indices.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
+    angle = angle === null ? null : Math.min(180, Math.max(1, Math.round(angle)));
+    if (objects.every((object) => (object.smooth ?? null) === angle) || this.busy()) return;
+    this.history.push(this.snapshot());
+    for (const object of objects) {
+      if (angle === null) delete object.smooth;
+      else object.smooth = angle;
+    }
+    this.view.updateNormals();
     this.viewport.requestRender();
     this.emitChange();
   }
@@ -3818,11 +3842,11 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
-          rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided),
+          rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -3857,6 +3881,7 @@ export class Editor extends EventTarget {
       if (source.rotation) object.rotation = [...source.rotation];
       if (source.color) object.color = source.color;
       if (source.oneSided) object.oneSided = true;
+      if (source.smooth) object.smooth = source.smooth;
       // A copy of an object that is on the atlas is on it too, with its picture.
       if (source.atlas) object.atlas = source.atlas;
       else delete object.atlas;
@@ -4053,7 +4078,7 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -4065,6 +4090,7 @@ export class Editor extends EventTarget {
       ...(atlas || placedObjects?.has(id) ? { atlas: ATLAS } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
       ...(oneSided ? { oneSided: true } : {}),
+      ...(smooth ? { smooth } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
     mesh.vertexObject = [...model.vertexObject];

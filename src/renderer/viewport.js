@@ -29,6 +29,11 @@ function letterTexture(letter) {
   return texture;
 }
 const WHEEL_NOTCH = 100; // wheel travel of one notch
+// The light preview (see setLit()): where the sun is, from what it lights -
+// high, and from the front left, as a picture is usually lit - and how bright it and the sky are.
+const SUN_DIRECTION = new THREE.Vector3(-0.6, 1, 0.8).normalize();
+const SUN_INTENSITY = 2.6;
+const SKY_INTENSITY = 1.1;
 const MIN_DISTANCE = 0.2;
 const MAX_DISTANCE = 300;
 
@@ -51,10 +56,35 @@ export class Viewport {
     this.scene.add(this.camera);
 
     // Headlight: the model is always lit from the viewer's side.
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-    const headlight = new THREE.DirectionalLight(0xffffff, 2);
-    headlight.position.set(-1, 2, 3);
-    this.camera.add(headlight);
+    this.ambient = new THREE.AmbientLight(0xffffff, 1.2);
+    this.scene.add(this.ambient);
+    this.headlight = new THREE.DirectionalLight(0xffffff, 2);
+    this.headlight.position.set(-1, 2, 3);
+    this.camera.add(this.headlight);
+
+    // The light preview (see setLit()): instead of the headlight, a sun that
+    // stays where it is in the world - so that the model turned about shows
+    // its lit side and its shaded one - with shadows, on the model and on
+    // the floor; and a sky that lights everything a little from all round,
+    // bluish from above, warm from the ground, so that no shade is black.
+    this.lit = false;
+    this.litSubject = null; // () => THREE.Sphere: what is lit, for the sun to be placed by
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.sun = new THREE.DirectionalLight(0xfff4e0, SUN_INTENSITY);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sky = new THREE.HemisphereLight(0xdde6ff, 0x4a3f33, SKY_INTENSITY);
+    // The floor takes the shadow and nothing else: it darkens what is under it.
+    this.shadowCatcher = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.ShadowMaterial({ opacity: 0.35, depthWrite: false }),
+    );
+    this.shadowCatcher.receiveShadow = true;
+    for (const object of [this.sun, this.sun.target, this.sky, this.shadowCatcher]) {
+      object.visible = false;
+      this.scene.add(object);
+    }
 
     // A pass drawn before the frame into a depth map of its own, for whoever
     // needs to know what the surface hides: { scene, prepare(camera, target) },
@@ -105,6 +135,36 @@ export class Viewport {
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
+  }
+
+  // The light preview on or off: the model lit as in a game (a sun with
+  // shadows, a sky) or by the headlight. Nothing of the model changes.
+  setLit(on) {
+    this.lit = on;
+    this.ambient.visible = this.headlight.visible = !on;
+    this.sun.visible = this.sun.target.visible = this.sky.visible = this.shadowCatcher.visible = on;
+    this.requestRender();
+  }
+
+  // Puts the sun where it lights what is lit (litSubject) from SUN_DIRECTION,
+  // its shadow just covering it, and the floor's shadow under it.
+  placeSun() {
+    const sphere = this.litSubject?.();
+    if (!sphere || !(sphere.radius > 0)) return;
+    const { center, radius } = sphere;
+    this.sun.target.position.copy(center);
+    this.sun.position.copy(center).addScaledVector(SUN_DIRECTION, radius * 4);
+    const camera = this.sun.shadow.camera;
+    const reach = radius * 2.5; // the model's shadow on the floor reaches past the model
+    camera.left = camera.bottom = -reach;
+    camera.right = camera.top = reach;
+    camera.near = radius * 0.5;
+    camera.far = radius * 8;
+    camera.updateProjectionMatrix();
+    this.sun.shadow.bias = -0.0005;
+    this.sun.shadow.normalBias = radius * 0.01;
+    this.shadowCatcher.position.set(center.x, 0, center.z);
+    this.shadowCatcher.scale.setScalar(reach * 4);
   }
 
   // RMB orbits; while pan mode is on (Space held) it pans instead.
@@ -253,6 +313,7 @@ export class Viewport {
       this.renderer.render(this.depthPass.scene, this.camera);
       this.renderer.setRenderTarget(null);
     }
+    if (this.lit) this.placeSun();
     this.renderer.render(this.scene, this.camera);
   }
 

@@ -597,6 +597,7 @@ export class Mirror {
           if (object.hidden) made.hidden = true;
           if (object.color) made.color = object.color;
           if (object.oneSided) made.oneSided = true;
+          if (object.smooth) made.smooth = object.smooth;
           if (object.atlas) made.atlas = object.atlas;
           else delete made.atlas;
           changed = true;

@@ -22,7 +22,9 @@
 //     UnitScaleFactor 100).
 //   - Faces go as they are, polygons of any number of corners; whoever reads
 //     the file cuts them into triangles.
-//   - The model is flat-shaded: every corner of a face has the face's normal.
+//   - Every corner of a face has the normal the editor lights it by: the
+//     face's, or for a smooth-shaded object the mean of its neighbours'
+//     (see normals.js).
 //   - Places on the atlas are pixels with y down here, and fractions of the
 //     picture with v up there.
 //   - Hidden entries and the edges drawn on their own are left out, as the
@@ -32,6 +34,16 @@
 
 import * as THREE from 'three';
 import { quaternionOf } from './frames.js';
+import { cornerNormals } from './normals.js';
+
+// The normals at every face's corners, as the editor lights them (see
+// normals.js): flat, or smooth for the objects that are.
+function modelNormals(model) {
+  const points = model.vertices.map((position) => new THREE.Vector3(...position));
+  const smooth = new Map(model.objects.map((object) => [object.id, object.smooth ?? null]));
+  return cornerNormals(points, model.faces, (face) => smooth.get(model.vertexObject[model.faces[face][0]]) ?? null);
+}
+
 
 // --- the records ----------------------------------------------------------------
 
@@ -209,20 +221,9 @@ function eulerOf(rotation) {
   return [euler.x, euler.y, euler.z].map((angle) => +THREE.MathUtils.radToDeg(angle).toFixed(6) || 0);
 }
 
-// The normal of a polygon, by its corners (counter-clockwise from outside).
-function normalOf(points) {
-  const normal = new THREE.Vector3();
-  points.forEach((a, i) => {
-    const b = points[(i + 1) % points.length];
-    normal.x += (a.y - b.y) * (a.z + b.z);
-    normal.y += (a.z - b.z) * (a.x + b.x);
-    normal.z += (a.x - b.x) * (a.y + b.y);
-  });
-  return normal.lengthSq() > 0 ? normal.normalize() : normal.set(0, 1, 0);
-}
 
 // An object's mesh: its own vertices and faces out of the model's.
-function geometryOf(id, object, model, textured) {
+function geometryOf(id, object, model, textured, cornerNormal) {
   const index = new Map(); // a vertex of the model -> of this object
   const positions = [];
   model.vertexObject.forEach((owner, vertex) => {
@@ -235,8 +236,8 @@ function geometryOf(id, object, model, textured) {
   const places = [];
   model.faces.forEach((face, i) => {
     if (model.vertexObject[face[0]] !== object.id) return;
-    const normal = normalOf(face.map((vertex) => new THREE.Vector3(...model.vertices[vertex])));
     face.forEach((vertex, corner) => {
+      const normal = cornerNormal[i][corner];
       // The last corner of a polygon is marked: written as -(index + 1).
       corners.push(corner === face.length - 1 ? -index.get(vertex) - 1 : index.get(vertex));
       normals.push(normal.x, normal.y, normal.z);
@@ -349,12 +350,13 @@ export function fbxOf(model, { name, texture }) {
     return materials.get(textured);
   };
 
+  const cornerNormal = modelNormals(model); // once, for all the objects
   const ids = new Map(shown.map((object) => [object.id, nextId++]));
   for (const object of shown) {
     const id = ids.get(object.id);
     const textured = Boolean(object.atlas);
     const geometryId = nextId++;
-    const geometry = object.kind === 'group' ? null : geometryOf(geometryId, object, model, textured);
+    const geometry = object.kind === 'group' ? null : geometryOf(geometryId, object, model, textured, cornerNormal);
     add('Model', node('Model', [long(id), named(object.name, 'Model'), geometry ? 'Mesh' : 'Null'], [
       node('Version', [int(232)]),
       properties(

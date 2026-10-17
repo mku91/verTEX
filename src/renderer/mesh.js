@@ -4,6 +4,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { markerColor } from './marker-colors.js';
 import { theme } from './theme.js';
+import { cornerNormals } from './normals.js';
 
 const PLANE_EPSILON = 1e-6; // a vertex this close to a cutting plane lies on it
 const MAX_LOOP = 8; // the pencil fills loops of up to this many vertices
@@ -83,7 +84,8 @@ export class EditableMesh {
     // `pivot` an [x, y, z] the entry turns and scales about - absent until one
     // is set, and then the middle of the entry's bounds stands in for it;
     // `oneSided` set on an object whose faces are not drawn from behind (see
-    // MeshView.rebuild()). The array is never changed in place, only replaced.
+    // MeshView.rebuild()); `smooth`, the angle (degrees) of an object that is
+    // smooth-shaded (see normals.js). The array is never changed in place, only replaced.
     this.objects = [];
     this.vertexObject = []; // the object id of every vertex
     this.nextObjectId = 1;
@@ -1241,7 +1243,7 @@ export class MeshView {
         // The colour is the geometry's, per object: see updateSurfaceColors().
         vertexColors: true,
         roughness: 1,
-        flatShading: true,
+        // Lit by the normals at the faces' corners: flat or smooth by object, see updatePositions().
         side: THREE.DoubleSide,
         // Push the surface back so edges and points don't z-fight with it.
         polygonOffset: true,
@@ -1286,6 +1288,8 @@ export class MeshView {
     // the front only (`surfaceFront`, `plainFront`). The material's side is
     // what picking rays keep to as well: a face not drawn is not hit.
     // (The same goes for the depth the dots are tested against.)
+    // In the light preview it casts shadows, on itself as well (see Viewport.setLit()).
+    this.solid.castShadow = this.solid.receiveShadow = true;
     this.surface = this.solid.material;
     this.plain = this.surface.clone();
     this.surfaceFront = this.surface.clone();
@@ -1464,6 +1468,7 @@ export class MeshView {
       }
     }
     this.setPositions(this.solid, this.triangleIndices.length);
+    this.solid.geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(this.triangleIndices.length * 3), 3));
     parts.forEach(([start, count], material) => this.solid.geometry.addGroup(start * 3, count * 3, material));
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
     // Which faces were on the atlas when the parts were made, see partsStale().
@@ -1567,11 +1572,28 @@ export class MeshView {
       attribute.needsUpdate = true;
     };
     write(this.solid, this.triangleIndices);
+    this.updateNormals();
     write(this.wire, this.edgeIndices);
     write(this.points, vertices.map((_, i) => i));
     // Raycasting against the surface relies on an up-to-date bounding sphere.
     this.solid.geometry.computeBoundingSphere();
     this.applyHighlight();
+  }
+
+  // The normals the surface is lit by, at its triangles' corners: flat, or
+  // smooth for the objects that are (`smooth`, see normals.js).
+  updateNormals() {
+    const { vertices, faces, objects, vertexObject } = this.mesh;
+    const smooth = new Map(objects.filter((object) => object.smooth).map((object) => [object.id, object.smooth]));
+    const corners = cornerNormals(vertices, faces, (face) => smooth.get(vertexObject[faces[face][0]]) ?? null);
+    const attribute = this.solid.geometry.getAttribute('normal');
+    if (!attribute) return;
+    this.triangleIndices.forEach((vertex, i) => {
+      const face = this.triangleFaces[Math.floor(i / 3)];
+      const normal = corners[face][faces[face].indexOf(vertex)];
+      attribute.setXYZ(i, normal.x, normal.y, normal.z);
+    });
+    attribute.needsUpdate = true;
   }
 
   // Takes the colours of the current theme. The vertex colours are the

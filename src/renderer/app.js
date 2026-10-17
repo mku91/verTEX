@@ -49,6 +49,7 @@ const ACTIONS = {
   'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
   'toggle-preview': () => editor.setPreview(!editor.preview),
+  'toggle-light': () => setLit(!editor.viewport.lit),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
@@ -123,6 +124,7 @@ const hotkeys = new Hotkeys(
     { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
     { id: 'view.preview', group: 'Вид', label: 'Просмотр', keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
     { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
+    { id: 'view.light', group: 'Вид', label: 'Свет', keys: '', run: () => ACTIONS['toggle-light']() },
     { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
     { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
   ],
@@ -203,6 +205,19 @@ for (const button of toolButtons) {
 $('back-faces').addEventListener('change', (event) => {
   editor.setBackFaces(editor.objectsInHand(), event.target.checked);
   event.target.blur(); // the keyboard back to the shortcuts
+});
+// Smoothing: on with the angle in the field (or the usual one), off; the
+// angle is taken when the field is left or Enter is pressed.
+const SMOOTH_ANGLE = 60; // degrees: an eight-sided cylinder comes out round, a cube's corners stay sharp
+$('smooth-shading').addEventListener('change', (event) => {
+  const angle = parseFloat($('smooth-angle').value);
+  editor.setSmoothing(editor.objectsInHand(), event.target.checked ? (angle > 0 ? angle : SMOOTH_ANGLE) : null);
+  event.target.blur();
+});
+$('smooth-angle').addEventListener('change', (event) => {
+  const angle = parseFloat(event.target.value.replace(',', '.'));
+  if (angle > 0) editor.setSmoothing(editor.objectsInHand(), angle);
+  else refresh(); // not an angle: the one there was comes back
 });
 
 // The painting tools (see Editor.paintPress()). Their colour, and whether
@@ -556,7 +571,7 @@ const HOTKEY_TITLES = {
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
-  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus',
+  '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
 };
 for (const selector of Object.keys(HOTKEY_TITLES)) {
@@ -747,6 +762,14 @@ function setFocus(on) {
   localStorage.setItem(FOCUS_KEY, on ? '1' : '0');
 }
 editor.setFocus(localStorage.getItem(FOCUS_KEY) === '1');
+
+// The light preview (see Viewport.setLit()); kept between runs.
+const LIGHT_KEY = 'vertex.light';
+function setLit(on) {
+  editor.setLit(on);
+  localStorage.setItem(LIGHT_KEY, on ? '1' : '0');
+}
+editor.setLit(localStorage.getItem(LIGHT_KEY) === '1');
 
 const SHADING_KEY = 'vertex.shading';
 function setShading(mode) {
@@ -1327,6 +1350,14 @@ function refresh() {
   const oneSided = owners.filter((object) => object.oneSided).length;
   $('back-faces').checked = oneSided === 0;
   $('back-faces').indeterminate = oneSided > 0 && oneSided < owners.length;
+  const smoothed = owners.filter((object) => object.smooth);
+  const angles = new Set(smoothed.map((object) => object.smooth));
+  $('smooth-shading').checked = owners.length > 0 && smoothed.length === owners.length;
+  $('smooth-shading').indeterminate = smoothed.length > 0 && smoothed.length < owners.length;
+  $('smooth-angle').disabled = smoothed.length === 0;
+  if (document.activeElement !== $('smooth-angle')) {
+    $('smooth-angle').value = smoothed.length === 0 ? SMOOTH_ANGLE : angles.size === 1 ? [...angles][0] : '';
+  }
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;
@@ -1341,6 +1372,7 @@ function refresh() {
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('focus-button').classList.toggle('active', editor.focus);
   $('preview-button').classList.toggle('active', editor.preview);
+  $('light-button').classList.toggle('active', editor.viewport.lit);
   mirrorDisplay.group.visible = !editor.preview; // the mirror's planes are the editor's too
   showMirror();
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);

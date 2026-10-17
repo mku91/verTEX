@@ -18,8 +18,9 @@
 //
 //   - glTF knows triangles only: the faces are cut the way the editor draws
 //     them (`triangles`, see EditableMesh.triangulate()).
-//   - The model is flat-shaded, so every corner of a face is a vertex of its
-//     own, with the face's normal.
+//   - Every corner of a face is a vertex of its own, with the normal the
+//     editor lights it by: the face's, or for a smooth-shaded object the
+//     mean of its neighbours' (see normals.js).
 //   - Places on the atlas are fractions of the picture, from its top left as
 //     here: v is not turned over.
 //   - The material shows both sides, as the editor does - but for the
@@ -29,6 +30,16 @@
 
 import * as THREE from 'three';
 import { quaternionOf } from './frames.js';
+import { cornerNormals } from './normals.js';
+
+// The normals at every face's corners, as the editor lights them (see
+// normals.js): flat, or smooth for the objects that are.
+function modelNormals(model) {
+  const points = model.vertices.map((position) => new THREE.Vector3(...position));
+  const smooth = new Map(model.objects.map((object) => [object.id, object.smooth ?? null]));
+  return cornerNormals(points, model.faces, (face) => smooth.get(model.vertexObject[model.faces[face][0]]) ?? null);
+}
+
 
 // The numbers glTF has for these (they are WebGL's).
 const FLOAT = 5126;
@@ -77,17 +88,6 @@ function base64(bytes) {
   return btoa(binary);
 }
 
-// The normal of a polygon, by its corners (counter-clockwise from outside).
-function normalOf(points) {
-  const normal = new THREE.Vector3();
-  points.forEach((a, i) => {
-    const b = points[(i + 1) % points.length];
-    normal.x += (a.y - b.y) * (a.z + b.z);
-    normal.y += (a.z - b.z) * (a.x + b.x);
-    normal.z += (a.x - b.x) * (a.y + b.y);
-  });
-  return normal.lengthSq() > 0 ? normal.normalize() : normal.set(0, 1, 0);
-}
 
 // The model (see modelOf() in project.js) as the bytes of a glTF file.
 //   name       what the scene is called
@@ -140,6 +140,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
   };
 
   // An object's mesh: every corner of every face of it a vertex, the faces in triangles.
+  const cornerNormal = modelNormals(model);
   const meshOf = (object) => {
     const textured = Boolean(object.atlas) && Boolean(picture);
     const positions = [];
@@ -149,9 +150,8 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     model.faces.forEach((face, i) => {
       if (model.vertexObject[face[0]] !== object.id) return;
       const first = positions.length / 3;
-      const points = face.map((vertex) => new THREE.Vector3(...model.vertices[vertex]));
-      const normal = normalOf(points);
       face.forEach((vertex, corner) => {
+        const normal = cornerNormal[i][corner];
         positions.push(...model.vertices[vertex]);
         normals.push(normal.x, normal.y, normal.z);
         const place = model.uvs?.[i]?.[corner];

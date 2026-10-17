@@ -1608,6 +1608,28 @@ body {
   cursor: pointer;
 }
 
+/* The smoothing's angle, after its name: a short field, in degrees. */
+#object-props .flag .angle {
+  width: 40px;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  cursor: text;
+}
+
+#object-props .flag .angle:disabled {
+  opacity: 0.4;
+}
+
+#object-props .flag .unit {
+  color: var(--text-dim);
+}
+
 /* Grid step, at the right end of the top bar. */
 #grid-controls {
   display: flex;
@@ -2015,15 +2037,24 @@ body {
   right: 222px;
 }
 
+/* And left of that, the light preview's. */
+#light-button {
+  position: absolute;
+  top: 10px;
+  right: 258px;
+}
+
 #focus-button.active,
-#preview-button.active {
+#preview-button.active,
+#light-button.active {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);
 }
 
 #focus-button i,
-#preview-button i {
+#preview-button i,
+#light-button i {
   display: block;
   flex: none;
   width: 18px;
@@ -2034,6 +2065,7 @@ body {
 
 #focus-button,
 #preview-button,
+#light-button,
 #shading-button {
   display: block;
   width: 30px;
@@ -2048,6 +2080,7 @@ body {
 
 #focus-button:hover:not(.active),
 #preview-button:hover:not(.active),
+#light-button:hover:not(.active),
 #shading-button:hover,
 #shading-button.active {
   background: var(--hover);

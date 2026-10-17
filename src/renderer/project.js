@@ -55,7 +55,7 @@ export function modelOf(editor) {
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided }) => {
       const frame = frames.get(id);
       const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
       // Inside a group that is not turned the angles are the entry's own, as they were set.
@@ -73,6 +73,7 @@ export function modelOf(editor) {
         ...(mirror?.length ? { mirror: [...mirror] } : {}),
         ...(color ? { color } : {}), // a marker colour's id, see marker-colors.js
         atlas: atlas ?? null, // the atlas the object is on (its id), or null: not textured
+        ...(oneSided ? { oneSided: true } : {}), // its faces are not drawn from behind
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -204,6 +205,7 @@ export function readProject(files) {
     const sound =
       object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
       (object.color === undefined || typeof object.color === 'string') &&
+      (object.oneSided === undefined || typeof object.oneSided === 'boolean') &&
       (object.atlas === undefined || object.atlas === null || typeof object.atlas === 'string') &&
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))

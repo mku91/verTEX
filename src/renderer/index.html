@@ -124,7 +124,7 @@
 
       <hr>
 
-      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Alt+щелчок берёт цвет (Q)">
+      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Shift+щелчок — прямая линия от последней точки, Alt+щелчок берёт цвет (Q)">
         <i class="fa-solid fa-paintbrush"></i>
       </button>
       <button id="paint-color" title="Цвет и палитра"><span></span></button>
@@ -332,6 +332,15 @@
         <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="x" title="Угол в градусах"></label>
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
+      </div>
+      <div id="object-props" hidden>
+        <div class="properties-header">
+          <p>Свойства</p>
+        </div>
+        <label class="flag" title="Снято — грани видны только с лицевой стороны, как их рисует большинство игровых движков: изнутри замкнутого объекта сквозь него видно то, что за ним. Уходит и в экспорт">
+          <input type="checkbox" id="back-faces">
+          <span>Изнанка граней</span>
+        </label>
       </div>
       </section>
       <section id="texture-section">

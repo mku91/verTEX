@@ -14,6 +14,7 @@ import { gltfOf } from './gltf.js';
 import { ColorPopup } from './color-popup.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
+import { PipetteLoupe } from './pipette-loupe.js';
 import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
 import { Welcome } from './welcome.js';
@@ -25,6 +26,7 @@ const editor = new Editor(viewport);
 new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
+new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
 new Outliner(document.getElementById('outliner-section'), editor);
@@ -185,6 +187,12 @@ const $ = (id) => document.getElementById(id);
 for (const button of toolButtons) {
   button.addEventListener('click', () => editor.setTool(button.dataset.tool));
 }
+
+// The objects' properties (see refresh()): of every object the selection is in.
+$('back-faces').addEventListener('change', (event) => {
+  editor.setBackFaces(editor.objectsInHand(), event.target.checked);
+  event.target.blur(); // the keyboard back to the shortcuts
+});
 
 // The painting tools (see Editor.paintPress()). Their colour, and whether
 // shapes are drawn whole, are the user's from one launch to the next.
@@ -1161,7 +1169,7 @@ function setViewsSize(share) {
   } catch {
     // Not a list: nothing is folded.
   }
-  for (const id of ['dimensions', 'properties', 'rotation']) {
+  for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) {
     const panel = $(id);
     const header = panel.querySelector('.properties-header');
     const caret = document.createElement('i');
@@ -1244,8 +1252,9 @@ function formatBytes(bytes) {
 function refresh() {
   const { mesh, selection, tool, mode, picked } = editor;
 
+  // With Alt held, a painting tool is the pipette for the time: its button is lit.
   for (const button of toolButtons) {
-    button.classList.toggle('active', button.dataset.tool === tool);
+    button.classList.toggle('active', button.dataset.tool === (editor.picking ? 'pipette' : tool));
   }
   // The shapes' button: the picture of the shape it stands for - the one in
   // hand, or the one that last was - and lit while a shape is in hand.
@@ -1260,6 +1269,8 @@ function refresh() {
   // (No colour at all - the brush rubbing out - is not kept: the next launch starts with a colour.)
   if (editor.paintColor[3]) localStorage.setItem(PAINT_COLOR_KEY, hexOf(editor.paintColor));
   $('viewport').classList.toggle('painting', editor.painting && !editor.preview);
+  $('app').classList.toggle('picking', editor.picking); // pipette cursor, see styles.css
+  $('app').classList.toggle('filling', tool === 'fill' && !editor.picking && !editor.preview); // bucket cursor
   for (const button of modeButtons) {
     button.classList.toggle('active', button.dataset.mode === mode);
     // An operation switches off the modes it can't work in.
@@ -1293,6 +1304,13 @@ function refresh() {
     input.value = +rotation[input.dataset.rotation].toFixed(4);
   }
   $('selection-count').textContent = tool === 'pivot' && point ? 'Опорная точка' : 'Позиция';
+  // The objects' own properties: of the objects the selection is in. A box
+  // half-ticked when they differ.
+  const owners = picked.size ? editor.objectsInHand().map((index) => mesh.objects[index]).filter(Boolean) : [];
+  $('object-props').hidden = owners.length === 0;
+  const oneSided = owners.filter((object) => object.oneSided).length;
+  $('back-faces').checked = oneSided === 0;
+  $('back-faces').indeterminate = oneSided > 0 && oneSided < owners.length;
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;

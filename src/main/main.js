@@ -19,6 +19,8 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: 'verTEX',
+    // Windows takes its icon sizes from the .ico (the taskbar, the title bar, Alt+Tab).
+    icon: path.join(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: '#282a36', // the default theme's background, shown until the page paints
     show: false,
     webPreferences: {

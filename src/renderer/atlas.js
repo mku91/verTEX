@@ -6,8 +6,8 @@ import { START_SIZE, PADDING } from './unwrap.js';
 // It is pixel art: shown with its pixels as they are (no smoothing, no
 // smaller copies for the distance), and see-through pixels are holes. The
 // picture itself is painted outside this program; here it is kept, moved
-// about when the unwrap moves a chart, and marked up so that the painter can
-// see what is where:
+// about when a chart moves, swept of whatever no face shows (see sweep()),
+// and marked up so that the painter can see what is where:
 //   - the template: room given to a new chart is filled with a colour of its
 //     own, every face in it outlined;
 //   - the guide: a picture of the same size with nothing but the faces'
@@ -108,6 +108,31 @@ export function shapePixels(kind, from, to, filled) {
   return pixels;
 }
 
+// The pixels of a straight line from one pixel to another ({ x, y } each),
+// both ends included: one pixel a step, none twice (Bresenham's). As [x, y] each.
+export function linePixels(from, to) {
+  const dx = Math.abs(to.x - from.x);
+  const dy = -Math.abs(to.y - from.y);
+  const sx = from.x < to.x ? 1 : -1;
+  const sy = from.y < to.y ? 1 : -1;
+  let { x, y } = from;
+  let error = dx + dy;
+  const pixels = [[x, y]];
+  while (x !== to.x || y !== to.y) {
+    const twice = 2 * error;
+    if (twice >= dy) {
+      error += dy;
+      x += sx;
+    }
+    if (twice <= dx) {
+      error += dx;
+      y += sy;
+    }
+    pixels.push([x, y]);
+  }
+  return pixels;
+}
+
 // A colour for a chart, told by where it is: the same chart keeps its colour.
 function tint(rect) {
   const hue = ((rect.x * 47 + rect.y * 89 + rect.w * 13) % 360) / 360;
@@ -181,39 +206,15 @@ export class Atlas extends EventTarget {
   }
 
   // Carries out what an unwrap asks for (see unwrap()). `mesh` is the mesh it
-  // was of. `sweep` off leaves the rooms that charts have left as they are: a
-  // chart moved by hand has left its picture behind on purpose.
-  apply(result, mesh, { sweep = true } = {}) {
+  // was of. Then sweeps the picture (see sweep()).
+  apply(result, mesh) {
     const { context } = this;
     let painted = result.width !== this.width || result.height !== this.height;
     this.resize(result.width, result.height);
     // Every picture that moves is taken up before any is put down: they may overlap.
     const lifted = result.moved.map(({ from, w, h }) => context.getImageData(from.x, from.y, w, h));
-    // Room that charts had and none has now is swept: what was painted there
-    // is of faces that are gone or have moved away. (Outside the charts'
-    // rooms nothing is touched: that is the painter's own.)
     // (A room is a chart's rectangle with its rim.)
     const withRim = ({ x, y, w, h }) => ({ x: x - PADDING, y: y - PADDING, w: w + 2 * PADDING, h: h + 2 * PADDING });
-    const rooms = result.charts.map((chart) => withRim(chart.rect));
-    for (const chart of sweep ? this.charts : []) {
-      const rect = withRim(chart.rect);
-      if (rooms.some((room) => room.x === rect.x && room.y === rect.y && room.w === rect.w && room.h === rect.h)) continue;
-      const image = context.getImageData(rect.x, rect.y, rect.w, rect.h);
-      let swept = false;
-      for (let y = 0; y < rect.h; y++) {
-        for (let x = 0; x < rect.w; x++) {
-          const px = rect.x + x;
-          const py = rect.y + y;
-          if (rooms.some((room) => px >= room.x && px < room.x + room.w && py >= room.y && py < room.y + room.h)) continue;
-          if (image.data[(y * rect.w + x) * 4 + 3] !== 0) swept = true;
-          image.data.fill(0, (y * rect.w + x) * 4, (y * rect.w + x) * 4 + 4);
-        }
-      }
-      if (swept) {
-        context.putImageData(image, rect.x, rect.y);
-        painted = true;
-      }
-    }
     for (const fresh of result.fresh) {
       const { x, y, w, h } = withRim(fresh);
       context.clearRect(x, y, w, h);
@@ -237,9 +238,57 @@ export class Atlas extends EventTarget {
       const within = (rect) => [...result.fresh, ...result.moved.map(({ to }) => to)].some((f) => f.x === rect.x && f.y === rect.y);
       for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart);
     }
+    if (this.sweep()) painted = true;
     if (painted) this.touch();
     // Where the faces are has changed, painted or not: the guide is another picture now.
     if (result.changed || painted) this.dispatchEvent(new Event('layout'));
+  }
+
+  // Rubs out every pixel that no face shows (see facePixels()): what was
+  // painted for faces that are gone, have moved or have shrunk, and anything
+  // else off the charts. Nothing on the atlas is there but for the model.
+  // Returns whether anything was rubbed out. (The picture is not touch()ed:
+  // that is the caller's to do.)
+  sweep() {
+    const { width, height } = this;
+    const used = new Uint8Array(width * height);
+    for (const chart of this.charts) {
+      for (const key of chart.pixels) {
+        const [x, y] = key.split(',').map(Number);
+        if (x >= 0 && y >= 0 && x < width && y < height) used[y * width + x] = 1;
+      }
+    }
+    const image = this.context.getImageData(0, 0, width, height);
+    let swept = false;
+    for (let at = 0; at < used.length; at++) {
+      if (used[at] || image.data[at * 4 + 3] === 0) continue;
+      image.data.fill(0, at * 4, at * 4 + 4);
+      swept = true;
+    }
+    if (swept) this.context.putImageData(image, 0, 0);
+    return swept;
+  }
+
+  // Carries charts' pictures along with them, as their faces are put
+  // elsewhere by hand: every pixel of each move's `pixels` (a Set of "x,y")
+  // goes to the pixel that `place` takes its middle to. A pixel in `keep` (a
+  // Set of "x,y": the pictures of charts that stay) is not painted over - a
+  // chart put onto another's picture takes that picture, the way two faces
+  // come to share one. What is left behind is for the sweep.
+  carry(moves, keep) {
+    const { width, height } = this;
+    const image = this.context.getImageData(0, 0, width, height);
+    const from = image.data.slice(); // every picture is taken up before any is put down: they may overlap
+    for (const { pixels, place } of moves) {
+      for (const key of pixels) {
+        const [x, y] = key.split(',').map(Number);
+        const [tx, ty] = place([x + 0.5, y + 0.5]).map(Math.floor);
+        if (tx < 0 || ty < 0 || tx >= width || ty >= height || keep.has(`${tx},${ty}`)) continue;
+        image.data.set(from.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), (ty * width + tx) * 4);
+      }
+    }
+    this.context.putImageData(image, 0, 0);
+    this.touch();
   }
 
   // Fills a chart's room with its colour and outlines its faces - only where

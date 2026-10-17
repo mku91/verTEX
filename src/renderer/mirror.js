@@ -596,6 +596,7 @@ export class Mirror {
           made.parent = object.parent ?? null;
           if (object.hidden) made.hidden = true;
           if (object.color) made.color = object.color;
+          if (object.oneSided) made.oneSided = true;
           if (object.atlas) made.atlas = object.atlas;
           else delete made.atlas;
           changed = true;

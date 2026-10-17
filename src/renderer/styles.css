@@ -456,9 +456,11 @@ body {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-/* The brush in hand: the pointer is a point to paint with. */
+/* The brush in hand: the pointer is a point to paint with. (Over the
+   cursor the camera's controls set inline; the pipette's and the bucket's,
+   further down, win over this one.) */
 #viewport.painting canvas {
-  cursor: crosshair;
+  cursor: crosshair !important;
 }
 
 /* Several tools behind one button: the button shows the one last taken, and
@@ -914,6 +916,55 @@ body {
 #app.pencil-mode #viewport > canvas,
 #app.pencil-mode .ortho-view canvas {
   cursor: url("pencil-cursor.svg") 2 22, crosshair !important;
+}
+
+/* A press would take the colour - the pipette, or Alt held with any painting
+   tool: the pointer is a pipette, its tip the hot spot. Wins over the
+   crosshair the UV editor sets inline. */
+#app.picking #viewport > canvas,
+#app.picking #uv-editor canvas {
+  cursor: url("pipette-cursor.svg") 2 22, crosshair !important;
+}
+
+/* The fill in hand: the pointer is a bucket, the tip of its drop the hot
+   spot. (With Alt held it is the pipette above, see app.js.) */
+#app.filling #viewport > canvas,
+#app.filling #uv-editor canvas {
+  cursor: url("fill-cursor.svg") 20 22, crosshair !important;
+}
+
+/* Beside it, the loupe (see pipette-loupe.js): above, the colour under the
+   pointer; below, the brush's own. Over chequers, which show through what is
+   not quite opaque. */
+#pipette-loupe {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #14161a, 0 2px 6px rgb(0 0 0 / 40%);
+  pointer-events: none;
+}
+
+#pipette-loupe[hidden] {
+  display: none;
+}
+
+#pipette-loupe span {
+  flex: 1;
+  background:
+    linear-gradient(var(--color), var(--color)),
+    repeating-conic-gradient(#c8c8c8 0% 25%, #fff 0% 50%) 0 0 / 8px 8px;
+}
+
+#pipette-loupe span + span {
+  border-top: 1px solid #14161a;
 }
 
 #viewport canvas {
@@ -1486,6 +1537,7 @@ body {
 
 #dimensions p,
 #rotation p,
+#object-props p,
 #properties p {
   flex: 1;
   margin: 0;
@@ -1537,11 +1589,23 @@ body {
 
 #dimensions label,
 #rotation label,
+#object-props label,
 #properties label {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* A property that is on or off: a box to tick, and what it is beside it. */
+#object-props .flag {
+  cursor: pointer;
+}
+
+#object-props .flag input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* Grid step, at the right end of the top bar. */

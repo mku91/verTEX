@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="#14161a" stroke-width="1.2" stroke-linejoin="round">
+  <!-- The tip, at (2, 22), is the cursor's hot spot. -->
+  <ellipse cx="18.3" cy="5.7" rx="4.3" ry="3.4" transform="rotate(-45 18.3 5.7)" fill="#e0606a"/>
+  <path d="M5 17 12 10 14 12 7 19z" fill="#cfe3ee"/>
+  <path d="M11 9 14 6 18 10 15 13z" fill="#5a6170"/>
+  <path d="M2 22 5 17 7 19z" fill="#cfe3ee"/>
+</svg>

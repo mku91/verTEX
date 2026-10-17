@@ -252,7 +252,8 @@ export class UVEditor {
       if (editor.painting) {
         // Here the picture is worked on as a picture: a fill or a shape has the whole of it.
         const pixel = this.pixelAt(event.clientX, event.clientY);
-        if (pixel && editor.paintPress(pixel, null, event.altKey)) this.drag = { paint: true, last: pixel };
+        const line = event.shiftKey ? { pixel } : null; // Shift: a straight line to here first
+        if (pixel && editor.paintPress(pixel, null, event.altKey, { line })) this.drag = { paint: true, last: pixel };
         return;
       }
       // A corner's marker first: it lies on the chart it belongs to.
@@ -270,7 +271,9 @@ export class UVEditor {
       if (editor.painting && !drag?.pan) {
         const pixel = this.pixelAt(event.clientX, event.clientY);
         canvas.style.cursor = 'crosshair';
-        if (drag?.paint && editor.stroke?.base) {
+        if (drag?.paint && editor.stroke?.pick) {
+          editor.pickColor(pixel);
+        } else if (drag?.paint && editor.stroke?.base) {
           editor.paintDrag(pixel); // a shape drawn out
         } else if (drag?.paint && pixel) {
           // Every pixel on the way from the last one: a quick stroke is told of only now and then.
@@ -284,6 +287,7 @@ export class UVEditor {
           drag.last = pixel;
         }
         editor.setPaintHover(pixel);
+        if (!drag) editor.setLineTarget(pixel ? { pixel } : null);
         return;
       }
       if (!drag) {
@@ -360,7 +364,10 @@ export class UVEditor {
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('pointerleave', () => {
-      if (editor.painting && !this.drag) editor.setPaintHover(null);
+      if (editor.painting && !this.drag) {
+        editor.setPaintHover(null);
+        editor.setLineTarget(null);
+      }
       if (this.drag || !this.hovered) return;
       this.hovered = null;
       this.draw();
@@ -490,6 +497,21 @@ export class UVEditor {
       context.strokeStyle = theme.box;
       context.stroke();
     }
+    // The line the brush would paint, Shift held (here or on the model): its
+    // pixels in the brush's colour, a little see-through - or, rubbing out,
+    // their outlines.
+    if (painting && editor.linePreview) {
+      const [r, g, b, a] = editor.paintColor;
+      context.lineWidth = 1;
+      context.fillStyle = `rgba(${r}, ${g}, ${b}, 0.75)`;
+      context.strokeStyle = 'rgba(248, 248, 242, 0.8)';
+      for (const { pixel } of editor.linePreview) {
+        const x = origin.x + pixel.x * zoom;
+        const y = origin.y + pixel.y * zoom;
+        if (a) context.fillRect(x, y, zoom, zoom);
+        else context.strokeRect(x + 0.5, y + 0.5, zoom - 1, zoom - 1);
+      }
+    }
     // The pixel the brush is on - here or on the model: a frame round it, dark in light.
     if (painting && editor.paintHover) {
       const x = origin.x + editor.paintHover.x * zoom;
@@ -513,5 +535,14 @@ export class UVEditor {
       context.strokeStyle = '#191a21';
       context.stroke();
     }
+    // The atlas' size, over its top right corner - kept in view however the
+    // atlas is moved about or zoomed.
+    context.font = '12px "Segoe UI", system-ui, sans-serif';
+    context.textAlign = 'right';
+    context.textBaseline = 'alphabetic';
+    const label = `${atlas.width} × ${atlas.height}`;
+    const right = Math.max(context.measureText(label).width + 6, Math.min(origin.x + w, width - 6));
+    context.fillStyle = theme.textDim;
+    context.fillText(label, right, Math.min(Math.max(origin.y - 6, 16), height - 6));
   }
 }

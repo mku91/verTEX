@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="#14161a" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">
+  <!-- The tip of the drop, at (20, 22), is the cursor's hot spot. -->
+  <path d="M5 8.5C6.5 3 11 1.5 14.5 4.5" fill="none" stroke-width="1.6"/>
+  <path d="M2.5 10.5 10 3 17.5 10.5 10 18z" fill="#e8e8ef"/>
+  <path d="M10 3 17.5 10.5 15.8 12.2 8.3 4.7z" fill="#b48cf2"/>
+  <path d="M17.5 10.5C20.5 12 21.2 14.5 21.2 17.5" fill="none" stroke="#b48cf2" stroke-width="2"/>
+  <path d="M20 16.6C21.4 18.4 22.2 19.4 22.2 20.2A2.2 2.2 0 0 1 17.8 20.2C17.8 19.4 18.6 18.4 20 16.6z" fill="#b48cf2"/>
+</svg>

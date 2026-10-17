@@ -22,7 +22,9 @@
 //     own, with the face's normal.
 //   - Places on the atlas are fractions of the picture, from its top left as
 //     here: v is not turned over.
-//   - The material shows both sides, as the editor does.
+//   - The material shows both sides, as the editor does - but for the
+//     objects that are seen from the front only (`oneSided`): theirs is a
+//     material of its own, one-sided.
 //   - Hidden entries and the edges drawn on their own are left out.
 
 import * as THREE from 'three';
@@ -115,24 +117,26 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       ...more,
     }) - 1;
 
-  // The materials, made when first called for: one with the atlas on it, one without.
+  // The materials, made when first called for: with the atlas on it or
+  // without, seen from both sides or from the front only.
   const materials = new Map();
-  const materialFor = (textured) => {
-    if (!materials.has(textured)) {
+  const materialFor = (textured, doubleSided) => {
+    const key = `${textured}/${doubleSided}`;
+    if (!materials.has(key)) {
       const material = {
-        name: textured ? name : `${name}.plain`,
+        name: `${textured ? name : `${name}.plain`}${doubleSided ? '' : '.oneSided'}`,
         pbrMetallicRoughness: { metallicFactor: 0, roughnessFactor: 1 },
-        doubleSided: true,
+        doubleSided,
       };
-      if (textured) {
+      if (textured && !gltf.textures) {
         gltf.samplers = [{ magFilter: NEAREST, minFilter: NEAREST, wrapS: CLAMP_TO_EDGE, wrapT: CLAMP_TO_EDGE }];
         gltf.images = [{ name, mimeType: 'image/png', ...(binary ? { bufferView: view(picture) } : { uri: `data:image/png;base64,${base64(picture)}` }) }];
         gltf.textures = [{ name, sampler: 0, source: 0 }];
-        material.pbrMetallicRoughness.baseColorTexture = { index: 0 };
       }
-      materials.set(textured, gltf.materials.push(material) - 1);
+      if (textured) material.pbrMetallicRoughness.baseColorTexture = { index: 0 };
+      materials.set(key, gltf.materials.push(material) - 1);
     }
-    return materials.get(textured);
+    return materials.get(key);
   };
 
   // An object's mesh: every corner of every face of it a vertex, the faces in triangles.
@@ -167,7 +171,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
           ...(textured ? { TEXCOORD_0: accessor(new Float32Array(places), 'VEC2', count) } : {}),
         },
         indices: accessor(count > 65535 ? new Uint32Array(indices) : new Uint16Array(indices), 'SCALAR', indices.length),
-        material: materialFor(textured),
+        material: materialFor(textured, !object.oneSided),
       }],
     }) - 1;
   };

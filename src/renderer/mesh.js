@@ -81,8 +81,9 @@ export class EditableMesh {
     // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree,
     // `rotation` how the entry has been turned as a whole, see frames.js;
     // `pivot` an [x, y, z] the entry turns and scales about - absent until one
-    // is set, and then the middle of the entry's bounds stands in for it. The
-    // array is never changed in place, only replaced.
+    // is set, and then the middle of the entry's bounds stands in for it;
+    // `oneSided` set on an object whose faces are not drawn from behind (see
+    // MeshView.rebuild()). The array is never changed in place, only replaced.
     this.objects = [];
     this.vertexObject = []; // the object id of every vertex
     this.nextObjectId = 1;
@@ -1119,8 +1120,18 @@ function pointsMaterial() {
 //     nothing looks different for it.
 // The same shader draws what the brush needs to see on the model (`texels`,
 // the uniforms: see MeshView.setTexelGrid() and setTexelHover()): the lines
-// between the atlas' pixels, and a frame round the one the brush is on.
+// between the atlas' pixels, a frame round the one the brush is on, and the
+// pixels of the line it would paint (see MeshView.setPaintLine()).
 // Both are in the colour that tells against what is under them.
+// A mask the size of the atlas, one byte a pixel, rows from the top: what
+// is marked in it the surface shows in another colour (see MeshView.setPaintLine()).
+function lineMask(width, height) {
+  const texture = new THREE.DataTexture(new Uint8Array(width * height), width, height, THREE.RedFormat);
+  texture.unpackAlignment = 1;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function keepInsideFaces(material, texels) {
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, texels);
@@ -1132,7 +1143,7 @@ function keepInsideFaces(material, texels) {
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <uv_pars_fragment>',
-        centroid(THREE.ShaderChunk.uv_pars_fragment) + box('') + 'uniform vec2 atlasSize;\nuniform float texelGrid;\nuniform vec2 texelHover;\n',
+        centroid(THREE.ShaderChunk.uv_pars_fragment) + box('') + 'uniform vec2 atlasSize;\nuniform float texelGrid;\nuniform vec2 texelHover;\nuniform sampler2D lineMask;\nuniform vec4 lineColor;\n',
       )
       .replace(
         '#include <map_fragment>',
@@ -1152,6 +1163,11 @@ const TEXELS_FRAGMENT = /* glsl */ `
     vec2 texelWide = max( fwidth( texelPlace ), vec2( 1e-6 ) );
     vec2 texelEdge = min( fract( texelPlace ), 1.0 - fract( texelPlace ) ) / texelWide;
     float texelLine = min( texelEdge.x, texelEdge.y );
+    // The line the brush would paint (Shift held): its pixels as they would come out.
+    // Rubbing out, they are shown dimmed instead.
+    if ( texelFetch( lineMask, ivec2( texelOwn ), 0 ).r > 0.5 ) {
+      diffuseColor.rgb = lineColor.a > 0.5 ? lineColor.rgb : mix( diffuseColor.rgb, vec3( 0.5 ), 0.6 );
+    }
     vec3 texelMark = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) > 0.35 ? vec3( 0.0 ) : vec3( 1.0 );
     // The grid: thin lines, gone where the pixels are too small on the screen to tell apart.
     float texelShown = texelGrid * smoothstep( 3.0, 6.0, 1.0 / max( texelWide.x, texelWide.y ) );
@@ -1260,18 +1276,32 @@ export class MeshView {
     // colour and back sides in another. They share the surface's geometry and
     // depth offset, so they cover it exactly; the surface itself stays as it is
     // for picking.
-    // The surface is drawn in two parts (see rebuild()): the faces that are on
+    // The surface is drawn in parts (see rebuild()): the faces that are on
     // the atlas with `surface`, which the textured look gives the atlas'
-    // picture, and the rest with a material that never has one.
+    // picture, and the rest with a material that never has one - each of the
+    // two seen from both sides, or, for the objects that are `oneSided`, from
+    // the front only (`surfaceFront`, `plainFront`). The material's side is
+    // what picking rays keep to as well: a face not drawn is not hit.
+    // (The same goes for the depth the dots are tested against.)
     this.surface = this.solid.material;
-    this.solid.material = [this.surface, this.surface.clone()];
+    const plain = this.surface.clone();
+    this.surfaceFront = this.surface.clone();
+    const plainFront = plain.clone();
+    this.surfaceFront.side = plainFront.side = THREE.FrontSide;
+    this.solid.material = [this.surface, plain, this.surfaceFront, plainFront];
+    const depthFront = this.depthMesh.material.clone();
+    depthFront.side = THREE.FrontSide;
+    this.depthMesh.material = [this.depthMesh.material, this.depthMesh.material, depthFront, depthFront];
     // What the brush is shown by on the surface, see keepInsideFaces().
     this.texels = {
       atlasSize: { value: new THREE.Vector2(1, 1) },
       texelGrid: { value: 0 },
       texelHover: { value: new THREE.Vector2(-1, -1) },
+      lineMask: { value: lineMask(1, 1) },
+      lineColor: { value: new THREE.Vector4() },
     };
     keepInsideFaces(this.surface, this.texels);
+    keepInsideFaces(this.surfaceFront, this.texels);
     const tint = (side) => {
       const mesh = new THREE.Mesh(this.solid.geometry, this.surface.clone());
       mesh.material.side = side;
@@ -1385,24 +1415,31 @@ export class MeshView {
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
     this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
-    // First the faces that are on the atlas, then those that are not: the two
-    // parts are drawn with different materials (see applyLook()).
-    let painted = 0;
-    for (const onAtlas of [true, false]) {
-      this.faceTriangles.forEach((triangles, faceIndex) => {
-        if (hidden.has(faces[faceIndex][0]) || Boolean(faces[faceIndex].uv) !== onAtlas) return;
-        for (const triangle of triangles) {
-          this.triangleIndices.push(...triangle);
-          this.triangleFaces.push(faceIndex);
-        }
-      });
-      if (onAtlas) painted = this.triangleFaces.length;
+    // In four parts, each drawn with its own material (see the constructor):
+    // the faces that are on the atlas, then those that are not - of the
+    // objects seen from both sides, then of those seen from the front only.
+    // A part's material is its number: on the atlas or not is the lower bit.
+    const { objects, vertexObject } = this.mesh;
+    const oneSided = new Set(objects.filter((object) => object.oneSided).map((object) => object.id));
+    const parts = [];
+    for (const front of [false, true]) {
+      for (const onAtlas of [true, false]) {
+        const start = this.triangleFaces.length;
+        this.faceTriangles.forEach((triangles, faceIndex) => {
+          const face = faces[faceIndex];
+          if (hidden.has(face[0]) || Boolean(face.uv) !== onAtlas || oneSided.has(vertexObject[face[0]]) !== front) return;
+          for (const triangle of triangles) {
+            this.triangleIndices.push(...triangle);
+            this.triangleFaces.push(faceIndex);
+          }
+        });
+        parts.push([start, this.triangleFaces.length - start]);
+      }
     }
     this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
 
     this.setPositions(this.solid, this.triangleIndices.length);
-    this.solid.geometry.addGroup(0, painted * 3, 0);
-    this.solid.geometry.addGroup(painted * 3, (this.triangleFaces.length - painted) * 3, 1);
+    parts.forEach(([start, count], material) => this.solid.geometry.addGroup(start * 3, count * 3, material));
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
     this.setPositions(this.wire, this.edgeIndices.length);
     this.setPositions(this.points, vertices.length);
@@ -1567,17 +1604,37 @@ export class MeshView {
     this.wire.visible = !this.bare;
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
     const map = (this.bare || this.shading === 'textured') && this.atlas ? this.atlas.texture : null;
-    const material = this.surface;
-    if (material.map !== map) {
-      material.map = map;
-      material.alphaTest = map ? 0.5 : 0;
-      material.needsUpdate = true;
+    if (this.surface.map !== map) {
+      for (const material of [this.surface, this.surfaceFront]) {
+        material.map = map;
+        material.alphaTest = map ? 0.5 : 0;
+        material.needsUpdate = true;
+      }
       this.updateSurfaceColors(); // the marker colours give way to the picture
     }
     for (const tint of Object.values(this.tints)) {
       tint.visible = !this.bare && !this.focus && this.shading === 'orientation';
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
+  }
+
+  // Shows the line the brush would paint, on the surface, pixel by pixel:
+  // `pixels` ({ x, y } each, of the atlas) in `color` ([r, g, b, a], 0..255).
+  // An empty list hides it. The atlas itself is not touched.
+  setPaintLine(pixels, color) {
+    const { atlasSize, lineMask: mask, lineColor } = this.texels;
+    const [width, height] = [atlasSize.value.x, atlasSize.value.y];
+    let texture = mask.value;
+    if (texture.image.width !== width || texture.image.height !== height) {
+      texture.dispose();
+      texture = mask.value = lineMask(width, height);
+    }
+    const { data } = texture.image;
+    data.fill(0);
+    for (const { x, y } of pixels) if (x >= 0 && y >= 0 && x < width && y < height) data[y * width + x] = 255;
+    texture.needsUpdate = true;
+    // (The surface's colours are worked out in linear light.)
+    lineColor.value.set(...color.slice(0, 3).map((value) => new THREE.Color().setRGB(value / 255, 0, 0, THREE.SRGBColorSpace).r), color[3] / 255);
   }
 
   // Shows a wireframe given as [Vector3, Vector3] segments; an empty list hides it.

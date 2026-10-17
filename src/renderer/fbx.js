@@ -367,7 +367,8 @@ export function fbxOf(model, { name, texture }) {
       node('MultiLayer', [int(0)]),
       node('MultiTake', [int(0)]),
       node('Shading', [flag(true)]),
-      node('Culling', ['CullingOff']),
+      // Seen from the front only, or from both sides (see `oneSided`). How an importer takes it is its own affair.
+      node('Culling', [object.oneSided ? 'CullingOnCW' : 'CullingOff']),
     ]));
     link(id, ids.get(object.parent) ?? 0); // 0 is the scene itself
     if (geometry) {

@@ -5,7 +5,7 @@ import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
-import { Atlas, facePixels, shapePixels } from './atlas.js';
+import { Atlas, facePixels, shapePixels, linePixels } from './atlas.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 
@@ -116,9 +116,15 @@ export class Editor extends EventTarget {
     this.box = null; // Shift+drag selection box in the main view, in client pixels
     this.shading = 'solid'; // how the object is drawn, see MeshView.setShading()
     this.paintColor = [0, 0, 0, 255]; // the brush's colour, as [r, g, b, a]
-    this.stroke = null; // a stroke of the brush, or a shape being drawn out, see paintPress()
+    this.stroke = null; // a stroke of the brush, a shape being drawn out, or the pipette's drag, see paintPress()
     this.shapeFilled = false; // the shape tools draw the whole shape, not its outline
     this.paintHover = null; // the pixel of the atlas the brush is on ({ x, y }), or null
+    // The brush's straight lines, Shift+click (see linePath()): the last pixel
+    // it put, and the line a press would paint, shown while Shift is held.
+    this.lastPaint = null; // { pixel, point, width, height }
+    this.shiftHeld = false;
+    this.lineTarget = null;
+    this.linePreview = null; // [{ pixel, point }]
     this.focus = false; // the focus look, see setFocus()
     // Modal operation, 'cut', 'extrude' or 'pencil': a state with its own look
     // and its own meaning of LMB, on top of whatever tool is active.
@@ -145,6 +151,7 @@ export class Editor extends EventTarget {
     this.cutDirection = 'vertical'; // or 'horizontal': which way the cut tool cuts
     this.axisHold = null; // the lock to go back to when a held axis key is let go, see holdAxis()
     this.tool = 'select';
+    this.toolBeforePaint = 'select'; // the tool an operation brings back from painting, see setOperation()
     this.raycaster = new THREE.Raycaster();
     this.snapGrid = new SnapGrid(viewport);
     this.history = new History();
@@ -275,16 +282,25 @@ export class Editor extends EventTarget {
     // Alt held while scaling: one-sided, see scaleCenter(). Pressing or
     // letting go of it mid-drag takes effect at once. (And Alt must not send
     // the keyboard to the window's menu while the scale tool is in hand.)
+    // With a painting tool, Alt held is the pipette, see picking.
     this.altHeld = false;
     for (const type of ['keydown', 'keyup']) {
       window.addEventListener(type, (event) => {
+        if (event.key === 'Shift') this.setShiftHeld(type === 'keydown'); // the brush's line, see setShiftHeld()
         if (event.key !== 'Alt') return;
-        if (this.tool === 'scale') event.preventDefault();
+        if (this.tool === 'scale' || this.painting) event.preventDefault();
         this.setAltHeld(type === 'keydown');
       });
     }
-    window.addEventListener('blur', () => this.setAltHeld(false));
-    renderer.domElement.addEventListener('pointermove', (event) => this.setAltHeld(event.altKey));
+    window.addEventListener('blur', () => {
+      this.setAltHeld(false);
+      this.setShiftHeld(false);
+    });
+    // In case the key events were missed.
+    window.addEventListener('pointermove', (event) => {
+      this.setAltHeld(event.altKey);
+      this.setShiftHeld(event.shiftKey);
+    });
     this.gizmo.addEventListener('mouseUp', () => {
       this.snapGrid.end();
       this.commit(this.gizmoBefore);
@@ -294,8 +310,11 @@ export class Editor extends EventTarget {
 
   setAltHeld(on) {
     if (on === this.altHeld) return;
+    const picking = this.picking;
     this.altHeld = on;
     if (this.gizmo.dragging && this.gizmo.mode === 'scale') this.applyGizmo();
+    if (this.picking !== picking) this.emitChange();
+    this.updateLinePreview(); // the pipette shows no line
   }
 
   // The point a scale drag holds still. Normally the gizmo's own place; with
@@ -930,11 +949,12 @@ export class Editor extends EventTarget {
 
   // Lays the faces out on the atlas as the model is now: every face gets its
   // place, or keeps the one it has. Returns whether anything is where it was
-  // not. `repack` forgets the places and lays everything out anew.
-  layOut(repack = false, sweep = true) {
+  // not. `repack` forgets the places and lays everything out anew. What no
+  // face shows any more is rubbed out (see Atlas.sweep()).
+  layOut(repack = false) {
     const result = unwrap(this.mesh, { ppu: this.ppu, width: this.atlas.width, height: this.atlas.height, repack });
     const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
-    this.atlas.apply(result, this.mesh, { sweep });
+    this.atlas.apply(result, this.mesh);
     return result.changed || resized;
   }
 
@@ -1042,7 +1062,7 @@ export class Editor extends EventTarget {
     }
     if (settle && changed) {
       this.history.push(before);
-      this.layOut(false, false);
+      this.layOut(); // what the faces no longer cover is rubbed out
       this.emitChange();
     }
     this.view.updateUVs();
@@ -1078,8 +1098,9 @@ export class Editor extends EventTarget {
   }
 
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
-  // given faces. Only the faces' places change, not the picture: this is how
-  // a face is given another picture, or several faces the same one.
+  // given faces. Their pictures go with them (see Atlas.carry()) - except onto
+  // the picture of a chart that stays, which they take: this is how several
+  // faces come to share one picture.
   //   { move: [dx, dy] }   by whole pixels (kept on the atlas)
   //   { turn: 1 | -1 }     a quarter turn, clockwise or back, about the chart's top left room
   //   { flip: 'h' | 'v' }  turned over, left to right or top to bottom
@@ -1090,6 +1111,7 @@ export class Editor extends EventTarget {
     if (charts.length === 0 || this.busy()) return false;
     const before = this.snapshot();
     let changed = false;
+    const moves = []; // the pictures to carry: { pixels, place }
     for (const chart of charts) {
       const { rect } = chart;
       const members = chart.faces.map((index) => this.mesh.faces[index]);
@@ -1114,12 +1136,15 @@ export class Editor extends EventTarget {
         face.uv = face.uv.map((point) => place(point).map((value) => +value.toFixed(6)));
         face.pin = true;
       }
+      moves.push({ pixels: chart.pixels, place });
       changed = true;
     }
     if (!changed) return false;
     this.history.push(before);
-    // The pictures stay where they are: nothing is swept behind a chart that was moved.
-    this.layOut(false, false);
+    const keep = new Set();
+    for (const chart of this.atlas.charts) if (!charts.includes(chart)) for (const key of chart.pixels) keep.add(key);
+    this.atlas.carry(moves, keep);
+    this.layOut(); // sweeps what was left behind
     this.view.updateUVs();
     this.viewport.requestRender();
     this.emitChange();
@@ -1199,6 +1224,23 @@ export class Editor extends EventTarget {
       else delete object.color;
     }
     this.view.updateSurfaceColors();
+    this.viewport.requestRender();
+    this.emitChange();
+  }
+
+  // Whether the faces of these objects (entries of the objects list, groups
+  // left out) are drawn from behind as well - the default - or from the front
+  // only, as most game engines draw them: then the inside of a closed object
+  // is not to be seen. One undo step.
+  setBackFaces(indices, shown) {
+    const objects = indices.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
+    if (objects.every((object) => !object.oneSided === shown) || this.busy()) return;
+    this.history.push(this.snapshot());
+    for (const object of objects) {
+      if (shown) delete object.oneSided;
+      else object.oneSided = true;
+    }
+    this.rebuildView();
     this.viewport.requestRender();
     this.emitChange();
   }
@@ -1403,10 +1445,14 @@ export class Editor extends EventTarget {
         // The gizmo's own hover handler has already run for this event.
         const idle = this.overGizmo() || this.tool === 'pivot' || this.painting; // see pointerdown
         this.setHovered(idle ? null : this.pickElement(event.clientX, event.clientY));
-        if (this.painting) this.setPaintHover(this.paintPixelAt(event.clientX, event.clientY));
+        if (this.painting) {
+          this.setPaintHover(this.paintPixelAt(event.clientX, event.clientY));
+          this.setLineTarget({ x: event.clientX, y: event.clientY });
+        }
       }
     });
     dom.addEventListener('pointerleave', () => {
+      this.setLineTarget(null);
       if (!this.stroke) this.setPaintHover(null);
       if (!this.drag) this.setHovered(null);
     });
@@ -1450,14 +1496,24 @@ export class Editor extends EventTarget {
     return PAINT_TOOLS.includes(this.tool);
   }
 
+  // Whether a press would take the colour: the pipette in hand, or any
+  // painting tool with Alt held - for as long as it is held, and the tool in
+  // hand comes back when it is let go. A stroke goes on as it was begun: Alt
+  // pressed in the middle of one takes the pipette only once it is over.
+  get picking() {
+    if (!this.painting || this.preview) return false;
+    if (this.stroke) return Boolean(this.stroke.pick);
+    return this.tool === 'pipette' || this.altHeld;
+  }
+
   // Where on the atlas the pointer is: { pixel: { x, y }, face } - the face of
   // the model it is on, by its number; null where it is not on a face that is
   // on the atlas.
   paintHitAt(clientX, clientY) {
     this.pointerRay(clientX, clientY);
     const [hit] = this.raycaster.intersectObject(this.view.solid, false);
-    // (The surface is drawn in two parts, see MeshView: the first is what is on the atlas.)
-    if (!hit?.uv || hit.face.materialIndex !== 0) return null;
+    // (The surface is drawn in parts, see MeshView.rebuild(): the even ones are what is on the atlas.)
+    if (!hit?.uv || hit.face.materialIndex % 2 !== 0) return null;
     const index = this.view.triangleFaces[hit.faceIndex];
     const face = this.mesh.faces[index];
     if (!face?.uv?.every(Boolean)) return null;
@@ -1468,7 +1524,11 @@ export class Editor extends EventTarget {
       const high = Math.ceil(Math.max(...face.uv.map((place) => place[axis])) - 1e-6) - 1;
       return Math.min(Math.max(Math.floor(value), low), Math.max(low, high));
     };
-    return { pixel: { x: within(hit.uv.x * this.atlas.width, 0), y: within((1 - hit.uv.y) * this.atlas.height, 1) }, face: index };
+    return {
+      pixel: { x: within(hit.uv.x * this.atlas.width, 0), y: within((1 - hit.uv.y) * this.atlas.height, 1) },
+      face: index,
+      point: hit.point, // where on the surface, in the world
+    };
   }
 
   paintPixelAt(clientX, clientY) {
@@ -1491,7 +1551,8 @@ export class Editor extends EventTarget {
     const hit = this.paintHitAt(event.clientX, event.clientY);
     if (!hit) return false;
     const kept = this.tool === 'paint' ? null : this.paintMask(hit.face);
-    if (this.paintPress(hit.pixel, kept, event.altKey)) {
+    const line = event.shiftKey ? { x: event.clientX, y: event.clientY } : null;
+    if (this.paintPress(hit.pixel, kept, event.altKey, { point: hit.point, line })) {
       this.stroke.x = event.clientX;
       this.stroke.y = event.clientY;
     }
@@ -1502,13 +1563,18 @@ export class Editor extends EventTarget {
   // found - on the model or in the UV editor. `mask` (a Set of "x,y", or
   // null) is what a fill or a shape must keep to. With Alt any tool takes the
   // colour instead, as the pipette does. Returns whether a drag is to follow:
-  // the brush's stroke (strokePixel()) or a shape drawn out (paintDrag()),
-  // ended by endPaint().
-  paintPress(pixel, mask, alt) {
+  // the brush's stroke (strokePixel()), a shape drawn out (paintDrag()) or
+  // the pipette taking the colour wherever it goes (pickColor()), ended by
+  // endPaint(). `point` is where on the model's surface the press was, if it
+  // was on the model. With `line` (Shift held: where the press was, see
+  // linePath()) the brush first paints a straight line there from its last
+  // pixel, and the stroke goes on from its end.
+  paintPress(pixel, mask, alt, { point = null, line = null } = {}) {
     if (this.busy() || !this.painting) return false;
     if (alt || this.tool === 'pipette') {
-      this.setPaintColor(this.atlas.colorAt(pixel.x, pixel.y));
-      return false;
+      this.stroke = { pick: true, changed: false };
+      this.pickColor(pixel);
+      return true;
     }
     this.stroke = { before: this.snapshot(), changed: false, tool: this.tool, mask, from: { ...pixel }, base: null };
     if (this.tool === 'fill') {
@@ -1521,13 +1587,113 @@ export class Editor extends EventTarget {
       this.paintDrag(pixel);
       return true;
     }
-    this.strokePixel(pixel.x, pixel.y);
+    if (line) for (const step of this.linePath(line)) this.strokePixel(step.pixel.x, step.pixel.y, step.point);
+    this.strokePixel(pixel.x, pixel.y, point);
+    this.updateLinePreview();
     return true;
   }
 
-  // The brush's stroke takes in a pixel.
-  strokePixel(x, y) {
-    if (this.stroke && !this.stroke.base && this.atlas.paintPixel(x, y, this.paintColor)) this.stroke.changed = true;
+  // The brush's stroke takes in a pixel - `point`, where on the model's
+  // surface, if it was put there on the model. It is the last pixel the
+  // brush has put, from then on: a line starts there (see linePath()).
+  strokePixel(x, y, point = null) {
+    const { stroke } = this;
+    if (!stroke || stroke.base || stroke.pick) return;
+    if (this.atlas.paintPixel(x, y, this.paintColor)) stroke.changed = true;
+    this.lastPaint = { pixel: { x, y }, point: point?.clone() ?? null, width: this.atlas.width, height: this.atlas.height };
+  }
+
+  // The way a straight line goes from the brush's last pixel to `target`, as
+  // [{ pixel, point }] - its pixels in order, each once, the first one
+  // included, with where on the surface it is (or null). `target` is a place
+  // on the model's view ({ x, y }, as the pointer has it) or a pixel of the
+  // UV editor ({ pixel }).
+  //   - On the model, if the last pixel was put on the model too: straight
+  //     on the screen, lying on the surface - the way a stroke goes. (Two
+  //     places on two faces can be far apart on the atlas, with other faces'
+  //     pixels between them.) Where the line leaves the surface nothing is put.
+  //   - Otherwise straight across the atlas, pixel by pixel.
+  linePath(target) {
+    const from = this.lastPaint;
+    if (!from || from.width !== this.atlas.width || from.height !== this.atlas.height) return [];
+    const path = [];
+    const seen = new Set();
+    const add = (pixel, point) => {
+      const key = `${pixel.x},${pixel.y}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      path.push({ pixel, point });
+    };
+    const start = target.pixel === undefined && from.point ? this.screenOf(from.point) : null;
+    if (start) {
+      add(from.pixel, from.point);
+      const steps = Math.min(Math.ceil(Math.hypot(target.x - start.x, target.y - start.y)), 600);
+      for (let step = 1; step <= steps; step++) {
+        const hit = this.paintHitAt(
+          start.x + ((target.x - start.x) * step) / steps,
+          start.y + ((target.y - start.y) * step) / steps,
+        );
+        if (hit) add(hit.pixel, hit.point);
+      }
+      // Pixel-perfect, as pixel art wants a line: where the way across the
+      // screen took a corner (two pixels for one diagonal step), the corner goes.
+      const kept = [];
+      for (const step of path) {
+        kept.push(step);
+        if (kept.length < 3) continue;
+        const [a, b, c] = kept.slice(-3).map((each) => each.pixel);
+        const diagonal = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1;
+        if (diagonal && (b.x === a.x || b.y === a.y) && (b.x === c.x || b.y === c.y)) kept.splice(-2, 1);
+      }
+      return kept;
+    }
+    const end = target.pixel ?? this.paintPixelAt(target.x, target.y);
+    if (!end) return [];
+    for (const [x, y] of linePixels(from.pixel, end)) add({ x, y }, null);
+    return path;
+  }
+
+  // Where a point of the world is on the model's view, as the pointer would
+  // have it ({ x, y }); null if it is behind the camera.
+  screenOf(point) {
+    const { camera, renderer } = this.viewport;
+    const ndc = point.clone().project(camera);
+    if (ndc.z < -1 || ndc.z > 1) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  }
+
+  // Shift held with the brush: the line a press would paint is shown, from
+  // the last pixel to where the pointer is (`lineTarget`, as linePath()
+  // takes it; null with the pointer on neither view): the pixels it would
+  // paint (`linePreview`, the path), on the model's surface and in the UV
+  // editor alike - over the picture, which is not touched. Tells of it with
+  // a 'painthover' event.
+  setShiftHeld(on) {
+    if (on === this.shiftHeld) return;
+    this.shiftHeld = on;
+    this.updateLinePreview();
+  }
+
+  setLineTarget(target) {
+    this.lineTarget = target;
+    this.updateLinePreview();
+  }
+
+  updateLinePreview() {
+    const on = this.tool === 'paint' && this.shiftHeld && !this.picking && !this.stroke && this.lineTarget && this.lastPaint;
+    let path = on ? this.linePath(this.lineTarget) : [];
+    if (path.length < 2) path = []; // the pointer on the last pixel itself: no line
+    if (!this.linePreview && path.length === 0) return;
+    this.linePreview = path.length ? path : null;
+    this.view.setPaintLine(path.map((step) => step.pixel), this.paintColor);
+    this.viewport.requestRender();
+    this.dispatchEvent(new Event('painthover'));
+  }
+
+  // The pipette takes the colour of a pixel.
+  pickColor(pixel) {
+    if (pixel) this.setPaintColor(this.atlas.colorAt(pixel.x, pixel.y));
   }
 
   // A shape being drawn out reaches to a pixel: it is drawn anew, from the
@@ -1548,16 +1714,18 @@ export class Editor extends EventTarget {
     const { stroke } = this;
     if (!stroke) return;
     const pixel = this.paintPixelAt(clientX, clientY);
-    if (stroke.base) {
+    if (stroke.pick) {
+      this.pickColor(pixel);
+    } else if (stroke.base) {
       this.paintDrag(pixel);
     } else {
       const steps = Math.min(Math.ceil(Math.hypot(clientX - stroke.x, clientY - stroke.y)), 400);
       for (let step = 1; step <= steps; step++) {
-        const on = this.paintPixelAt(
+        const on = this.paintHitAt(
           stroke.x + ((clientX - stroke.x) * step) / steps,
           stroke.y + ((clientY - stroke.y) * step) / steps,
         );
-        if (on) this.strokePixel(on.x, on.y);
+        if (on) this.strokePixel(on.pixel.x, on.pixel.y, on.point);
       }
       stroke.x = clientX;
       stroke.y = clientY;
@@ -1569,9 +1737,10 @@ export class Editor extends EventTarget {
     const { stroke } = this;
     if (!stroke) return;
     this.stroke = null;
-    if (!stroke.changed) return;
-    this.history.push(stroke.before);
-    this.emitChange();
+    if (stroke.changed) this.history.push(stroke.before);
+    // Alt pressed or let go during the stroke takes effect only now, see picking.
+    if (stroke.changed || Boolean(stroke.pick) !== this.picking) this.emitChange();
+    this.updateLinePreview(); // Shift still held: the next line, from the stroke's end
   }
 
   // The pixel the tool is on, wherever it is looked at from - the model
@@ -1607,6 +1776,16 @@ export class Editor extends EventTarget {
     if (name === this.operation) return;
     // The place tool needs one object or group picked whole.
     if (name === 'place' && this.pivotEntry() === null) return;
+    // An operation puts the painting tool down: the tool that was in hand
+    // before it comes back (see setTool()). What was selected was not to be
+    // seen while painting, so the operation does not take it: it starts with
+    // nothing, for the user to pick. (The place tool's object stays: it
+    // starts nothing by itself.)
+    if (name && this.painting) {
+      if (this.busy()) return;
+      this.setTool(this.toolBeforePaint);
+      if (name !== 'place') this.clearSelection();
+    }
     this.cancelDrag();
     this.cancelBox();
     const wasIdle = this.operation === null;
@@ -3037,6 +3216,8 @@ export class Editor extends EventTarget {
       if (this.busy()) return;
       if (this.operation) this.setOperation(null);
       this.setHovered(null);
+      // The pivot tool would change the mode on the way back: the plain select instead.
+      if (!this.painting) this.toolBeforePaint = this.tool === 'pivot' ? 'select' : this.tool;
     }
     this.tool = tool;
     this.applyBare();
@@ -3325,11 +3506,11 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
-          rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null,
+          rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided),
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -3363,6 +3544,7 @@ export class Editor extends EventTarget {
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
       if (source.color) object.color = source.color;
+      if (source.oneSided) object.oneSided = true;
       // A copy of an object that is on the atlas is on it too, with its picture.
       if (source.atlas) object.atlas = source.atlas;
       else delete object.atlas;
@@ -3538,6 +3720,7 @@ export class Editor extends EventTarget {
   loadProject({ model, view }) {
     if (this.busy()) return false;
     this.setOperation(null);
+    this.lastPaint = null; // a line is not drawn from another project's pixel
     this.cancelDrag();
     this.cancelBox();
     const { mesh } = this;
@@ -3556,7 +3739,7 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -3567,6 +3750,7 @@ export class Editor extends EventTarget {
       ...(typeof color === 'string' ? { color } : {}),
       ...(atlas || placedObjects?.has(id) ? { atlas: ATLAS } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
+      ...(oneSided ? { oneSided: true } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
     mesh.vertexObject = [...model.vertexObject];
@@ -3883,6 +4067,7 @@ export class Editor extends EventTarget {
 
   emitChange() {
     this.updatePivotMarker();
+    this.updateLinePreview(); // another tool, another colour
     this.dispatchEvent(new Event('change'));
   }
 }

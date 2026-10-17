@@ -3,7 +3,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
-import { Mirror } from './mirror.js';
+import { Mirror, mirrorPoint } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
@@ -982,7 +982,7 @@ export class Editor extends EventTarget {
   // Lays the faces out on the atlas as the model is now: every face gets its
   // place, or keeps the one it has. Returns whether anything is where it was
   // not. `repack` forgets the places and lays everything out anew. What no
-  // face shows any more is rubbed out (see Atlas.sweep()).
+  // face shows any more stays, until the atlas is cleaned (see cleanAtlas()).
   layOut(repack = false) {
     const result = unwrap(this.mesh, { ppu: this.ppu, width: this.atlas.width, height: this.atlas.height, repack });
     const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
@@ -1005,8 +1005,8 @@ export class Editor extends EventTarget {
   }
 
   // Puts objects on the atlas, or takes them off it: their faces get places
-  // there (see unwrap.js), or lose them - and with them what was painted for
-  // them. One undo step.
+  // there (see unwrap.js), or lose them; what was painted for them stays,
+  // until the atlas is cleaned (see cleanAtlas()). One undo step.
   setOnAtlas(entries, on) {
     const objects = entries.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
     if (objects.every((object) => Boolean(object.atlas) === on) || this.busy()) return false;
@@ -1103,9 +1103,10 @@ export class Editor extends EventTarget {
   }
 
   // Makes the charts that hold any of the given faces anew: they are the
-  // unwrap's again - not pinned, not shaped - their room is swept of what was
-  // painted for them, and they are laid out and filled in like new ones. With
-  // no faces given, the whole atlas (see repackAtlas()). One undo step.
+  // unwrap's again - not pinned, not shaped - and they are laid out and
+  // filled in like new ones. What was painted where they were stays, until
+  // the atlas is cleaned (see cleanAtlas()). With no faces given, the whole
+  // atlas (see repackAtlas()). One undo step.
   regenerateCharts(faces) {
     const charts = this.chartsOfFaces(faces);
     if (this.busy()) return false;
@@ -1122,7 +1123,7 @@ export class Editor extends EventTarget {
         delete face.shaped;
       }
     }
-    this.layOut(); // sweeps the rooms they have left, gives them new ones
+    this.layOut(); // gives them new rooms
     this.view.updateUVs();
     this.viewport.requestRender();
     this.emitChange();
@@ -1176,7 +1177,7 @@ export class Editor extends EventTarget {
     const keep = new Set();
     for (const chart of this.atlas.charts) if (!charts.includes(chart)) for (const key of chart.pixels) keep.add(key);
     this.atlas.carry(moves, keep);
-    this.layOut(); // sweeps what was left behind
+    this.layOut();
     this.view.updateUVs();
     this.viewport.requestRender();
     this.emitChange();
@@ -1217,6 +1218,20 @@ export class Editor extends EventTarget {
     if (!(await this.atlas.load(bytes, true))) return false;
     const now = this.atlas.pixels().data;
     if (now.length === before.atlas.data.length && now.every((value, i) => value === before.atlas.data[i])) return true;
+    this.history.push(before);
+    this.emitChange();
+    return true;
+  }
+
+  // Rubs out of the atlas all that no face shows (see Atlas.sweep()) - what
+  // was painted for faces that are gone, have moved or have shrunk, left
+  // behind by charts put elsewhere, or painted off the charts. One undo
+  // step. Returns whether anything was rubbed out.
+  cleanAtlas() {
+    if (this.busy()) return false;
+    const before = this.snapshot();
+    if (!this.atlas.sweep()) return false;
+    this.atlas.touch();
     this.history.push(before);
     this.emitChange();
     return true;
@@ -1657,6 +1672,12 @@ export class Editor extends EventTarget {
     this.stroke = { before: this.snapshot(), changed: false, tool: this.tool, mask, from: { ...pixel }, base: null };
     if (this.tool === 'fill') {
       this.stroke.changed = this.atlas.paintPixels(this.atlas.floodPixels(pixel.x, pixel.y, mask), this.paintColor);
+      // With the mirror on, the same from the mirror images of where it was begun - on
+      // the model within their charts, as the fill keeps to, in the UV editor anywhere.
+      for (const image of this.mirroredPixels(pixel.x, pixel.y, at)) {
+        const kept = mask ? this.paintMask(image.face) : null;
+        if (this.atlas.paintPixels(this.atlas.floodPixels(image.x, image.y, kept), this.paintColor)) this.stroke.changed = true;
+      }
       this.endPaint();
       return false;
     }
@@ -1678,6 +1699,10 @@ export class Editor extends EventTarget {
     const { stroke } = this;
     if (!stroke || stroke.base || stroke.pick) return;
     if (this.atlas.paintPixel(x, y, this.paintColor)) stroke.changed = true;
+    // With the mirror on, its images as well (see mirroredPixels()).
+    for (const image of this.mirroredPixels(x, y, at)) {
+      if (this.atlas.paintPixel(image.x, image.y, this.paintColor)) stroke.changed = true;
+    }
     this.lastPaint = {
       pixel: { x, y },
       // (The view's triangles are numbered anew whenever it is rebuilt: `rebuilds` tells whether these still hold.)
@@ -1685,6 +1710,73 @@ export class Editor extends EventTarget {
       width: this.atlas.width,
       height: this.atlas.height,
     };
+  }
+
+  // Painting with the mirror on (see mirror.js): the pixels of the atlas that
+  // are the mirror images of pixel (x, y) - where its place on the model
+  // (`at`, { point, triangle }; or, painted in the UV editor, found by the
+  // pixel's middle on a face's piece of the atlas) is mirrored to, across
+  // the planes its object's edits are mirrored across, every one of them
+  // and every pair and three of them; and where that is on the model, a
+  // face of it there (see surfacePlace()), and where that is on the atlas.
+  // As [{ x, y, face }]; [] with the mirror off, or nothing there.
+  mirroredPixels(x, y, at = null) {
+    if (!this.mirror.active()) return [];
+    const place = at?.point ? { point: at.point, face: this.view.triangleFaces[at.triangle] } : this.placeOfPixel(x, y);
+    if (!place) return [];
+    const owner = this.mesh.vertexObject[this.mesh.faces[place.face]?.[0]];
+    const planes = this.mirror.planesFor(this.mesh.objects.findIndex((object) => object.id === owner));
+    const pixels = [];
+    for (let mask = 1; mask < 1 << planes.length; mask++) {
+      const image = mirrorPoint(place.point, planes.filter((_, i) => mask & (1 << i)));
+      const found = this.surfacePlace(image);
+      if (!found) continue;
+      const spot = this.atlasPlaceAt(found.triangle, image);
+      const pixel = spot && this.facePixelAt(this.view.triangleFaces[found.triangle], spot.x, spot.y);
+      if (pixel) pixels.push({ ...pixel, face: this.view.triangleFaces[found.triangle] });
+    }
+    return pixels;
+  }
+
+  // Where on the model a pixel of the atlas is: the middle of it on the
+  // first face whose piece of the atlas holds it - { point, face } - or null.
+  placeOfPixel(x, y) {
+    const { faces, vertices } = this.mesh;
+    const { triangleIndices, triangleFaces } = this.view;
+    const middle = new THREE.Vector3(x + 0.5, y + 0.5, 0);
+    for (let t = 0; t < triangleFaces.length; t++) {
+      const face = faces[triangleFaces[t]];
+      if (!face?.uv?.every(Boolean)) continue;
+      const corners = triangleIndices.slice(t * 3, t * 3 + 3);
+      const places = corners.map((vertex) => new THREE.Vector3(...face.uv[face.indexOf(vertex)], 0));
+      const flat = new THREE.Triangle(...places);
+      if (!flat.containsPoint(middle)) continue;
+      const weights = flat.getBarycoord(middle, new THREE.Vector3());
+      const point = new THREE.Vector3();
+      corners.forEach((vertex, k) => point.addScaledVector(vertices[vertex], weights.getComponent(k)));
+      return { point, face: triangleFaces[t] };
+    }
+    return null;
+  }
+
+  // The triangle of the view (that is drawn) a point of the world lies on,
+  // nearest to it within a hair: { triangle }; null if it is on none.
+  surfacePlace(point) {
+    const { vertices } = this.mesh;
+    const { triangleIndices } = this.view;
+    const triangle = new THREE.Triangle();
+    const nearest = new THREE.Vector3();
+    let best = null;
+    let least = 1e-3;
+    for (let t = 0; t < triangleIndices.length / 3; t++) {
+      triangle.set(vertices[triangleIndices[t * 3]], vertices[triangleIndices[t * 3 + 1]], vertices[triangleIndices[t * 3 + 2]]);
+      const gap = triangle.closestPointToPoint(point, nearest).distanceTo(point);
+      if (gap < least) {
+        least = gap;
+        best = { triangle: t };
+      }
+    }
+    return best;
   }
 
   // The way a straight line goes from the brush's last pixel to `target`, as
@@ -1902,8 +1994,8 @@ export class Editor extends EventTarget {
   //   - A pasted picture floats too, where it was copied from.
   //   - Quarter turns and turning over only: any other angle would make the
   //     pixels anew, and pixel art does not survive that.
-  // What is moved off the faces is rubbed out at the next layout, as all
-  // that no face shows (see Atlas.sweep()).
+  // What is moved off the faces stays there, until the atlas is cleaned
+  // (see cleanAtlas()).
 
   // Picks a rectangle ({ x, y, w, h }, kept on the atlas; null: none). What
   // floats is put down first. Tells of it with a 'painthover' event.

@@ -19,12 +19,14 @@ import { MirrorDisplay } from './mirror-display.js';
 import { Warnings } from './warnings.js';
 import { Welcome } from './welcome.js';
 import { RenderMode } from './render-mode.js';
+import { ModeIndicator } from './mode-indicator.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
 const viewport = new Viewport(document.getElementById('viewport'));
 const editor = new Editor(viewport);
 new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
+new ModeIndicator(document.getElementById('mode-indicator'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 new PipetteLoupe(editor);

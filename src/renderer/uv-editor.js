@@ -119,7 +119,7 @@ export class UVEditor {
     const charts = this.pickedCharts();
     const pixels = this.editor.tool === 'marquee' && Boolean(this.editor.marquee); // the turns are for the pixels picked then
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove', 'shape', 'regenerate'].includes(button.dataset.uv)) button.disabled = charts.length === 0 && !pixels;
+      if (!['fit', 'add', 'remove', 'shape', 'regenerate', 'clean'].includes(button.dataset.uv)) button.disabled = charts.length === 0 && !pixels;
     }
     // Regenerate: the picked charts, or with none picked the whole atlas - if there is anything on it.
     this.container.querySelector('[data-uv="regenerate"]').disabled = this.editor.atlas.charts.length === 0;
@@ -166,6 +166,7 @@ export class UVEditor {
       if (this.editor.tool === 'marquee' && this.editor.marquee) this.editor.turnPixels(how);
       else this.editor.placeCharts(faces, how);
     }
+    else if (name === 'clean') this.editor.cleanAtlas();
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;

@@ -541,6 +541,23 @@ body {
   right: 10px;
 }
 
+/* The selection mode as a shape, in the view's top left corner (see mode-indicator.js). */
+#mode-indicator {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 85%, transparent);
+  pointer-events: none;
+}
+
+#mode-indicator canvas {
+  display: block;
+}
+
 /* Bottom center of the viewport. */
 #extrude-popup,
 #polygon-popup {

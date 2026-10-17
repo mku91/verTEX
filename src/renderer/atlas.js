@@ -6,7 +6,7 @@ import { START_SIZE, PADDING } from './unwrap.js';
 // It is pixel art: shown with its pixels as they are (no smoothing, no
 // smaller copies for the distance), and see-through pixels are holes. The
 // picture itself is painted outside this program; here it is kept, moved
-// about when a chart moves, swept of whatever no face shows (see sweep()),
+// about when a chart moves, swept of whatever no face shows when asked (see sweep()),
 // and marked up so that the painter can see what is where:
 //   - the template: room given to a new chart is filled with a colour of its
 //     own, every face in it outlined;
@@ -226,7 +226,8 @@ export class Atlas extends EventTarget {
   }
 
   // Carries out what an unwrap asks for (see unwrap()). `mesh` is the mesh it
-  // was of. Then sweeps the picture (see sweep()).
+  // was of. Nothing is rubbed out that faces have left: that is for the
+  // user to sweep, when they will (see sweep()).
   apply(result, mesh) {
     const { context } = this;
     let painted = result.width !== this.width || result.height !== this.height;
@@ -258,7 +259,6 @@ export class Atlas extends EventTarget {
       const within = (rect) => [...result.fresh, ...result.moved.map(({ to }) => to)].some((f) => f.x === rect.x && f.y === rect.y);
       for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart);
     }
-    if (this.sweep()) painted = true;
     if (painted) this.touch();
     // Where the faces are has changed, painted or not: the guide is another picture now.
     if (result.changed || painted) this.dispatchEvent(new Event('layout'));
@@ -266,7 +266,7 @@ export class Atlas extends EventTarget {
 
   // Rubs out every pixel that no face shows (see facePixels()): what was
   // painted for faces that are gone, have moved or have shrunk, and anything
-  // else off the charts. Nothing on the atlas is there but for the model.
+  // else off the charts - the UV editor's "Clean" (see Editor.cleanAtlas()).
   // Returns whether anything was rubbed out. (The picture is not touch()ed:
   // that is the caller's to do.)
   sweep() {
@@ -294,7 +294,7 @@ export class Atlas extends EventTarget {
   // goes to the pixel that `place` takes its middle to. A pixel in `keep` (a
   // Set of "x,y": the pictures of charts that stay) is not painted over - a
   // chart put onto another's picture takes that picture, the way two faces
-  // come to share one. What is left behind is for the sweep.
+  // come to share one. What is left behind stays, until it is swept.
   carry(moves, keep) {
     const { width, height } = this;
     const image = this.context.getImageData(0, 0, width, height);

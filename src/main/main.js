@@ -64,7 +64,8 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
         { type: 'separator' },
-        { label: 'Выход', role: 'quit' },
+        // (Its own key: the one the role may bring, Ctrl+Q, is the cut tool's.)
+        { label: 'Выход', role: 'quit', accelerator: 'Alt+F4' },
       ],
     },
     {

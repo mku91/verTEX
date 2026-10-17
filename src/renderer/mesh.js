@@ -1410,12 +1410,35 @@ export class MeshView {
 
   // Call after topology changes (vertices or faces added/removed).
   rebuild() {
-    const { vertices, faces } = this.mesh;
-    this.rebuilds = (this.rebuilds ?? 0) + 1; // the triangles are numbered anew
+    const { vertices } = this.mesh;
     // Vertices of hidden objects, set by the owner before a rebuild: nothing
     // of theirs is drawn or hit by picking rays.
     const hidden = (this.hidden ??= new Set());
+    this.buildSurface();
+    this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
 
+    this.setPositions(this.wire, this.edgeIndices.length);
+    this.setPositions(this.points, vertices.length);
+    this.points.geometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(new Float32Array(vertices.length * 3), 3),
+    );
+    this.points.geometry.setAttribute('scale', new THREE.BufferAttribute(new Float32Array(vertices.length).fill(1), 1));
+
+    this.highlight = NO_HIGHLIGHT; // its indices referred to the old topology
+    this.updateSurfaceColors();
+    this.updateUVs();
+    this.updatePositions();
+    this.updateColors(new Set(), -1);
+  }
+
+  // The surface's triangles, in the parts they are drawn in (see below) -
+  // a part of rebuild(), and done again on its own when a face comes onto
+  // the atlas or goes off it while nothing else changes (see updateUVs()).
+  buildSurface() {
+    const { faces } = this.mesh;
+    const hidden = (this.hidden ??= new Set());
+    this.rebuilds = (this.rebuilds ?? 0) + 1; // the triangles are numbered anew
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
     this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
@@ -1440,24 +1463,18 @@ export class MeshView {
         parts.push([start, this.triangleFaces.length - start]);
       }
     }
-    this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
-
     this.setPositions(this.solid, this.triangleIndices.length);
     parts.forEach(([start, count], material) => this.solid.geometry.addGroup(start * 3, count * 3, material));
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
-    this.setPositions(this.wire, this.edgeIndices.length);
-    this.setPositions(this.points, vertices.length);
-    this.points.geometry.setAttribute(
-      'color',
-      new THREE.BufferAttribute(new Float32Array(vertices.length * 3), 3),
-    );
-    this.points.geometry.setAttribute('scale', new THREE.BufferAttribute(new Float32Array(vertices.length).fill(1), 1));
+    // Which faces were on the atlas when the parts were made, see partsStale().
+    this.partsOnAtlas = faces.map((face) => Boolean(face.uv));
+  }
 
-    this.highlight = NO_HIGHLIGHT; // its indices referred to the old topology
-    this.updateSurfaceColors();
-    this.updateUVs();
-    this.updatePositions();
-    this.updateColors(new Set(), -1);
+  // Whether some face has come onto the atlas, or gone off it, since the
+  // surface's parts were made - or faces have come or gone.
+  partsStale() {
+    const { faces } = this.mesh;
+    return !this.partsOnAtlas || this.partsOnAtlas.length !== faces.length || faces.some((face, i) => Boolean(face.uv) !== this.partsOnAtlas[i]);
   }
 
   // Paints the surface: every object in its marker colour (see
@@ -1484,6 +1501,15 @@ export class MeshView {
   // its outermost corners (`uvBox`, as min u, min v, max u, max v): what the
   // surface keeps to, see keepInsideFaces().
   updateUVs() {
+    // A face that has come onto the atlas (or gone off it) is drawn in
+    // another part now - the one with the picture (or without): the parts
+    // are made anew first. (An extrusion's sides do: they have no place on
+    // the atlas while they have no size, and get one when it is done.)
+    if (this.partsStale()) {
+      this.buildSurface();
+      this.updateSurfaceColors();
+      this.updatePositions();
+    }
     const { faces } = this.mesh;
     const width = this.atlas?.width || 1;
     const height = this.atlas?.height || 1;

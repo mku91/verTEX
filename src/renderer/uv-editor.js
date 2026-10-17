@@ -1,4 +1,5 @@
 import { theme, onThemeChange } from './theme.js';
+import { facePixels } from './atlas.js';
 
 // The UV editor: the atlas, flat, with the faces drawn on it.
 //
@@ -21,6 +22,10 @@ import { theme, onThemeChange } from './theme.js';
 // With the marquee a drag picks a rectangle of pixels, and a drag inside it
 // moves them (Alt: a copy of them) - see Editor.setMarquee().
 //
+// F1 held: the picture is dimmed and the outlines are gone, all but the
+// pixels and the outline of the face under the pointer - here, or on the
+// model - to see which are that face's.
+//
 //   LMB on a chart       pick it (Shift adds); the faces are selected in the scene too
 //   LMB drag             move the picked charts, by whole pixels
 //   wheel                zoom at the pointer
@@ -33,6 +38,7 @@ const SNAP = 3; // atlas px within which a dragged chart jumps onto another's ro
 const MARKER = 4.5; // px, the radius of a corner's marker
 const MARKER_REACH = 8; // px within which a marker is taken
 const SHAPED = '#ffb86c'; // the outline of a chart whose shape was changed by hand
+const DIMMED = 0.15; // how much of the picture shows with F1 held, but for the face under the pointer
 
 export class UVEditor {
   constructor(container, editor) {
@@ -47,6 +53,10 @@ export class UVEditor {
     this.shaping = false; // the shape lock is open: corners can be dragged
     this.hoveredMarker = null;
     this.ants = 0; // how far the marquee's dashes have crawled
+    // F1 held (see isolate()): the face shown alone, and where the pointer was last.
+    this.isolating = false;
+    this.isolated = null; // a face's number
+    this.pointer = null; // { view: 'uv' | 'model', x, y }
 
     this.canvas = container.querySelector('canvas');
     this.context = this.canvas.getContext('2d');
@@ -63,6 +73,21 @@ export class UVEditor {
     editor.atlas.addEventListener('layout', () => this.update());
     onThemeChange(() => this.draw());
     this.bindPointer();
+    // F1 is held, and let go; a window left while it is held lets it go too.
+    window.addEventListener('keydown', (event) => {
+      if (event.code !== 'F1' || !this.open) return;
+      event.preventDefault();
+      this.isolate(true);
+    });
+    window.addEventListener('keyup', (event) => {
+      if (event.code === 'F1') this.isolate(false);
+    });
+    window.addEventListener('blur', () => this.isolate(false));
+    // The face under the pointer on the model counts as well.
+    editor.viewport.renderer.domElement.addEventListener('pointermove', (event) => {
+      this.pointer = { view: 'model', x: event.clientX, y: event.clientY };
+      if (this.isolating) this.isolate(true);
+    });
   }
 
   toggle(open = !this.open) {
@@ -147,6 +172,45 @@ export class UVEditor {
       if (all && !window.confirm('Перегенерировать весь атлас?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) return;
       this.editor.regenerateCharts(faces);
     }
+  }
+
+  // F1 held or let go: the picture dimmed but for the face under the
+  // pointer (on whichever view it was last), or as it is.
+  isolate(on) {
+    const face = on ? this.faceUnderPointer() : null;
+    if (on === this.isolating && face === this.isolated) return;
+    this.isolating = on;
+    this.isolated = face;
+    this.draw();
+  }
+
+  // The face under the pointer, wherever it was last: here, the smallest of
+  // those whose places hold it (faces may lie on each other); on the model,
+  // the one it is on. Null for none, or one that is not on the atlas.
+  faceUnderPointer() {
+    const { pointer, editor } = this;
+    if (!pointer) return null;
+    if (pointer.view === 'model') return editor.paintHitAt(pointer.x, pointer.y)?.face ?? null;
+    const { x, y } = this.toAtlas(pointer.x, pointer.y);
+    let best = null;
+    let least = Infinity;
+    editor.mesh.faces.forEach((face, index) => {
+      const polygon = face.uv;
+      if (!polygon?.every(Boolean)) return;
+      let within = false;
+      let area = 0;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [ax, ay] = polygon[i];
+        const [bx, by] = polygon[j];
+        if ((ay > y) !== (by > y) && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) within = !within;
+        area += (bx - ax) * (by + ay);
+      }
+      if (within && Math.abs(area) < least) {
+        least = Math.abs(area);
+        best = index;
+      }
+    });
+    return best;
   }
 
   // Keeps the marching ants going while there is a rectangle to go round:
@@ -345,6 +409,8 @@ export class UVEditor {
     });
     canvas.addEventListener('pointermove', (event) => {
       const { drag } = this;
+      this.pointer = { view: 'uv', x: event.clientX, y: event.clientY };
+      if (this.isolating) this.isolate(true);
       if (editor.tool === 'marquee' && !drag?.pan) {
         this.moveMarquee(event);
         return;
@@ -526,7 +592,26 @@ export class UVEditor {
       }
     }
     context.imageSmoothingEnabled = false;
-    context.drawImage(atlas.canvas, origin.x, origin.y, w, h);
+    if (this.isolating) {
+      // F1 held: all of it faint, and the face under the pointer as it is - to the edges of its pixels.
+      context.globalAlpha = DIMMED;
+      context.drawImage(atlas.canvas, origin.x, origin.y, w, h);
+      context.globalAlpha = 1;
+      const uv = this.isolated === null ? null : editor.mesh.faces[this.isolated]?.uv;
+      if (uv?.every(Boolean)) {
+        context.save();
+        context.beginPath();
+        for (const key of facePixels(uv)) {
+          const [px, py] = key.split(',').map(Number);
+          context.rect(origin.x + px * zoom, origin.y + py * zoom, zoom, zoom);
+        }
+        context.clip();
+        context.drawImage(atlas.canvas, origin.x, origin.y, w, h);
+        context.restore();
+      }
+    } else {
+      context.drawImage(atlas.canvas, origin.x, origin.y, w, h);
+    }
     if (zoom >= GRID_FROM) {
       context.strokeStyle = 'rgba(0, 0, 0, 0.18)';
       context.lineWidth = 1;
@@ -564,7 +649,17 @@ export class UVEditor {
         context.closePath();
       }
     };
-    for (const chart of atlas.charts) {
+    // F1 held: no outlines but the one of the face shown alone (see isolate()).
+    const isolatedUV = this.isolating && this.isolated !== null ? editor.mesh.faces[this.isolated]?.uv : null;
+    if (isolatedUV?.every(Boolean)) {
+      context.beginPath();
+      isolatedUV.forEach(([x, y], k) => context[k ? 'lineTo' : 'moveTo'](origin.x + x * zoom, origin.y + y * zoom));
+      context.closePath();
+      context.lineWidth = 1;
+      context.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      context.stroke();
+    }
+    for (const chart of this.isolating ? [] : atlas.charts) {
       if (picked.has(chart)) continue;
       outline(chart);
       const hovered = chart === this.hovered && !painting;
@@ -572,7 +667,7 @@ export class UVEditor {
       context.strokeStyle = hovered ? theme.hovered : chart.shaped ? SHAPED : chart.pinned ? theme.pivot : 'rgba(255, 255, 255, 0.55)';
       context.stroke();
     }
-    for (const chart of picked) {
+    for (const chart of this.isolating ? [] : picked) {
       outline(chart);
       context.fillStyle = 'rgba(80, 250, 123, 0.18)';
       context.fill();
@@ -621,7 +716,7 @@ export class UVEditor {
       context.strokeRect(x - 0.5, y - 0.5, zoom + 1, zoom + 1);
     }
     // The corners, with the shape lock open: a round marker on each.
-    for (const marker of painting ? [] : this.markers()) {
+    for (const marker of painting || this.isolating ? [] : this.markers()) {
       const hot = this.drag?.marker
         ? this.drag.marker.vertex === marker.vertex && this.drag.marker.chart === marker.chart
         : this.hoveredMarker?.vertex === marker.vertex && this.hoveredMarker?.chart === marker.chart;

@@ -312,7 +312,7 @@ export class Editor extends EventTarget {
         if (event.key === 'Shift') this.setShiftHeld(type === 'keydown'); // the brush's line, see setShiftHeld()
         if (event.code === 'Space') this.setSpaceHeld(type === 'keydown'); // ... along the faces
         if (event.key !== 'Alt') return;
-        if (this.tool === 'scale' || this.painting) event.preventDefault();
+        if (this.tool === 'scale' || this.painting || this.extrude) event.preventDefault(); // (an extrusion's taper, see taperExtrude())
         this.setAltHeld(type === 'keydown');
       });
     }
@@ -1368,6 +1368,19 @@ export class Editor extends EventTarget {
   setupPointer() {
     const dom = this.viewport.renderer.domElement;
     let down = null; // LMB press on empty space; a click there clears the selection
+
+    // Alt + the wheel while extruding tapers the cap (see taperExtrude()):
+    // the wheel is not the camera's then. (Capture phase: before the camera's own listener.)
+    dom.addEventListener(
+      'wheel',
+      (event) => {
+        if (!this.extrude || !event.altKey) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        this.taperExtrude(event.deltaY * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1));
+      },
+      { capture: true, passive: false },
+    );
 
     this.boxElement = document.createElement('div');
     this.boxElement.className = 'selection-box';
@@ -2521,7 +2534,59 @@ export class Editor extends EventTarget {
     for (const position of base.values()) anchor.add(position);
     anchor.divideScalar(base.size);
     // `direction` is the automatic one; `axis` ('x' | 'y' | 'z') overrides it.
-    this.extrude = { before, base, direction, axis: 'free', anchor, distance: 0, pointer: null };
+    // `taper`: by how many fine grid steps the cap is grown (or, below 0, shrunk), see taperExtrude().
+    this.extrude = { before, base, direction, axis: 'free', anchor, distance: 0, pointer: null, taper: 0, wheel: 0 };
+    this.emitChange();
+  }
+
+  // Alt + the wheel while extruding: the cap is grown or shrunk about its
+  // middle, a fine grid step a notch - its farthest corner goes that much
+  // farther from the middle, or nearer, along the world's axes, so that a
+  // cap whose corners were on the fine grid keeps them there. The sides
+  // slope out or in. It never shrinks to nothing: a fine step is the least.
+  // `travel` is the wheel's (deltaY: one notch is 100, down shrinks).
+  taperExtrude(travel) {
+    const extrude = this.extrude;
+    if (!extrude) return;
+    extrude.wheel -= travel / 100;
+    const notches = Math.trunc(extrude.wheel);
+    if (notches === 0) return;
+    extrude.wheel -= notches;
+    const fine = this.snapGrid.step / this.snapGrid.fineDivisor;
+    const reach = this.extrudeReach();
+    if (reach < 1e-9) return;
+    // No smaller than a fine step across from the middle.
+    const least = Math.ceil((fine - reach) / fine - 1e-9);
+    const taper = Math.max(least, extrude.taper + notches);
+    if (taper === extrude.taper) return;
+    extrude.taper = taper;
+    this.placeExtrude();
+  }
+
+  // How far the cap's farthest corner is from its middle, along the world's
+  // axes (the largest of the three) - before any taper.
+  extrudeReach() {
+    const { base, anchor } = this.extrude;
+    let reach = 0;
+    for (const position of base.values()) {
+      reach = Math.max(reach, Math.abs(position.x - anchor.x), Math.abs(position.y - anchor.y), Math.abs(position.z - anchor.z));
+    }
+    return reach;
+  }
+
+  // Puts the cap where the extrusion has it: out by `distance` along its
+  // direction, grown or shrunk by `taper` about its middle.
+  placeExtrude() {
+    const { anchor, base, distance, taper } = this.extrude;
+    const normal = AXIS_LOCKS[this.extrude.axis] ?? this.extrude.direction;
+    const reach = this.extrudeReach();
+    const fine = this.snapGrid.step / this.snapGrid.fineDivisor;
+    const factor = reach > 1e-9 ? (reach + taper * fine) / reach : 1;
+    for (const [i, position] of base) {
+      this.mesh.vertices[i].copy(position).sub(anchor).multiplyScalar(factor).add(anchor).addScaledVector(normal, distance);
+    }
+    this.view.updatePositions();
+    this.viewport.requestRender();
     this.emitChange();
   }
 
@@ -2562,7 +2627,7 @@ export class Editor extends EventTarget {
   // the middle of the extruded elements, along the chosen axis or else the
   // automatic direction, that is nearest to the cursor, in grid steps.
   moveExtrude(clientX, clientY) {
-    const { anchor, base } = this.extrude;
+    const { anchor } = this.extrude;
     this.extrude.pointer = [clientX, clientY];
     const normal = AXIS_LOCKS[this.extrude.axis] ?? this.extrude.direction;
     // Plane through that line that faces the camera as much as possible.
@@ -2574,13 +2639,8 @@ export class Editor extends EventTarget {
     if (!hit) return;
 
     const step = this.snapGrid.activeStep;
-    const distance = Math.round(hit.sub(anchor).dot(normal) / step) * step;
-    this.extrude.distance = distance;
-    for (const [i, position] of base) {
-      this.mesh.vertices[i].copy(position).addScaledVector(normal, distance);
-    }
-    this.view.updatePositions();
-    this.emitChange();
+    this.extrude.distance = Math.round(hit.sub(anchor).dot(normal) / step) * step;
+    this.placeExtrude();
   }
 
   // Picks the direction of the extrusion in progress: a world axis, or 'free'

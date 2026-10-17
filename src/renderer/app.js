@@ -90,7 +90,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.marquee', group: 'Рисование', label: 'Выделение пикселей', keys: '', run: () => editor.setTool('marquee') },
 
     { id: 'op.place', group: 'Режимы', label: 'Разместить', keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
-    { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'KeyK', run: () => ACTIONS['toggle-cut']() },
+    { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
     { id: 'op.extrude', group: 'Режимы', label: 'Экструд', keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
     { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
     { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
@@ -127,7 +127,7 @@ const hotkeys = new Hotkeys(
     { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
   ],
   // The fixed keys below can't be given to anything else.
-  ['Escape', 'Tab', 'Shift+Tab', 'Space', 'Enter', 'NumpadEnter', 'Backspace', 'PageUp', 'PageDown', 'Ctrl+Shift+KeyZ'],
+  ['Escape', 'Tab', 'Shift+Tab', 'Space', 'Enter', 'NumpadEnter', 'Backspace', 'PageUp', 'PageDown', 'Ctrl+Shift+KeyZ', 'F1'],
 );
 
 // Keys with a fixed meaning; they are listed in the settings, not rebound.
@@ -155,7 +155,7 @@ const FIXED_KEYS = {
 };
 const FIXED_KEY_NOTES = [
   ['Esc', 'Отменить действие, выйти из режима, снять выделение'],
-  ['Tab / Shift+Tab', 'Следующий / предыдущий режим выделения'],
+  ['Tab / Shift+Tab', 'Следующий / предыдущий режим выделения; в разрезе — вертикальный / горизонтальный'],
   ['Пробел + ПКМ', 'Панорама камеры'],
   ['Enter', 'Полигон: замкнуть контур; выделение пикселей: положить перенесённое'],
   ['Backspace', 'Полигон: убрать последнюю точку'],
@@ -164,6 +164,8 @@ const FIXED_KEY_NOTES = [
   ['Ctrl (зажат)', 'Мелкая сетка'],
   ['Shift (зажат)', 'Добавить к выделению, рамка'],
   ['Alt (зажат)', 'Масштаб с одной стороны'],
+  ['F1 (зажат)', 'Развёртка: приглушить картинку, кроме грани под указателем (на развёртке или на модели)'],
+  ['Alt + колесо', 'Экструд: расширить / сузить вытягиваемую грань на шаг малой сетки'],
   ['Ctrl / Alt (зажаты)', 'Перетаскивание числового поля: шаг 0.1 / 0.01'],
   ['X / C / Z (зажаты)', 'При перетаскивании: только по оси X / Y / Z'],
 ];
@@ -868,8 +870,13 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.code === 'Tab') {
     // Tab / Shift+Tab cycle the selection mode; inside an operation, only
-    // through the modes it works in.
+    // through the modes it works in. In the cut, which works in one mode
+    // only, Tab turns the cut the other way instead.
     event.preventDefault();
+    if (editor.operation === 'cut') {
+      editor.setCutDirection(editor.cutDirection === 'vertical' ? 'horizontal' : 'vertical');
+      return;
+    }
     const modes = editor.operation ? MODES.filter((mode) => OPERATION_MODES[editor.operation].includes(mode)) : MODES;
     const next = modes.indexOf(editor.mode) + (event.shiftKey ? -1 : 1);
     editor.setMode(modes[(next + modes.length) % modes.length]);

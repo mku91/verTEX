@@ -87,6 +87,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.fill', group: 'Рисование', label: 'Заливка', keys: 'KeyE', run: () => editor.setTool('fill') },
     { id: 'tool.rect', group: 'Рисование', label: 'Прямоугольник', keys: 'KeyM', run: () => editor.setTool('rect') },
     { id: 'tool.ellipse', group: 'Рисование', label: 'Эллипс', keys: 'KeyO', run: () => editor.setTool('ellipse') },
+    { id: 'tool.marquee', group: 'Рисование', label: 'Выделение пикселей', keys: '', run: () => editor.setTool('marquee') },
 
     { id: 'op.place', group: 'Режимы', label: 'Разместить', keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'KeyK', run: () => ACTIONS['toggle-cut']() },
@@ -97,10 +98,11 @@ const hotkeys = new Hotkeys(
     { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
     { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
     { id: 'edit.flip-faces', group: 'Правка', label: 'Инвертировать грань', keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
-    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => editor.deleteSelection() },
+    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : editor.deleteSelection() },
     // Copying and pasting leave the keys to the system where they have nothing to do.
-    { id: 'edit.copy', group: 'Правка', label: 'Копировать объекты', keys: 'Ctrl+KeyC', run: () => editor.copyObjects() },
-    { id: 'edit.paste', group: 'Правка', label: 'Вставить объекты', keys: 'Ctrl+KeyV', run: () => editor.pasteObjects() },
+    { id: 'edit.copy', group: 'Правка', label: 'Копировать', keys: 'Ctrl+KeyC', run: () => pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
+    { id: 'edit.cut', group: 'Правка', label: 'Вырезать пиксели', keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
+    { id: 'edit.paste', group: 'Правка', label: 'Вставить', keys: 'Ctrl+KeyV', run: () => pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
     { id: 'edit.undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+KeyZ', run: () => editor.undo() },
     { id: 'edit.redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+KeyY', run: () => editor.redo() },
 
@@ -129,14 +131,21 @@ const hotkeys = new Hotkeys(
 );
 
 // Keys with a fixed meaning; they are listed in the settings, not rebound.
+// The marquee in hand (see Editor.setMarquee()): Delete, copy, cut and
+// paste are the atlas' pixels', not the model's.
+const pixelsInHand = () => editor.tool === 'marquee';
+
 const FIXED_KEYS = {
-  // The polygon tool's own keys; they do nothing outside it.
-  Enter: () => editor.closePolygon(),
-  NumpadEnter: () => editor.closePolygon(),
+  // The polygon tool's own keys; they do nothing outside it. (And the
+  // marquee's: what floats is put down.)
+  Enter: () => editor.commitFloating() || editor.closePolygon(),
+  NumpadEnter: () => editor.commitFloating() || editor.closePolygon(),
   Backspace: () => editor.undoPolygonPoint(),
   PageUp: () => editor.shiftPolygonPlane(1),
   PageDown: () => editor.shiftPolygonPlane(-1),
   Escape: () =>
+    editor.cancelFloating() ||
+    (editor.marquee ? (editor.setMarquee(null), true) : false) ||
     orthoViews.cancelBox() ||
     editor.cancelBox() ||
     editor.escapeOperation() ||
@@ -148,7 +157,7 @@ const FIXED_KEY_NOTES = [
   ['Esc', 'Отменить действие, выйти из режима, снять выделение'],
   ['Tab / Shift+Tab', 'Следующий / предыдущий режим выделения'],
   ['Пробел + ПКМ', 'Панорама камеры'],
-  ['Enter', 'Полигон: замкнуть контур'],
+  ['Enter', 'Полигон: замкнуть контур; выделение пикселей: положить перенесённое'],
   ['Backspace', 'Полигон: убрать последнюю точку'],
   ['PgUp / PgDn', 'Полигон: сдвинуть плоскость'],
   ['Ctrl+Shift+Z', 'Повторить'],
@@ -540,7 +549,7 @@ $('hotkeys-reset').addEventListener('click', () => {
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
   '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot', '[data-tool="paint"]': 'tool.paint',
-  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill',
+  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
@@ -1268,7 +1277,7 @@ function refresh() {
   localStorage.setItem(SHAPE_FILL_KEY, editor.shapeFilled ? '1' : '0');
   // (No colour at all - the brush rubbing out - is not kept: the next launch starts with a colour.)
   if (editor.paintColor[3]) localStorage.setItem(PAINT_COLOR_KEY, hexOf(editor.paintColor));
-  $('viewport').classList.toggle('painting', editor.painting && !editor.preview);
+  $('viewport').classList.toggle('painting', editor.painting && !editor.preview && tool !== 'marquee'); // (the marquee is the UV editor's)
   $('app').classList.toggle('picking', editor.picking); // pipette cursor, see styles.css
   $('app').classList.toggle('filling', tool === 'fill' && !editor.picking && !editor.preview); // bucket cursor
   for (const button of modeButtons) {

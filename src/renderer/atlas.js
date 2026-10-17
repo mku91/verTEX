@@ -133,6 +133,26 @@ export function linePixels(from, to) {
   return pixels;
 }
 
+// A piece of picture (an ImageData) turned a quarter turn - clockwise for
+// `turn` 1, back for -1 - or turned over (`flip` 'h': left to right, 'v':
+// top to bottom). Pixel for pixel: nothing is resampled. A new ImageData.
+export function turnedImage(image, { turn = 0, flip = null }) {
+  const { width, height, data } = image;
+  const quarter = turn !== 0;
+  const out = new ImageData(quarter ? height : width, quarter ? width : height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let [tx, ty] = [x, y];
+      if (turn > 0) [tx, ty] = [height - 1 - y, x];
+      else if (turn < 0) [tx, ty] = [y, width - 1 - x];
+      else if (flip === 'h') tx = width - 1 - x;
+      else if (flip === 'v') ty = height - 1 - y;
+      out.data.set(data.subarray((y * width + x) * 4, (y * width + x) * 4 + 4), (ty * out.width + tx) * 4);
+    }
+  }
+  return out;
+}
+
 // A colour for a chart, told by where it is: the same chart keeps its colour.
 function tint(rect) {
   const hue = ((rect.x * 47 + rect.y * 89 + rect.w * 13) % 360) / 360;
@@ -459,6 +479,32 @@ export class Atlas extends EventTarget {
   // setPixels(), which are the document's: these leave the charts alone.)
   taken() {
     return this.context.getImageData(0, 0, this.width, this.height);
+  }
+
+  // A rectangle of the picture ({ x, y, w, h }, in pixels), as an ImageData of its own.
+  region({ x, y, w, h }) {
+    return this.context.getImageData(x, y, w, h);
+  }
+
+  // Rubs a rectangle of the picture out. Returns whether anything was there.
+  clearRegion(rect) {
+    const had = this.region(rect).data.some((value, i) => i % 4 === 3 && value !== 0);
+    if (!had) return false;
+    this.context.clearRect(rect.x, rect.y, rect.w, rect.h);
+    this.touch();
+    return true;
+  }
+
+  // Puts a piece of picture down with its top left at (x, y): its pixels
+  // over those under them, except the ones it has none at (see-through), which
+  // let what is under them show - as a piece of pixel art is laid on another.
+  stamp(image, x, y) {
+    const under = this.context.getImageData(x, y, image.width, image.height);
+    for (let i = 0; i < image.data.length; i += 4) {
+      if (image.data[i + 3] !== 0) under.data.set(image.data.subarray(i, i + 4), i);
+    }
+    this.context.putImageData(under, x, y);
+    this.touch();
   }
 
   putBack(image) {

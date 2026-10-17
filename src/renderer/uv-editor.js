@@ -18,6 +18,8 @@ import { theme, onThemeChange } from './theme.js';
 // that is worked on here, not the charts: the brush paints the pixel under
 // it, any pixel of the atlas, and a drag paints a line of them; the fill and
 // the shapes have the whole picture to themselves; Alt takes the colour.
+// With the marquee a drag picks a rectangle of pixels, and a drag inside it
+// moves them (Alt: a copy of them) - see Editor.setMarquee().
 //
 //   LMB on a chart       pick it (Shift adds); the faces are selected in the scene too
 //   LMB drag             move the picked charts, by whole pixels
@@ -44,6 +46,7 @@ export class UVEditor {
     this.fitted = ''; // the atlas size the view was last fitted to
     this.shaping = false; // the shape lock is open: corners can be dragged
     this.hoveredMarker = null;
+    this.ants = 0; // how far the marquee's dashes have crawled
 
     this.canvas = container.querySelector('canvas');
     this.context = this.canvas.getContext('2d');
@@ -64,6 +67,7 @@ export class UVEditor {
 
   toggle(open = !this.open) {
     this.open = open;
+    if (!open) this.editor.commitFloating();
     this.container.hidden = !open;
     if (open) this.update();
     return open;
@@ -88,8 +92,9 @@ export class UVEditor {
     const { painting } = this.editor;
     if (painting !== (this.canvas.style.cursor === 'crosshair')) this.canvas.style.cursor = painting ? 'crosshair' : '';
     const charts = this.pickedCharts();
+    const pixels = this.editor.tool === 'marquee' && Boolean(this.editor.marquee); // the turns are for the pixels picked then
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove', 'shape', 'regenerate'].includes(button.dataset.uv)) button.disabled = charts.length === 0;
+      if (!['fit', 'add', 'remove', 'shape', 'regenerate'].includes(button.dataset.uv)) button.disabled = charts.length === 0 && !pixels;
     }
     // Regenerate: the picked charts, or with none picked the whole atlas - if there is anything on it.
     this.container.querySelector('[data-uv="regenerate"]').disabled = this.editor.atlas.charts.length === 0;
@@ -104,7 +109,12 @@ export class UVEditor {
     add.querySelector('span').textContent = started ? 'Добавить в атлас' : 'Создать атлас';
     add.disabled = !hand.some((object) => !object.atlas);
     this.container.querySelector('[data-uv="remove"]').disabled = !hand.some((object) => object.atlas);
-    this.status.textContent = charts.length === 0
+    const { marquee, tool } = this.editor;
+    this.status.textContent = tool === 'marquee'
+      ? marquee
+        ? `Выделено ${marquee.w} × ${marquee.h} px, место ${marquee.x}, ${marquee.y}${this.editor.floating ? ' · плавает: Enter — положить, Esc — вернуть' : ''}`
+        : 'Протяните, чтобы выделить пиксели'
+      : charts.length === 0
       ? started
         ? 'Клик по грани на атласе выбирает её лоскут'
         : 'Атлас пуст: выберите объект и нажмите «Создать атлас»'
@@ -125,16 +135,31 @@ export class UVEditor {
       this.update();
     } else if (name === 'add') this.editor.setOnAtlas(this.editor.objectsInHand(), true);
     else if (name === 'remove') this.editor.setOnAtlas(this.editor.objectsInHand(), false);
-    else if (name === 'turn-left') this.editor.placeCharts(faces, { turn: -1 });
-    else if (name === 'turn-right') this.editor.placeCharts(faces, { turn: 1 });
-    else if (name === 'flip-h') this.editor.placeCharts(faces, { flip: 'h' });
-    else if (name === 'flip-v') this.editor.placeCharts(faces, { flip: 'v' });
+    else if (['turn-left', 'turn-right', 'flip-h', 'flip-v'].includes(name)) {
+      const how = { 'turn-left': { turn: -1 }, 'turn-right': { turn: 1 }, 'flip-h': { flip: 'h' }, 'flip-v': { flip: 'v' } }[name];
+      // With the marquee in hand it is the pixels picked that are turned, not the charts.
+      if (this.editor.tool === 'marquee' && this.editor.marquee) this.editor.turnPixels(how);
+      else this.editor.placeCharts(faces, how);
+    }
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;
       if (all && !window.confirm('Перегенерировать весь атлас?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) return;
       this.editor.regenerateCharts(faces);
     }
+  }
+
+  // Keeps the marching ants going while there is a rectangle to go round:
+  // a step every tenth of a second.
+  crawl() {
+    if (this.crawling) return;
+    this.crawling = true;
+    setTimeout(() => {
+      this.crawling = false;
+      if (!this.open || this.editor.tool !== 'marquee' || !this.editor.marquee) return;
+      this.ants = (this.ants + 1) % 8;
+      this.draw();
+    }, 100);
   }
 
   // The whole atlas in view, with a margin.
@@ -224,6 +249,54 @@ export class UVEditor {
     return hit[0] ?? null;
   }
 
+  // A press with the marquee: inside the rectangle picked it lifts the
+  // pixels (Alt: a copy of them) to be dragged; elsewhere it puts down what
+  // floats and starts picking a new rectangle.
+  pressMarquee(event) {
+    const { editor } = this;
+    const at = this.toAtlas(event.clientX, event.clientY);
+    const pixel = { x: Math.floor(at.x), y: Math.floor(at.y) };
+    const rect = editor.marquee;
+    const inside = rect && pixel.x >= rect.x && pixel.y >= rect.y && pixel.x < rect.x + rect.w && pixel.y < rect.y + rect.h;
+    if (inside && editor.liftMarquee(event.altKey)) {
+      this.drag = { lift: true, x: event.clientX, y: event.clientY, from: { x: editor.floating.x, y: editor.floating.y } };
+      return;
+    }
+    editor.commitFloating();
+    const { width, height } = editor.atlas;
+    const from = { x: Math.max(0, Math.min(width - 1, pixel.x)), y: Math.max(0, Math.min(height - 1, pixel.y)) };
+    this.drag = { select: true, from, x: event.clientX, y: event.clientY, moved: false };
+  }
+
+  // The pointer moves with the marquee: the rectangle is drawn out, or what
+  // floats goes along, by whole pixels.
+  moveMarquee(event) {
+    const { editor, drag, canvas } = this;
+    const at = this.toAtlas(event.clientX, event.clientY);
+    const pixel = { x: Math.floor(at.x), y: Math.floor(at.y) };
+    if (drag?.select) {
+      if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) <= CLICK) return;
+      drag.moved = true;
+      const { width, height } = editor.atlas;
+      const to = { x: Math.max(0, Math.min(width - 1, pixel.x)), y: Math.max(0, Math.min(height - 1, pixel.y)) };
+      const x = Math.min(drag.from.x, to.x);
+      const y = Math.min(drag.from.y, to.y);
+      editor.setMarquee({ x, y, w: Math.abs(to.x - drag.from.x) + 1, h: Math.abs(to.y - drag.from.y) + 1 });
+      return;
+    }
+    if (drag?.lift) {
+      editor.moveFloating(
+        drag.from.x + Math.round((event.clientX - drag.x) / this.zoom),
+        drag.from.y + Math.round((event.clientY - drag.y) / this.zoom),
+      );
+      return;
+    }
+    // Over the rectangle picked the pointer says it can be moved.
+    const rect = editor.marquee;
+    const inside = rect && pixel.x >= rect.x && pixel.y >= rect.y && pixel.x < rect.x + rect.w && pixel.y < rect.y + rect.h;
+    canvas.style.cursor = inside ? 'move' : 'crosshair';
+  }
+
   bindPointer() {
     const { canvas, editor } = this;
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -248,6 +321,10 @@ export class UVEditor {
         this.drag = { pan: true, x: event.clientX, y: event.clientY, origin: { ...this.origin } };
         return;
       }
+      if (editor.tool === 'marquee') {
+        this.pressMarquee(event);
+        return;
+      }
       if (editor.busy()) return;
       if (editor.painting) {
         // Here the picture is worked on as a picture: a fill or a shape has the whole of it.
@@ -268,6 +345,10 @@ export class UVEditor {
     });
     canvas.addEventListener('pointermove', (event) => {
       const { drag } = this;
+      if (editor.tool === 'marquee' && !drag?.pan) {
+        this.moveMarquee(event);
+        return;
+      }
       if (editor.painting && !drag?.pan) {
         const pixel = this.pixelAt(event.clientX, event.clientY);
         canvas.style.cursor = 'crosshair';
@@ -341,7 +422,9 @@ export class UVEditor {
       const { drag } = this;
       this.drag = null;
       if (drag?.paint) editor.endPaint();
-      if (!drag || drag.pan || drag.paint) return;
+      // A click with the marquee, not a drag: nothing picked.
+      if (drag?.select && !drag.moved && event.type === 'pointerup') editor.setMarquee(null);
+      if (!drag || drag.pan || drag.paint || drag.select || drag.lift) return;
       if (drag.marker) {
         // Let go: the corner stays where it was dragged to, or, if the drag was broken off, goes back.
         const { chart, vertex, x, y } = drag.marker;
@@ -512,8 +595,23 @@ export class UVEditor {
         else context.strokeRect(x + 0.5, y + 0.5, zoom - 1, zoom - 1);
       }
     }
+    // The marquee's rectangle: marching ants - a dashed line, light over dark, that crawls.
+    if (editor.tool === 'marquee' && editor.marquee) {
+      const { x, y, w: mw, h: mh } = editor.marquee;
+      const box = [origin.x + x * zoom + 0.5, origin.y + y * zoom + 0.5, mw * zoom - 1, mh * zoom - 1];
+      context.lineWidth = 1;
+      context.setLineDash([]);
+      context.strokeStyle = '#191a21';
+      context.strokeRect(...box);
+      context.setLineDash([4, 4]);
+      context.lineDashOffset = -this.ants;
+      context.strokeStyle = '#f8f8f2';
+      context.strokeRect(...box);
+      context.setLineDash([]);
+      this.crawl();
+    }
     // The pixel the brush is on - here or on the model: a frame round it, dark in light.
-    if (painting && editor.paintHover) {
+    if (painting && editor.paintHover && editor.tool !== 'marquee') {
       const x = origin.x + editor.paintHover.x * zoom;
       const y = origin.y + editor.paintHover.y * zoom;
       context.lineWidth = 1;

@@ -1180,6 +1180,9 @@ const TEXELS_FRAGMENT = /* glsl */ `
 #endif
 `;
 
+// How much of the picture shows in the focus look, on a textured model (see applyLook()).
+const XRAY_OPACITY = 0.65;
+
 // Thick lines: plain GL lines are always one pixel wide.
 function edgeOverlay(color) {
   return new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ color, linewidth: 3 }));
@@ -1284,11 +1287,11 @@ export class MeshView {
     // what picking rays keep to as well: a face not drawn is not hit.
     // (The same goes for the depth the dots are tested against.)
     this.surface = this.solid.material;
-    const plain = this.surface.clone();
+    this.plain = this.surface.clone();
     this.surfaceFront = this.surface.clone();
-    const plainFront = plain.clone();
-    this.surfaceFront.side = plainFront.side = THREE.FrontSide;
-    this.solid.material = [this.surface, plain, this.surfaceFront, plainFront];
+    this.plainFront = this.plain.clone();
+    this.surfaceFront.side = this.plainFront.side = THREE.FrontSide;
+    this.solid.material = [this.surface, this.plain, this.surfaceFront, this.plainFront];
     const depthFront = this.depthMesh.material.clone();
     depthFront.side = THREE.FrontSide;
     this.depthMesh.material = [this.depthMesh.material, this.depthMesh.material, depthFront, depthFront];
@@ -1394,7 +1397,7 @@ export class MeshView {
   // (a wireframe hides nothing).
   prepareDepth(camera, target) {
     const { uniforms } = this.points.material;
-    const needed = this.points.visible && this.solid.visible;
+    const needed = this.points.visible && this.solid.visible && !this.xray; // (the see-through picture hides nothing)
     uniforms.occlusion.value = needed ? 1 : 0;
     if (!needed) return false;
     this.depthMesh.geometry = this.solid.geometry; // replaced at every rebuild
@@ -1408,6 +1411,7 @@ export class MeshView {
   // Call after topology changes (vertices or faces added/removed).
   rebuild() {
     const { vertices, faces } = this.mesh;
+    this.rebuilds = (this.rebuilds ?? 0) + 1; // the triangles are numbered anew
     // Vertices of hidden objects, set by the owner before a rebuild: nothing
     // of theirs is drawn or hit by picking rays.
     const hidden = (this.hidden ??= new Set());
@@ -1600,7 +1604,24 @@ export class MeshView {
   applyLook() {
     const wireframe = !this.bare && (this.focus || this.shading === 'wireframe');
     this.light = wireframe;
-    this.solid.visible = !wireframe; // still hit by picking rays when not drawn
+    // The focus look on a textured model: the picture stays, see-through
+    // (XRAY_OPACITY), over the wireframe - which it hides nothing of: it
+    // does not take part in the depth. Its front sides only: the back ones
+    // would lie over them and make a muddle of both. The faces that are not
+    // on the atlas are not drawn, as in the wireframe.
+    const xray = wireframe && this.focus && this.shading === 'textured' && Boolean(this.atlas);
+    this.xray = xray;
+    this.solid.visible = !wireframe || xray; // still hit by picking rays when not drawn
+    for (const material of [this.surface, this.surfaceFront]) {
+      const side = material === this.surface && !xray ? THREE.DoubleSide : THREE.FrontSide;
+      if (material.transparent === xray && material.side === side) continue;
+      material.transparent = xray;
+      material.opacity = xray ? XRAY_OPACITY : 1;
+      material.depthWrite = !xray;
+      material.side = side;
+      material.needsUpdate = true;
+    }
+    this.plain.visible = this.plainFront.visible = !xray;
     this.wire.visible = !this.bare;
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
     const map = (this.bare || this.shading === 'textured') && this.atlas ? this.atlas.texture : null;

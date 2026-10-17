@@ -5,7 +5,8 @@ import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation } from './frames.js';
-import { Atlas, facePixels, shapePixels, linePixels } from './atlas.js';
+import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
+import { surfacePath, barycentric } from './surface-path.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 
@@ -22,8 +23,9 @@ export const TOOLS = {
   fill: null, // floods an area of one colour
   rect: null, // draws a rectangle out
   ellipse: null, // and an ellipse
+  marquee: null, // a rectangle of pixels, picked to be moved, copied, turned or rubbed out - in the UV editor only
 };
-export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'rect', 'ellipse'];
+export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'rect', 'ellipse', 'marquee'];
 
 const PIVOT_MARKER_SIZE = 18; // px
 const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected group holds
@@ -87,6 +89,21 @@ const CUT_FLOW = 40; // px per second
 // Adds a primitive to a mesh as a new object and returns its vertices, or
 // undefined for an unknown kind. Options: cone { sides, size }, cylinder
 // { sides, size, height }, sphere { segments, size }.
+// A line's pixels made pixel-perfect, as pixel art wants a line: where the
+// way took a corner (two pixels for one diagonal step), the corner goes.
+// `path` is [{ pixel, ... }], in order.
+function pixelPerfect(path) {
+  const kept = [];
+  for (const step of path) {
+    kept.push(step);
+    if (kept.length < 3) continue;
+    const [a, b, c] = kept.slice(-3).map((each) => each.pixel);
+    const diagonal = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1;
+    if (diagonal && (b.x === a.x || b.y === a.y) && (b.x === c.x || b.y === c.y)) kept.splice(-2, 1);
+  }
+  return kept;
+}
+
 function buildPrimitive(mesh, kind, options) {
   switch (kind) {
     case 'cube': return mesh.addCube(options.size);
@@ -121,10 +138,16 @@ export class Editor extends EventTarget {
     this.paintHover = null; // the pixel of the atlas the brush is on ({ x, y }), or null
     // The brush's straight lines, Shift+click (see linePath()): the last pixel
     // it put, and the line a press would paint, shown while Shift is held.
-    this.lastPaint = null; // { pixel, point, width, height }
+    this.lastPaint = null; // { pixel, at, width, height }, see strokePixel()
     this.shiftHeld = false;
+    this.spaceHeld = false; // the line along the faces, see linePath()
     this.lineTarget = null;
     this.linePreview = null; // [{ pixel, point }]
+    // The marquee (see setMarquee()): the rectangle of pixels picked, and the
+    // piece of picture that floats over the rest while it is moved about.
+    this.marquee = null; // { x, y, w, h }, in the atlas' pixels
+    this.floating = null; // see liftMarquee()
+    this.pixelClipboard = null; // { image, x, y }
     this.focus = false; // the focus look, see setFocus()
     // Modal operation, 'cut', 'extrude' or 'pencil': a state with its own look
     // and its own meaning of LMB, on top of whatever tool is active.
@@ -287,6 +310,7 @@ export class Editor extends EventTarget {
     for (const type of ['keydown', 'keyup']) {
       window.addEventListener(type, (event) => {
         if (event.key === 'Shift') this.setShiftHeld(type === 'keydown'); // the brush's line, see setShiftHeld()
+        if (event.code === 'Space') this.setSpaceHeld(type === 'keydown'); // ... along the faces
         if (event.key !== 'Alt') return;
         if (this.tool === 'scale' || this.painting) event.preventDefault();
         this.setAltHeld(type === 'keydown');
@@ -295,6 +319,7 @@ export class Editor extends EventTarget {
     window.addEventListener('blur', () => {
       this.setAltHeld(false);
       this.setShiftHeld(false);
+      this.setSpaceHeld(false);
     });
     // In case the key events were missed.
     window.addEventListener('pointermove', (event) => {
@@ -1445,7 +1470,7 @@ export class Editor extends EventTarget {
         // The gizmo's own hover handler has already run for this event.
         const idle = this.overGizmo() || this.tool === 'pivot' || this.painting; // see pointerdown
         this.setHovered(idle ? null : this.pickElement(event.clientX, event.clientY));
-        if (this.painting) {
+        if (this.painting && this.tool !== 'marquee') {
           this.setPaintHover(this.paintPixelAt(event.clientX, event.clientY));
           this.setLineTarget({ x: event.clientX, y: event.clientY });
         }
@@ -1501,7 +1526,7 @@ export class Editor extends EventTarget {
   // hand comes back when it is let go. A stroke goes on as it was begun: Alt
   // pressed in the middle of one takes the pipette only once it is over.
   get picking() {
-    if (!this.painting || this.preview) return false;
+    if (!this.painting || this.preview || this.tool === 'marquee') return false; // (with the marquee Alt copies, see liftMarquee())
     if (this.stroke) return Boolean(this.stroke.pick);
     return this.tool === 'pipette' || this.altHeld;
   }
@@ -1515,20 +1540,25 @@ export class Editor extends EventTarget {
     // (The surface is drawn in parts, see MeshView.rebuild(): the even ones are what is on the atlas.)
     if (!hit?.uv || hit.face.materialIndex % 2 !== 0) return null;
     const index = this.view.triangleFaces[hit.faceIndex];
+    const pixel = this.facePixelAt(index, hit.uv.x * this.atlas.width, (1 - hit.uv.y) * this.atlas.height);
+    if (!pixel) return null;
+    // Where on the surface, in the world, and in which of the view's triangles (see surfacePath()).
+    return { pixel, face: index, point: hit.point, triangle: hit.faceIndex };
+  }
+
+  // The pixel of a face at a place on the atlas (x, y in its pixels, y down);
+  // null if the face is not on the atlas. Kept within the face's own piece
+  // of the picture: right on its edge the place may come out a hair into
+  // the next pixel, which is a neighbour's.
+  facePixelAt(index, x, y) {
     const face = this.mesh.faces[index];
     if (!face?.uv?.every(Boolean)) return null;
-    // Within the face's own piece of the picture: right on its edge the
-    // place may come out a hair into the next pixel, which is a neighbour's.
     const within = (value, axis) => {
       const low = Math.floor(Math.min(...face.uv.map((place) => place[axis])) + 1e-6);
       const high = Math.ceil(Math.max(...face.uv.map((place) => place[axis])) - 1e-6) - 1;
       return Math.min(Math.max(Math.floor(value), low), Math.max(low, high));
     };
-    return {
-      pixel: { x: within(hit.uv.x * this.atlas.width, 0), y: within((1 - hit.uv.y) * this.atlas.height, 1) },
-      face: index,
-      point: hit.point, // where on the surface, in the world
-    };
+    return { x: within(x, 0), y: within(y, 1) };
   }
 
   paintPixelAt(clientX, clientY) {
@@ -1547,12 +1577,12 @@ export class Editor extends EventTarget {
   // A press on the model with a painting tool. Returns whether the press was
   // the tool's - on the model - at all.
   pressPaint(event) {
-    if (this.busy()) return false;
+    if (this.busy() || this.tool === 'marquee') return false; // the marquee works in the UV editor only
     const hit = this.paintHitAt(event.clientX, event.clientY);
     if (!hit) return false;
     const kept = this.tool === 'paint' ? null : this.paintMask(hit.face);
     const line = event.shiftKey ? { x: event.clientX, y: event.clientY } : null;
-    if (this.paintPress(hit.pixel, kept, event.altKey, { point: hit.point, line })) {
+    if (this.paintPress(hit.pixel, kept, event.altKey, { at: hit, line })) {
       this.stroke.x = event.clientX;
       this.stroke.y = event.clientY;
     }
@@ -1565,12 +1595,12 @@ export class Editor extends EventTarget {
   // colour instead, as the pipette does. Returns whether a drag is to follow:
   // the brush's stroke (strokePixel()), a shape drawn out (paintDrag()) or
   // the pipette taking the colour wherever it goes (pickColor()), ended by
-  // endPaint(). `point` is where on the model's surface the press was, if it
-  // was on the model. With `line` (Shift held: where the press was, see
+  // endPaint(). `at` is where on the model's surface the press was (as
+  // paintHitAt() has it), if it was on the model. With `line` (Shift held: where the press was, see
   // linePath()) the brush first paints a straight line there from its last
   // pixel, and the stroke goes on from its end.
-  paintPress(pixel, mask, alt, { point = null, line = null } = {}) {
-    if (this.busy() || !this.painting) return false;
+  paintPress(pixel, mask, alt, { at = null, line = null } = {}) {
+    if (this.busy() || !this.painting || this.tool === 'marquee') return false;
     if (alt || this.tool === 'pipette') {
       this.stroke = { pick: true, changed: false };
       this.pickColor(pixel);
@@ -1587,70 +1617,107 @@ export class Editor extends EventTarget {
       this.paintDrag(pixel);
       return true;
     }
-    if (line) for (const step of this.linePath(line)) this.strokePixel(step.pixel.x, step.pixel.y, step.point);
-    this.strokePixel(pixel.x, pixel.y, point);
+    if (line) for (const step of this.linePath(line)) this.strokePixel(step.pixel.x, step.pixel.y, step.at);
+    this.strokePixel(pixel.x, pixel.y, at);
     this.updateLinePreview();
     return true;
   }
 
-  // The brush's stroke takes in a pixel - `point`, where on the model's
-  // surface, if it was put there on the model. It is the last pixel the
-  // brush has put, from then on: a line starts there (see linePath()).
-  strokePixel(x, y, point = null) {
+  // The brush's stroke takes in a pixel - `at`, where on the model's surface
+  // ({ point, triangle }), if it was put there on the model. It is the last
+  // pixel the brush has put, from then on: a line starts there (see linePath()).
+  strokePixel(x, y, at = null) {
     const { stroke } = this;
     if (!stroke || stroke.base || stroke.pick) return;
     if (this.atlas.paintPixel(x, y, this.paintColor)) stroke.changed = true;
-    this.lastPaint = { pixel: { x, y }, point: point?.clone() ?? null, width: this.atlas.width, height: this.atlas.height };
+    this.lastPaint = {
+      pixel: { x, y },
+      // (The view's triangles are numbered anew whenever it is rebuilt: `rebuilds` tells whether these still hold.)
+      at: at ? { point: at.point.clone(), triangle: at.triangle, rebuilds: this.view.rebuilds } : null,
+      width: this.atlas.width,
+      height: this.atlas.height,
+    };
   }
 
   // The way a straight line goes from the brush's last pixel to `target`, as
-  // [{ pixel, point }] - its pixels in order, each once, the first one
-  // included, with where on the surface it is (or null). `target` is a place
-  // on the model's view ({ x, y }, as the pointer has it) or a pixel of the
-  // UV editor ({ pixel }).
-  //   - On the model, if the last pixel was put on the model too: straight
-  //     on the screen, lying on the surface - the way a stroke goes. (Two
-  //     places on two faces can be far apart on the atlas, with other faces'
-  //     pixels between them.) Where the line leaves the surface nothing is put.
-  //   - Otherwise straight across the atlas, pixel by pixel.
+  // [{ pixel, at }] - its pixels in order, each once, the first one
+  // included, with where on the surface each is ({ point, triangle }, or
+  // null). `target` is a place on the model's view ({ x, y }, as the pointer
+  // has it) or a pixel of the UV editor ({ pixel }).
+  //   - On the model, if the last pixel was put on the model too, the line
+  //     lies on the surface. Normally it goes straight on the screen - the
+  //     way a stroke goes - and where it leaves the surface nothing is put.
+  //     With Space held it goes along the faces instead: the shortest way
+  //     over the surface (see surfacePath()), as a string pulled tight over
+  //     the model. (Two places on two faces can be far apart on the atlas,
+  //     with other faces' pixels between them: a line across the atlas would
+  //     not join them.)
+  //   - Otherwise straight across the atlas, pixel by pixel (Bresenham's).
   linePath(target) {
     const from = this.lastPaint;
     if (!from || from.width !== this.atlas.width || from.height !== this.atlas.height) return [];
     const path = [];
     const seen = new Set();
-    const add = (pixel, point) => {
+    const add = (pixel, at) => {
       const key = `${pixel.x},${pixel.y}`;
       if (seen.has(key)) return;
       seen.add(key);
-      path.push({ pixel, point });
+      path.push({ pixel, at });
     };
-    const start = target.pixel === undefined && from.point ? this.screenOf(from.point) : null;
+    const onModel = target.pixel === undefined && from.at;
+    if (onModel && this.spaceHeld && from.at.rebuilds === this.view.rebuilds) {
+      const end = this.paintHitAt(target.x, target.y);
+      const pieces = end && surfacePath(this.mesh.vertices, this.view.triangleIndices, from.at, end);
+      if (pieces) {
+        add(from.pixel, from.at);
+        for (const { a, b, triangle } of pieces) {
+          // Along the piece, finer than the atlas' pixels.
+          const ends = [a, b].map((point) => this.atlasPlaceAt(triangle, point));
+          if (!ends[0]) continue; // a face that is not on the atlas: nothing is put there
+          const steps = Math.min(Math.ceil(Math.hypot(ends[1].x - ends[0].x, ends[1].y - ends[0].y) * 3), 3000);
+          for (let step = 0; step <= steps; step++) {
+            const k = steps ? step / steps : 0;
+            const x = ends[0].x + (ends[1].x - ends[0].x) * k;
+            const y = ends[0].y + (ends[1].y - ends[0].y) * k;
+            add(this.facePixelAt(this.view.triangleFaces[triangle], x, y), { point: a.clone().lerp(b, k), triangle });
+          }
+        }
+        return pixelPerfect(path);
+      }
+    }
+    const start = onModel ? this.screenOf(from.at.point) : null;
     if (start) {
-      add(from.pixel, from.point);
+      add(from.pixel, from.at);
       const steps = Math.min(Math.ceil(Math.hypot(target.x - start.x, target.y - start.y)), 600);
       for (let step = 1; step <= steps; step++) {
         const hit = this.paintHitAt(
           start.x + ((target.x - start.x) * step) / steps,
           start.y + ((target.y - start.y) * step) / steps,
         );
-        if (hit) add(hit.pixel, hit.point);
+        if (hit) add(hit.pixel, hit);
       }
-      // Pixel-perfect, as pixel art wants a line: where the way across the
-      // screen took a corner (two pixels for one diagonal step), the corner goes.
-      const kept = [];
-      for (const step of path) {
-        kept.push(step);
-        if (kept.length < 3) continue;
-        const [a, b, c] = kept.slice(-3).map((each) => each.pixel);
-        const diagonal = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1;
-        if (diagonal && (b.x === a.x || b.y === a.y) && (b.x === c.x || b.y === c.y)) kept.splice(-2, 1);
-      }
-      return kept;
+      return pixelPerfect(path);
     }
     const end = target.pixel ?? this.paintPixelAt(target.x, target.y);
     if (!end) return [];
     for (const [x, y] of linePixels(from.pixel, end)) add({ x, y }, null);
     return path;
+  }
+
+  // Where a point of one of the view's triangles is on the atlas (x, y in its
+  // pixels, y down), by its weights there; null if the face is not on the atlas.
+  atlasPlaceAt(triangle, point) {
+    const face = this.mesh.faces[this.view.triangleFaces[triangle]];
+    if (!face?.uv?.every(Boolean)) return null;
+    const corners = this.view.triangleIndices.slice(triangle * 3, triangle * 3 + 3);
+    const weights = barycentric(point, ...corners.map((vertex) => this.mesh.vertices[vertex]));
+    const place = { x: 0, y: 0 };
+    corners.forEach((vertex, k) => {
+      const [u, v] = face.uv[face.indexOf(vertex)];
+      place.x += weights.getComponent(k) * u;
+      place.y += weights.getComponent(k) * v;
+    });
+    return place;
   }
 
   // Where a point of the world is on the model's view, as the pointer would
@@ -1672,6 +1739,12 @@ export class Editor extends EventTarget {
   setShiftHeld(on) {
     if (on === this.shiftHeld) return;
     this.shiftHeld = on;
+    this.updateLinePreview();
+  }
+
+  setSpaceHeld(on) {
+    if (on === this.spaceHeld) return;
+    this.spaceHeld = on;
     this.updateLinePreview();
   }
 
@@ -1725,7 +1798,7 @@ export class Editor extends EventTarget {
           stroke.x + ((clientX - stroke.x) * step) / steps,
           stroke.y + ((clientY - stroke.y) * step) / steps,
         );
-        if (on) this.strokePixel(on.pixel.x, on.pixel.y, on.point);
+        if (on) this.strokePixel(on.pixel.x, on.pixel.y, on);
       }
       stroke.x = clientX;
       stroke.y = clientY;
@@ -1765,6 +1838,180 @@ export class Editor extends EventTarget {
     if (on === this.shapeFilled) return;
     this.shapeFilled = on;
     this.emitChange();
+  }
+
+  // --- the marquee: a rectangle of the atlas' pixels -----------------------
+  //
+  // In the UV editor, with the marquee in hand, a drag picks a rectangle of
+  // the picture's pixels (`marquee`). What is in it can be rubbed out,
+  // copied, cut, turned by quarter turns and turned over; and dragged
+  // elsewhere - it is then lifted off the picture (`floating`) and moves
+  // over it, leaving a hole where it was (or, with Alt, a copy of itself).
+  // A floating piece is put down (commitFloating()) by Enter, a press
+  // outside it or another tool, or sent back (cancelFloating()) by Esc or
+  // Ctrl+Z. All that is done to a piece between its lifting and its putting
+  // down is one undo step.
+  //   - A pasted picture floats too, where it was copied from.
+  //   - Quarter turns and turning over only: any other angle would make the
+  //     pixels anew, and pixel art does not survive that.
+  // What is moved off the faces is rubbed out at the next layout, as all
+  // that no face shows (see Atlas.sweep()).
+
+  // Picks a rectangle ({ x, y, w, h }, kept on the atlas; null: none). What
+  // floats is put down first. Tells of it with a 'painthover' event.
+  setMarquee(rect) {
+    if (rect) {
+      const x = Math.max(0, Math.min(rect.x, rect.x + rect.w));
+      const y = Math.max(0, Math.min(rect.y, rect.y + rect.h));
+      const right = Math.min(this.atlas.width, Math.max(rect.x, rect.x + rect.w));
+      const bottom = Math.min(this.atlas.height, Math.max(rect.y, rect.y + rect.h));
+      rect = right > x && bottom > y ? { x, y, w: right - x, h: bottom - y } : null;
+    }
+    this.commitFloating();
+    this.marquee = rect;
+    this.dispatchEvent(new Event('painthover'));
+    this.emitChange();
+  }
+
+  // Lifts what is in the rectangle off the picture, to be moved about: a
+  // hole is left where it was - or, with `copy`, the picture as it is.
+  // Returns whether anything floats now.
+  liftMarquee(copy = false) {
+    if (this.floating) return true;
+    if (!this.marquee || this.busy()) return false;
+    const before = this.snapshot();
+    const original = this.atlas.taken();
+    const image = this.atlas.region(this.marquee);
+    const changed = copy ? false : this.atlas.clearRegion(this.marquee);
+    this.floating = { before, original, base: this.atlas.taken(), image, x: this.marquee.x, y: this.marquee.y, changed };
+    this.emitChange();
+    return true;
+  }
+
+  // Moves what floats to have its top left at (x, y), in the atlas' pixels.
+  moveFloating(x, y) {
+    const floating = this.floating;
+    if (!floating || (x === floating.x && y === floating.y)) return;
+    floating.x = x;
+    floating.y = y;
+    floating.changed = true;
+    this.showFloating();
+  }
+
+  // The picture with what floats over it, where it is.
+  showFloating() {
+    const { base, image, x, y } = this.floating;
+    this.atlas.putBack(base);
+    this.atlas.stamp(image, x, y);
+    this.marquee = { x, y, w: image.width, h: image.height };
+    this.dispatchEvent(new Event('painthover'));
+  }
+
+  // Puts what floats down where it is: one undo step, if anything changed.
+  // Returns whether anything floated.
+  commitFloating() {
+    const floating = this.floating;
+    if (!floating) return false;
+    this.floating = null;
+    if (floating.changed) this.history.push(floating.before);
+    this.emitChange();
+    return true;
+  }
+
+  // Sends what floats back where it was taken from, as if it had not been
+  // lifted. Returns whether anything floated.
+  cancelFloating() {
+    const floating = this.floating;
+    if (!floating) return false;
+    this.floating = null;
+    this.atlas.putBack(floating.original);
+    this.marquee = null;
+    this.dispatchEvent(new Event('painthover'));
+    this.emitChange();
+    return true;
+  }
+
+  // Rubs out what is picked: the pixels in the rectangle, or what floats. One
+  // undo step. Returns whether there was anything picked.
+  deletePixels() {
+    if (this.floating) {
+      const { before, base } = this.floating;
+      this.floating = null;
+      this.atlas.putBack(base); // the hole it left, or the picture as it was if it was a copy
+      if (this.atlas.pixels().data.some((value, i) => value !== before.atlas.data[i])) this.history.push(before);
+    } else if (this.marquee) {
+      if (this.busy()) return false;
+      const before = this.snapshot();
+      if (this.atlas.clearRegion(this.marquee)) this.history.push(before);
+    } else {
+      return false;
+    }
+    this.marquee = null;
+    this.dispatchEvent(new Event('painthover'));
+    this.emitChange();
+    return true;
+  }
+
+  // Copies what is picked, to be pasted (see pastePixels()). Returns whether
+  // there was anything picked.
+  copyPixels() {
+    if (this.floating) {
+      const { image, x, y } = this.floating;
+      this.pixelClipboard = { image: new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), x, y };
+    } else if (this.marquee) {
+      this.pixelClipboard = { image: this.atlas.region(this.marquee), x: this.marquee.x, y: this.marquee.y };
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  cutPixels() {
+    return this.copyPixels() && this.deletePixels();
+  }
+
+  // Pastes what was copied: it floats over the picture, where it was copied
+  // from (kept on the atlas), to be moved and put down. Returns whether there
+  // was anything to paste.
+  pastePixels() {
+    const clip = this.pixelClipboard;
+    if (!clip) return false;
+    this.commitFloating();
+    if (this.busy()) return false;
+    const { image } = clip;
+    const x = Math.max(0, Math.min(clip.x, this.atlas.width - image.width));
+    const y = Math.max(0, Math.min(clip.y, this.atlas.height - image.height));
+    const original = this.atlas.taken();
+    this.floating = {
+      before: this.snapshot(),
+      original,
+      base: original,
+      image: new ImageData(new Uint8ClampedArray(image.data), image.width, image.height),
+      x,
+      y,
+      changed: true,
+    };
+    this.showFloating();
+    this.emitChange();
+    return true;
+  }
+
+  // Turns what is picked a quarter turn (`turn` 1 clockwise, -1 back) or
+  // over (`flip` 'h' or 'v'), about its middle. It floats from then on.
+  turnPixels(how) {
+    if (!this.liftMarquee()) return false;
+    const floating = this.floating;
+    const { width, height } = floating.image;
+    floating.image = turnedImage(floating.image, how);
+    if (how.turn) {
+      // About the middle, kept on the atlas.
+      floating.x = Math.max(0, Math.min(floating.x + Math.floor((width - height) / 2), this.atlas.width - floating.image.width));
+      floating.y = Math.max(0, Math.min(floating.y + Math.floor((height - width) / 2), this.atlas.height - floating.image.height));
+    }
+    floating.changed = true;
+    this.showFloating();
+    this.emitChange();
+    return true;
   }
 
   // --- modal operations --------------------------------------------------
@@ -3201,6 +3448,11 @@ export class Editor extends EventTarget {
 
   setTool(tool) {
     if (!(tool in TOOLS)) return;
+    // The marquee's rectangle is its own: another tool puts down what floats, and forgets it.
+    if (tool !== 'marquee' && this.tool === 'marquee') {
+      this.commitFloating();
+      this.setMarquee(null);
+    }
     // Pivot points belong to whole objects: the pivot tool works in object
     // mode, on the object that was being edited.
     if (tool === 'pivot' && this.pivotEntry() === null) {
@@ -3721,6 +3973,8 @@ export class Editor extends EventTarget {
     if (this.busy()) return false;
     this.setOperation(null);
     this.lastPaint = null; // a line is not drawn from another project's pixel
+    this.floating = null;
+    this.marquee = null;
     this.cancelDrag();
     this.cancelBox();
     const { mesh } = this;
@@ -3863,6 +4117,7 @@ export class Editor extends EventTarget {
   // --- history -----------------------------------------------------------
 
   undo() {
+    if (this.cancelFloating()) return; // first, what floats goes back where it was
     if (this.busy()) return;
     const state = this.history.undo(this.snapshot());
     if (state) this.restore(state);
@@ -3879,6 +4134,7 @@ export class Editor extends EventTarget {
     return (
       Boolean(this.drag?.start) ||
       Boolean(this.stroke) ||
+      Boolean(this.floating) ||
       Boolean(this.pivotDrag?.before) ||
       this.gizmo.dragging ||
       this.extrude !== null ||
@@ -3905,6 +4161,7 @@ export class Editor extends EventTarget {
   }
 
   restore(state) {
+    this.marquee = null; // the pixels it went round may be other ones now
     this.mesh.vertices = state.vertices.map((vertex) => vertex.clone());
     this.mesh.faces = state.faces.map(cloneFace);
     this.mesh.wires = state.wires.map((wire) => [...wire]);

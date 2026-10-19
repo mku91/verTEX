@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:">
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:">
   <title>verTEX</title>
   <link rel="stylesheet" href="../fonts/all.css">
   <link rel="stylesheet" href="styles.css">
@@ -11,7 +11,8 @@
     {
       "imports": {
         "three": "../../node_modules/three/build/three.module.js",
-        "three/addons/": "../../node_modules/three/examples/jsm/"
+        "three/addons/": "../../node_modules/three/examples/jsm/",
+        "@dimforge/rapier3d-compat": "../../node_modules/@dimforge/rapier3d-compat/dist/rapier.mjs"
       }
     }
   </script>
@@ -103,9 +104,15 @@
           </div>
         </div>
       </div>
-      <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
-        <i class="fa-solid fa-camera"></i><span>Рендер</span>
-      </button>
+      <span class="top-separator"></span>
+      <div id="screen-modes" class="top-actions">
+        <button id="collision-button" title="Коллизии: фигуры столкновений объектов для Godot — добавить вручную или подобрать автоматически, затем поправить">
+          <i class="fa-solid fa-shapes"></i><span>Коллизии</span>
+        </button>
+        <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
+          <i class="fa-solid fa-camera"></i><span>Рендер</span>
+        </button>
+      </div>
     </header>
 
     <aside id="toolbar">
@@ -179,6 +186,10 @@
     <div id="workspace">
     <main id="viewport">
       <div id="mode-indicator" title="Режим выделения: объект — куб, грань — плоскость, ребро — линия, вершина — точка"></div>
+      <div id="sim-controls">
+        <button id="sim-start"><i class="fa-solid fa-play"></i><span>Симуляция</span></button>
+        <button id="sim-restart" title="Начать заново"><i class="fa-solid fa-rotate-left"></i></button>
+      </div>
       <div id="operation-banner">
         <span id="operation-name"></span>
         <button id="operation-close" title="Выключить режим (Esc)">
@@ -346,6 +357,41 @@
         <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
         <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
       </div>
+      <div id="collision-panel" hidden>
+        <div class="properties-header">
+          <p>Коллизии</p>
+        </div>
+        <p class="collision-hint">Выберите объект: щелчок по нему или по его фигуре</p>
+        <div class="collision-body">
+          <div class="body-types" title="Чем объект станет в Godot">
+            <button data-body="static" title="StaticBody3D: неподвижен — стены, пол, камни">Статика</button>
+            <button data-body="kinematic" title="AnimatableBody3D: движется кодом или анимацией — двери, лифты">Кинематика</button>
+            <button data-body="dynamic" title="RigidBody3D: движется физикой — ящики, бочки">Динамика</button>
+            <button data-body="trigger" title="Area3D: ничего не останавливает, только замечает вход — зоны, подбираемые предметы">Триггер</button>
+          </div>
+          <button class="collider-auto"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Авто</span></button>
+          <div class="collider-add" title="Добавить фигуру, подогнанную по объекту">
+            <button data-add="box" title="Коробка по границам объекта">Коробка</button>
+            <button data-add="sphere" title="Сфера вокруг объекта">Сфера</button>
+            <button data-add="capsule" title="Капсула вдоль самой длинной оси объекта">Капсула</button>
+            <button data-add="cylinder" title="Цилиндр вдоль самой длинной оси объекта">Цилиндр</button>
+            <button data-add="convex" title="Выпуклая оболочка: плотно, но без впадин">Оболочка</button>
+            <button data-add="trimesh" title="Сами грани объекта: точно, но только для статики — двигаться такое тело в Godot не может">Сетка</button>
+          </div>
+          <div class="collider-list"></div>
+          <div class="collider-tools">
+            <button class="collider-refit" title="Подогнать фигуру заново по объекту, каким он стал"><i class="fa-solid fa-arrows-rotate"></i><span>Подогнать</span></button>
+            <button class="collider-delete" title="Удалить фигуру (Delete)"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+          <div class="collider-fields">
+            <div data-for="box sphere capsule cylinder"><p>Центр</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.2"></label></div>
+            <div data-for="box capsule cylinder"><p>Поворот</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.0" title="Угол в градусах"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.1" title="Угол в градусах"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.2" title="Угол в градусах"></label></div>
+            <div data-for="box"><p>Размер</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.2"></label></div>
+            <div data-for="sphere capsule cylinder"><label><span class="field-name">Радиус</span><input type="text" inputmode="decimal" spellcheck="false" data-field="radius"></label></div>
+            <div data-for="capsule cylinder"><label><span class="field-name">Высота</span><input type="text" inputmode="decimal" spellcheck="false" data-field="height" title="Во всю длину, вместе с закруглениями"></label></div>
+          </div>
+        </div>
+      </div>
       <div id="object-props" hidden>
         <div class="properties-header">
           <p>Свойства</p>
@@ -372,7 +418,7 @@
         </div>
         <div class="texture-buttons">
           <button id="atlas-open" title="Открыть картинку атласа в программе для рисования. Рабочая копия картинки кладётся во временную папку; сохранённое в ней сразу видно на модели, а в файл проекта попадает при его сохранении. Рядом кладётся файл-подсказка с контурами граней">
-            <i class="fa-solid fa-paintbrush"></i><span>Рисовать</span>
+            <i class="fa-solid fa-paintbrush"></i><span>Рисовать во внешнем редакторе</span>
           </button>
           <button id="atlas-reveal" title="Показать рабочую копию атласа и файл с контурами граней в папке">
             <i class="fa-regular fa-folder-open"></i>
@@ -523,13 +569,13 @@
             </label>
           </section>
           <section data-page="textures" hidden>
-            <label title="Программа, в которой открывается картинка атласа по кнопке «Рисовать»: путь к её исполняемому файлу. Пусто — та, которой система открывает такие файлы">
+            <label title="Программа, в которой открывается картинка атласа по кнопке «Рисовать во внешнем редакторе»: путь к её исполняемому файлу. Пусто — та, которой система открывает такие файлы">
               <span>Внешний редактор</span>
               <input type="text" id="external-editor" spellcheck="false" placeholder="программа по умолчанию">
               <button type="button" id="external-editor-pick">Обзор…</button>
               <button type="button" id="external-editor-clear" title="Открывать программой по умолчанию">Сбросить</button>
             </label>
-            <p class="settings-note">Кнопка «Рисовать» в панели «Текстура» откроет картинку атласа в этой программе. Сохранённое там сразу видно на модели.</p>
+            <p class="settings-note">Кнопка «Рисовать во внешнем редакторе» в панели «Текстура» откроет картинку атласа в этой программе. Сохранённое там сразу видно на модели.</p>
           </section>
           <section data-page="hotkeys" hidden>
             <div class="hotkeys-head">
@@ -622,7 +668,7 @@
         <label class="choice" title="Ширина и высота листа — 64, 128, 256…, как требуют многие движки: справа и снизу добавляется прозрачное поле, кадры остаются на своих местах"><input type="checkbox" name="pot"><span>Размер — степень двойки</span></label>
         <label class="choice" title="Рядом с PNG — JSON с местом и углом каждого кадра (формат TexturePacker / Aseprite)"><input type="checkbox" name="json"><span>JSON с кадрами</span></label>
         <div class="form-buttons">
-          <button type="button" data-render="save">Сохранить PNG…</button>
+          <button type="button" data-render="save" title="Сохранить лист в PNG (и JSON с кадрами, если отмечено)">Экспорт</button>
         </div>
       </form>
     </div>

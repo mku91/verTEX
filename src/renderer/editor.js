@@ -4,11 +4,13 @@ import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror, mirrorPoint } from './mirror.js';
-import { quaternionOf, rotationOf, setRotation } from './frames.js';
+import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
+import { cloneCollider } from './collision-fit.js';
+import { latinName } from './names.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
 export const TOOLS = {
@@ -166,6 +168,12 @@ export class Editor extends EventTarget {
     this.ppu = 16;
     this.uvLook = false; // the UV editor is open, see setUVLook()
     this.preview = false; // the model alone is shown, see setPreview()
+    // The collision mode (see collisions.js, setCollisions()): on, and what it
+    // has to say about a press in the main view - see collisionPress below.
+    this.collisions = false;
+    this.collisionPress = null; // (event) -> 'gizmo' | true (taken) | false (the editor's)
+    this.collisionDragging = false; // a collision shape's gizmo is being dragged
+    this.simulating = false; // the simulation runs (see simulation.js): the model is its, not to be edited
     this.atlas = new Atlas();
     this.atlas.addEventListener('change', () => this.viewport.requestRender());
     // The place tool: what is being placed (see beginPlace()), and the side it lies on.
@@ -621,7 +629,7 @@ export class Editor extends EventTarget {
     const entry = this.pivotEntry();
     // The pivot tool needs an object to have a pivot; the others, something to move.
     const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0;
-    if (!mode || nothing || this.operation || this.preview) {
+    if (!mode || nothing || this.operation || this.preview || this.collisions) {
       this.gizmo.detach();
     } else {
       // What belongs to a turned object is scaled along that object's own
@@ -1294,6 +1302,79 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
+  // --- collisions --------------------------------------------------------
+  //
+  // An object's collision shapes (`colliders`, see collision-fit.js) are in
+  // its own frame, so they go wherever it goes and turn with it; its `body`
+  // is what they make it in a game (see gltf.js): 'static' (left out), or
+  // 'kinematic', 'dynamic', 'trigger'.
+
+  // The collision mode: the shapes shown and edited, in object mode, with the
+  // model itself not to be changed (see collisions.js).
+  setCollisions(on) {
+    if (on === this.collisions || this.busy()) return;
+    if (on) {
+      this.setOperation(null);
+      if (this.painting) this.setTool(this.toolBeforePaint);
+      if (this.tool === 'pivot') this.setTool('select');
+      this.setMode('object');
+      if (this.mode !== 'object') return;
+    }
+    this.cancelDrag();
+    this.collisions = on;
+    this.refreshHighlight();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
+  // An object's frame in the world (see frames.js), by its index.
+  objectFrame(index) {
+    return { origin: this.pivotPoint(index), quaternion: quaternionOf(this.mesh.objects[index].rotation) };
+  }
+
+  // An object's vertices in its own frame, as [x, y, z]: what shapes are fitted to.
+  objectPoints(index) {
+    const frame = this.objectFrame(index);
+    const { id } = this.mesh.objects[index];
+    const points = [];
+    this.mesh.vertices.forEach((vertex, i) => {
+      if (this.mesh.vertexObject[i] === id) points.push(toLocal(vertex, frame).toArray());
+    });
+    return points;
+  }
+
+  // An object's collision shapes from now on (an empty list: none). One undo
+  // step; with `record` off it is only shown, as a shape is dragged:
+  // commitColliders() makes the drag one undo step.
+  setColliders(index, colliders, record = true) {
+    const object = this.mesh.objects[index];
+    if (!object || object.kind === 'group' || (record && this.busy())) return;
+    if (record) this.history.push(this.snapshot());
+    if (colliders.length) object.colliders = colliders;
+    else delete object.colliders;
+    this.emitChange();
+  }
+
+  // The end of a drag of a collision shape: one undo step, back to `before`.
+  commitColliders(before) {
+    const was = new Map(before.objects.map((object) => [object.id, JSON.stringify(object.colliders ?? [])]));
+    if (this.mesh.objects.every((object) => JSON.stringify(object.colliders ?? []) === (was.get(object.id) ?? '[]'))) return;
+    this.history.push(before);
+    this.emitChange();
+  }
+
+  // What these objects are as bodies (see above). One undo step.
+  setBody(indices, body) {
+    const objects = indices.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'group');
+    if (objects.every((object) => (object.body ?? 'static') === body) || this.busy()) return;
+    this.history.push(this.snapshot());
+    for (const object of objects) {
+      if (body === 'static') delete object.body;
+      else object.body = body;
+    }
+    this.emitChange();
+  }
+
   // The end of a drag of the smoothing's angle (see setSmoothing()): one
   // undo step, back to `before`, if any object's smoothing changed.
   commitSmoothing(before) {
@@ -1444,7 +1525,17 @@ export class Editor extends EventTarget {
         this.gizmoUsed = false;
         down = null;
         if (event.button !== 0) return;
-        if (this.preview) return; // only looked at: the press is the camera's
+        if (this.preview || this.simulating) return; // only looked at: the press is the camera's (or the simulation's)
+        // The collision mode: its gizmo, or a shape under the pointer, takes the
+        // press; else it picks objects as usual (and moves nothing, see dragTo()).
+        if (this.collisions) {
+          const taken = this.collisionPress?.(event) ?? false;
+          if (taken === 'gizmo') return;
+          if (taken) {
+            event.stopImmediatePropagation();
+            return;
+          }
+        }
         // The pencil works through ordinary vertex drags, see sproutVertex().
         if (this.operation && this.operation !== 'pencil') {
           event.stopImmediatePropagation();
@@ -1496,7 +1587,7 @@ export class Editor extends EventTarget {
       { capture: true },
     );
     dom.addEventListener('pointermove', (event) => {
-      if (this.preview) return; // only looked at
+      if (this.preview || this.simulating) return; // only looked at
       this.setFineSnap(event.ctrlKey); // in case the key event was missed
       if (this.cut) {
         this.moveCut(event.clientX, event.clientY);
@@ -2161,6 +2252,7 @@ export class Editor extends EventTarget {
   // are what the pointer picks, and LMB drives the operation instead of dragging.
   setOperation(name) {
     if (name === this.operation) return;
+    if (name && this.collisions) this.setCollisions(false);
     // The place tool needs one object or group picked whole.
     if (name === 'place' && this.pivotEntry() === null) return;
     // An operation puts the painting tool down: the tool that was in hand
@@ -3061,6 +3153,7 @@ export class Editor extends EventTarget {
 
   dragTo(clientX, clientY) {
     const drag = this.drag;
+    if (this.collisions) return; // only shapes are moved there: a press is a click
     if (!drag.start) {
       if (Math.hypot(clientX - drag.x, clientY - drag.y) <= CLICK_TOLERANCE) return;
       this.beginDrag();
@@ -3635,6 +3728,8 @@ export class Editor extends EventTarget {
 
   setTool(tool) {
     if (!(tool in TOOLS)) return;
+    // The collision mode's gizmo moves, turns and scales by the tools; any other tool leaves it.
+    if (this.collisions && !['select', 'move', 'rotate', 'scale'].includes(tool)) this.setCollisions(false);
     // The marquee's rectangle is its own: another tool puts down what floats, and forgets it.
     if (tool !== 'marquee' && this.tool === 'marquee') {
       this.commitFloating();
@@ -3667,6 +3762,7 @@ export class Editor extends EventTarget {
 
   setMode(mode) {
     if (!MODES.includes(mode) || mode === this.mode) return;
+    if (this.collisions) return; // shapes belong to objects: object mode only
     this.cancelDrag();
     // A mode the current operation can't work in leaves the operation for it.
     if (this.operation && !OPERATION_MODES[this.operation].includes(mode)) {
@@ -3948,11 +4044,12 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
+          colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -3988,6 +4085,8 @@ export class Editor extends EventTarget {
       if (source.color) object.color = source.color;
       if (source.oneSided) object.oneSided = true;
       if (source.smooth) object.smooth = source.smooth;
+      if (source.colliders) object.colliders = source.colliders.map(cloneCollider);
+      if (source.body) object.body = source.body;
       // A copy of an object that is on the atlas is on it too, with its picture.
       if (source.atlas) object.atlas = source.atlas;
       else delete object.atlas;
@@ -4024,6 +4123,22 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // Copies of these entries (objects or groups, indices in the objects list),
+  // in the same place, named as copies are (see names.js): "Cube" gives
+  // "Cube_0". They are picked, with the move tool in hand. One undo step.
+  // What was copied with Ctrl+C stays where it was.
+  duplicateObjects(indices) {
+    if (indices.length === 0 || this.operation || this.busy()) return false;
+    this.setMode('object');
+    if (this.mode !== 'object') return false;
+    const clipboard = this.clipboard;
+    this.picked = new Set(indices);
+    this.syncSelection();
+    const done = this.copyObjects() && this.pasteObjects();
+    this.clipboard = clipboard;
+    return done;
+  }
+
   // Flies the camera to an object or a group (index in the objects list).
   focusObject(index) {
     const { vertices } = this.contents([index]);
@@ -4034,7 +4149,8 @@ export class Editor extends EventTarget {
   renameObject(index, name) {
     const object = this.mesh.objects[index];
     name = name.trim();
-    if (!object || !name || name === object.name || this.busy()) return;
+    // Latin letters only (see names.js): a name with anything else is not taken.
+    if (!object || !name || latinName(name) !== name || name === object.name || this.busy()) return;
     this.history.push(this.snapshot());
     object.name = this.mesh.freeName(name, object);
     this.updateTopology(); // the names are copied there
@@ -4184,7 +4300,7 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -4197,6 +4313,8 @@ export class Editor extends EventTarget {
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
       ...(oneSided ? { oneSided: true } : {}),
       ...(smooth ? { smooth } : {}),
+      ...(kind !== 'group' && colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
+      ...(kind !== 'group' && body && body !== 'static' ? { body } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
     mesh.vertexObject = [...model.vertexObject];
@@ -4329,6 +4447,8 @@ export class Editor extends EventTarget {
       Boolean(this.floating) ||
       Boolean(this.pivotDrag?.before) ||
       this.gizmo.dragging ||
+      this.collisionDragging ||
+      this.simulating ||
       this.extrude !== null ||
       Boolean(this.polygon?.points.length)
     );

@@ -50,6 +50,7 @@ export class UVEditor {
     this.hovered = null; // a chart of editor.atlas.charts
     this.drag = null;
     this.fitted = ''; // the atlas size the view was last fitted to
+    this.moved = false; // panned or zoomed by hand since: a new size of the panel then leaves it be
     this.shaping = false; // the shape lock is open: corners can be dragged
     this.hoveredMarker = null;
     this.ants = 0; // how far the marquee's dashes have crawled
@@ -66,7 +67,12 @@ export class UVEditor {
       button.addEventListener('click', () => this.command(button.dataset.uv));
     }
 
-    new ResizeObserver(() => this.draw()).observe(this.canvas);
+    // A view not panned or zoomed by hand stays fitted as the panel changes
+    // size - as the window opens maximized, after the first fit was made.
+    new ResizeObserver(() => {
+      if (!this.moved && this.open) this.fit();
+      this.draw();
+    }).observe(this.canvas);
     editor.addEventListener('change', () => this.update());
     editor.addEventListener('painthover', () => this.draw());
     editor.atlas.addEventListener('change', () => this.draw());
@@ -240,6 +246,7 @@ export class UVEditor {
       y: Math.round((height - atlas.height * this.zoom) / 2),
     };
     this.fitted = `${atlas.width}x${atlas.height}`;
+    this.moved = false;
   }
 
   // A point of the canvas (client coordinates) as a place on the atlas, in pixels.
@@ -369,6 +376,7 @@ export class UVEditor {
       event.preventDefault();
       const before = this.toAtlas(event.clientX, event.clientY);
       const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(this.zoom * (event.deltaY < 0 ? 1.25 : 0.8)) || MIN_ZOOM));
+      this.moved = true;
       if (zoom === this.zoom) this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom + (event.deltaY < 0 ? 1 : -1)));
       else this.zoom = zoom;
       // The pixel under the pointer stays under it.
@@ -466,6 +474,7 @@ export class UVEditor {
       }
       if (drag.pan) {
         this.origin = { x: drag.origin.x + event.clientX - drag.x, y: drag.origin.y + event.clientY - drag.y };
+        this.moved = true;
         this.draw();
         return;
       }

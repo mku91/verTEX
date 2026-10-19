@@ -27,7 +27,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  win.once('ready-to-show', () => win.show());
+  // It opens maximized: the views want all the room there is. (Restored
+  // down, it takes the size above.)
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.show();
+  });
   guardWindow(win); // unsaved changes are asked about before it closes
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   return win;
@@ -54,13 +59,7 @@ function buildMenu() {
         { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
         { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
         { type: 'separator' },
-        {
-          label: 'Экспорт',
-          submenu: [
-            { label: 'FBX…', click: send('export-fbx') },
-            { label: 'glTF…', click: send('export-gltf') },
-          ],
-        },
+        { label: 'Экспорт в glTF…', click: send('export-gltf') },
         { label: 'Рендер спрайтов…', click: send('render-sprites') },
         { type: 'separator' },
         { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },

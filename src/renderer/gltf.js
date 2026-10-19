@@ -9,12 +9,11 @@
 //                its positions, normals, places on the atlas and indices are
 //   materials    one for what is on the atlas, one for what is not
 //   textures     the atlas' picture (a PNG among the bytes) and a sampler -
-//                how it is to be shown: pixel by pixel, which is what this
-//                format, unlike FBX, has a word for
+//                how it is to be shown: pixel by pixel
 //
 // What goes in is the model as a project file has it (see modelOf() in
-// project.js), as with FBX (see fbx.js); up is Y and a unit is a metre in
-// both, so nothing is converted.
+// project.js); up is Y and a unit is a metre in both, so nothing is
+// converted.
 //
 //   - glTF knows triangles only: the faces are cut the way the editor draws
 //     them (`triangles`, see EditableMesh.triangulate()).
@@ -27,10 +26,20 @@
 //     objects that are seen from the front only (`oneSided`): theirs is a
 //     material of its own, one-sided.
 //   - Hidden entries and the edges drawn on their own are left out.
+//   - An object with collision shapes (see collision-fit.js) is a physics
+//     body - Godot reads it as one (the OMI_physics_body and
+//     OMI_physics_shape extensions, Godot 4.3 and on): its node is the
+//     body, which Godot makes a StaticBody3D, an AnimatableBody3D, a
+//     RigidBody3D or an Area3D; its mesh goes to a child node of it, as a
+//     body's mesh is in Godot (a node that is both is made a body, and its
+//     mesh lost); and every shape is a child node, where the shape is in the
+//     object's frame. A convex shape is a mesh of its hull, which no node
+//     shows; a trimesh one is the object's own mesh.
 
 import * as THREE from 'three';
 import { quaternionOf } from './frames.js';
 import { cornerNormals } from './normals.js';
+import { hullOf } from './collision-fit.js';
 
 // The normals at every face's corners, as the editor lights them (see
 // normals.js): flat, or smooth for the objects that are.
@@ -176,22 +185,85 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     }) - 1;
   };
 
+  // A collision shape, among the document's (OMI_physics_shape); its number.
+  const shapes = [];
+  const shapeOf = (collider, mesh) => {
+    const { type } = collider;
+    const fields = type === 'box' ? { size: [...collider.size] }
+      : type === 'sphere' ? { radius: collider.radius }
+      : type === 'capsule' || type === 'cylinder' ? { radius: collider.radius, height: collider.height }
+      : { mesh };
+    return shapes.push({ type, [type]: fields }) - 1;
+  };
+  // A convex shape's mesh: its hull's corners and triangles, no material.
+  const hullMesh = (points) => {
+    const hull = hullOf(points);
+    if (!hull) return null;
+    const corners = new Float32Array(hull.points.flat());
+    const box = new THREE.Box3().setFromArray(corners);
+    return gltf.meshes.push({
+      name: 'hull',
+      primitives: [{
+        attributes: { POSITION: accessor(corners, 'VEC3', hull.points.length, { min: box.min.toArray(), max: box.max.toArray() }) },
+        indices: accessor(new Uint16Array(hull.triangles.flat()), 'SCALAR', hull.triangles.length * 3),
+      }],
+    }) - 1;
+  };
+  const BODY_MOTION = { static: 'static', kinematic: 'kinematic', dynamic: 'dynamic' };
+
   // What is hidden, itself or by a group above it, is left out.
   const byId = new Map(model.objects.map((object) => [object.id, object]));
   const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
   const shown = model.objects.filter((object) => !hidden(object));
   const numbers = new Map(shown.map((object, i) => [object.id, i]));
+  // The nodes a body has besides its objects' - its mesh's, its shapes' -
+  // go after all the objects', so as not to move their numbers.
+  const extra = [];
+  const extraNode = (node) => shown.length + extra.push(node) - 1;
   for (const object of shown) {
     const mesh = object.kind === 'group' ? null : meshOf(object);
     const children = shown.filter((other) => other.parent === object.id).map((other) => numbers.get(other.id));
-    gltf.nodes.push({
+    const node = {
       name: object.name,
       translation: [...object.position],
       ...(object.rotation ? { rotation: quaternionOf(object.rotation).toArray() } : {}),
       ...(mesh === null ? {} : { mesh }),
-      ...(children.length ? { children } : {}),
-    });
+    };
+    const colliders = object.kind === 'group' ? [] : object.colliders ?? [];
+    if (colliders.length) {
+      // A body: the mesh a child of it, and a child for every shape.
+      const trigger = object.body === 'trigger';
+      const own = [];
+      if (mesh !== null) {
+        delete node.mesh;
+        children.push(extraNode({ name: `${object.name}-mesh`, mesh }));
+      }
+      colliders.forEach((collider, k) => {
+        const shapeMesh = collider.type === 'convex' ? hullMesh(collider.points) : collider.type === 'trimesh' ? mesh : null;
+        if ((collider.type === 'convex' || collider.type === 'trimesh') && shapeMesh === null) return; // nothing to make it of
+        const shape = shapeOf(collider, shapeMesh);
+        const r = collider.rotation ?? [0, 0, 0];
+        const index = extraNode({
+          name: collider.name ?? `${object.name}-collision${colliders.length > 1 ? k + 1 : ''}`,
+          ...(collider.center ? { translation: [...collider.center] } : {}),
+          ...(r.some(Boolean) ? { rotation: quaternionOf(r).toArray() } : {}),
+          extensions: { OMI_physics_body: trigger ? { trigger: { shape } } : { collider: { shape } } },
+        });
+        children.push(index);
+        own.push(index);
+      });
+      node.extensions = {
+        OMI_physics_body: trigger ? { trigger: { nodes: own } } : { motion: { type: BODY_MOTION[object.body] ?? 'static' } },
+      };
+    }
+    if (children.length) node.children = children;
+    gltf.nodes.push(node);
     if (!numbers.has(object.parent)) gltf.scenes[0].nodes.push(numbers.get(object.id));
+  }
+  gltf.nodes.push(...extra);
+  if (shapes.length) {
+    gltf.extensionsUsed = ['OMI_physics_shape', 'OMI_physics_body'];
+    gltf.extensions = { OMI_physics_shape: { shapes } };
   }
 
   const data = bytes.whole();

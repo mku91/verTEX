@@ -1,8 +1,8 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-// The renderer's way to write an exported model (see fbx.js and gltf.js in
-// src/renderer).
+// The renderer's way to write an exported file (see gltf.js and
+// render-mode.js in src/renderer).
 // `ipcMain`, `dialog` and `BrowserWindow` are Electron's, passed in as in
 // project-io.js.
 //

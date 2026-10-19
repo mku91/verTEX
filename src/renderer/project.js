@@ -27,12 +27,32 @@
 
 import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
+import { cloneCollider } from './collision-fit.js';
 
 const FORMAT = 'vertex-project';
 const VERSION = 3;
 const UNTITLED = 'Без названия';
 
 const round = (value) => +value.toFixed(6);
+
+// The bodies an object with collision shapes can be (see gltf.js); and a
+// shape (see collision-fit.js) as a project file may have it.
+export const BODIES = ['static', 'kinematic', 'dynamic', 'trigger'];
+const isTriple = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+const positive = (value) => Number.isFinite(value) && value > 0;
+function soundCollider(collider) {
+  if (!collider || typeof collider !== 'object') return false;
+  if (collider.name !== undefined && typeof collider.name !== 'string') return false;
+  const placed = isTriple(collider.center) && isTriple(collider.rotation);
+  switch (collider.type) {
+    case 'box': return placed && isTriple(collider.size) && collider.size.every((value) => value >= 0);
+    case 'sphere': return isTriple(collider.center) && positive(collider.radius);
+    case 'capsule': case 'cylinder': return placed && positive(collider.radius) && positive(collider.height);
+    case 'convex': return Array.isArray(collider.points) && collider.points.length >= 4 && collider.points.every(isTriple);
+    case 'trimesh': return true;
+    default: return false;
+  }
+}
 
 // The scene as plain data.
 export function modelOf(editor) {
@@ -55,7 +75,7 @@ export function modelOf(editor) {
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body }) => {
       const frame = frames.get(id);
       const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
       // Inside a group that is not turned the angles are the entry's own, as they were set.
@@ -75,6 +95,9 @@ export function modelOf(editor) {
         atlas: atlas ?? null, // the atlas the object is on (its id), or null: not textured
         ...(oneSided ? { oneSided: true } : {}), // its faces are not drawn from behind
         ...(smooth ? { smooth } : {}), // smooth-shaded, with this angle (degrees): see normals.js
+        // Collision shapes, in its own frame (see collision-fit.js), and the body they make.
+        ...(colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
+        ...(body && body !== 'static' ? { body } : {}),
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -87,6 +110,18 @@ export function modelOf(editor) {
   };
 }
 
+// A collision shape (see collision-fit.js) made `times` as large, about its object's origin.
+function scaledCollider(collider, times) {
+  const out = { ...collider };
+  const by = (value) => round(value * times);
+  if (out.center) out.center = out.center.map(by);
+  if (out.size) out.size = out.size.map(by);
+  if (out.radius !== undefined) out.radius = by(out.radius);
+  if (out.height !== undefined) out.height = by(out.height);
+  if (out.points) out.points = out.points.map((point) => point.map(by));
+  return out;
+}
+
 // A model (as modelOf() gives it) so many times its size: the vertices, each
 // in its object's frame, and the entries' places are that many times farther
 // from where they are counted from; nothing is turned, and the picture is
@@ -96,7 +131,12 @@ export function scaledModel(model, times) {
   return {
     ...model,
     vertices: model.vertices.map(scaled),
-    objects: model.objects.map((object) => ({ ...object, position: scaled(object.position) })),
+    objects: model.objects.map((object) => ({
+      ...object,
+      position: scaled(object.position),
+      // The collision shapes too (see collision-fit.js): places and sizes alike.
+      ...(object.colliders ? { colliders: object.colliders.map((collider) => scaledCollider(collider, times)) } : {}),
+    })),
   };
 }
 
@@ -208,6 +248,8 @@ export function readProject(files) {
       (object.color === undefined || typeof object.color === 'string') &&
       (object.oneSided === undefined || typeof object.oneSided === 'boolean') &&
       (object.smooth === undefined || (Number.isFinite(object.smooth) && object.smooth > 0 && object.smooth <= 180)) &&
+      (object.colliders === undefined || (Array.isArray(object.colliders) && object.colliders.every(soundCollider))) &&
+      (object.body === undefined || BODIES.includes(object.body)) &&
       (object.atlas === undefined || object.atlas === null || typeof object.atlas === 'string') &&
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))

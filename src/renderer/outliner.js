@@ -1,5 +1,7 @@
 import { scrubbable } from './scrub.js';
 import { MARKER_COLORS, markerColor } from './marker-colors.js';
+import { BODY_COLORS, SHAPE_ICONS, shapeLabel } from './collisions.js';
+import { latinOnly } from './names.js';
 
 const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
 const GROUP_ICON = '<i class="fa-solid fa-folder"></i>';
@@ -73,6 +75,9 @@ export class Outliner {
     this.folded = new Set(); // ids of objects whose children are hidden
     this.press = null; // a press on a row that may become a drag
     this.suppressClick = false;
+    // The collision mode (see collisions.js), set once it is made: in it an
+    // object's collision shapes are rows under it, to pick them by.
+    this.shapes = null;
 
     this.bindList();
     this.bindContextMenu();
@@ -100,6 +105,10 @@ export class Outliner {
       whole,
       [...this.folded],
       this.editor.mesh.objects.map((object) => object.color ?? null), // the icons' colours
+      // In the collision mode, the shapes: their kinds, the bodies, the one picked.
+      this.editor.collisions
+        ? [this.editor.mesh.objects.map((object) => [object.body ?? null, (object.colliders ?? []).map((shape) => shape.type)]), this.shapes?.picked ?? null]
+        : null,
     ]);
     if (signature === this.shown) return;
     this.shown = signature;
@@ -117,9 +126,11 @@ export class Outliner {
       if (within) row.classList.add('implied'); // selected through its group: marked faintly
       else if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
 
+      const object = this.editor.mesh.objects[index];
+      const shapes = this.editor.collisions && island.kind !== 'group' ? object.colliders ?? [] : [];
       const arrow = document.createElement('span');
       arrow.className = 'outliner-arrow';
-      if (island.children.length) {
+      if (island.children.length || shapes.length) {
         arrow.innerHTML = `<i class="fa-solid fa-caret-${folded ? 'right' : 'down'}"></i>`;
         arrow.dataset.fold = island.id;
       }
@@ -147,7 +158,25 @@ export class Outliner {
       row.append(eye);
       rows.push(row);
       const carries = within || (picked && island.kind === 'group');
-      if (!folded) for (const child of island.children) addRow(child, depth + 1, carries);
+      if (folded) return;
+      // Its collision shapes first, in the body's colour; the picked one marked.
+      shapes.forEach((shape, k) => {
+        const line = document.createElement('div');
+        line.className = 'outliner-row outliner-shape';
+        line.dataset.shape = `${index}:${k}`;
+        line.style.paddingLeft = `${6 + (depth + 1) * INDENT}px`;
+        const chosen = this.shapes?.picked?.id === object.id && this.shapes.picked.index === k;
+        if (chosen) line.classList.add('selected');
+        line.innerHTML = `<span class="outliner-arrow"></span><i class="${SHAPE_ICONS[shape.type]}"></i>`;
+        line.lastElementChild.style.color = `#${BODY_COLORS[object.body ?? 'static'].toString(16).padStart(6, '0')}`;
+        const name = document.createElement('span');
+        name.className = 'outliner-name';
+        name.textContent = shapeLabel(object.colliders, k);
+        line.append(name);
+        line.title = 'Фигура столкновения: щелчок — выбрать, двойной щелчок — переименовать, Delete — удалить';
+        rows.push(line);
+      });
+      for (const child of island.children) addRow(child, depth + 1, carries);
     };
     islands.forEach((island, index) => {
       if (island.parentIndex === null) addRow(index, 0);
@@ -177,12 +206,20 @@ export class Outliner {
         this.update();
         return;
       }
+      const shape = event.target.closest('[data-shape]');
+      if (shape) {
+        const [index, k] = shape.dataset.shape.split(':').map(Number);
+        this.shapes?.pickShape(index, k);
+        return;
+      }
       const row = rowAt(event.target);
       if (row && !this.renaming) editor.selectObject(Number(row.dataset.object), event.shiftKey);
     });
     list.addEventListener('dblclick', (event) => {
       const row = rowAt(event.target);
       if (row && !event.target.closest('[data-fold], [data-eye]')) this.rename(row);
+      const shape = event.target.closest('[data-shape]');
+      if (shape) this.rename(shape);
     });
     // Rows must not take the keyboard focus away from the editor.
     list.addEventListener('mousedown', (event) => {
@@ -237,9 +274,10 @@ export class Outliner {
     list.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       close();
-      const row = event.target.closest?.('[data-object]');
+      const shape = event.target.closest?.('[data-shape]');
+      const row = shape ?? event.target.closest?.('[data-object]');
       if (!row || this.renaming) return;
-      const index = Number(row.dataset.object);
+      const index = Number(shape ? shape.dataset.shape.split(':')[0] : row.dataset.object);
       const island = editor.topology.islands[index];
       const item = (label, run, enabled = true) => {
         const button = document.createElement('button');
@@ -251,6 +289,25 @@ export class Outliner {
         });
         return button;
       };
+      // A collision shape's row: picked by the press, and its own menu.
+      if (shape) {
+        const k = Number(shape.dataset.shape.split(':')[1]);
+        this.shapes?.pickShape(index, k);
+        menu.replaceChildren(
+          item('Переименовать', () => {
+            const line = this.list.querySelector(`[data-shape="${index}:${k}"]`);
+            if (line) this.rename(line);
+          }),
+          item('Удалить', () => this.shapes?.removeShape(index, k)),
+        );
+        // (the press picked it, and the list was built anew: the row is the new one's)
+        this.list.querySelector(`[data-shape="${index}:${k}"]`)?.classList.add('context');
+        menu.hidden = false;
+        const { width, height } = menu.getBoundingClientRect();
+        menu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 4)}px`;
+        menu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 4)}px`;
+        return;
+      }
       // A marker colour: for this row, or - if it is one of several picked - for all of them.
       const whole = editor.mode === 'object' && editor.picked.has(index) ? [...editor.picked] : [index];
       const current = editor.mesh.objects[index].color ?? null;
@@ -283,6 +340,7 @@ export class Outliner {
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
+        item('Дублировать', () => editor.duplicateObjects(whole)),
         item('Объединить в один объект', () => editor.joinObjects(joined), island.kind !== 'group' && joined.length > 1),
         item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
@@ -318,6 +376,7 @@ export class Outliner {
   // row that is the group the object is in: the row lands next to it.
   dropTarget(event) {
     const element = document.elementFromPoint(event.clientX, event.clientY);
+    if (element?.closest('[data-shape]')) return undefined; // a shape's row holds nothing
     const row = element?.closest('[data-object]');
     if (row && this.list.contains(row)) {
       const index = Number(row.dataset.object);
@@ -336,13 +395,17 @@ export class Outliner {
 
   // Replaces a row's name with a text field; Enter or a click away keeps the
   // new name, Esc drops it.
+  // A row's name made a field to type a new one in: an object's, a group's
+  // or a collision shape's. Latin letters only (see names.js).
   rename(row) {
-    const index = Number(row.dataset.object);
+    const shape = row.dataset.shape?.split(':').map(Number) ?? null;
+    const index = shape ? shape[0] : Number(row.dataset.object);
     const label = row.querySelector('.outliner-name');
     const input = document.createElement('input');
     input.type = 'text';
     input.spellcheck = false;
     input.value = label.textContent;
+    latinOnly(input);
     label.replaceWith(input);
     this.renaming = true;
     input.focus();
@@ -353,7 +416,8 @@ export class Outliner {
       if (!this.renaming) return;
       this.renaming = false;
       this.shown = ''; // force a rebuild
-      if (keep) this.editor.renameObject(index, input.value);
+      if (keep && shape) this.shapes?.renameShape(index, shape[1], input.value);
+      else if (keep) this.editor.renameObject(index, input.value);
       this.update();
     };
     input.addEventListener('keydown', (event) => {

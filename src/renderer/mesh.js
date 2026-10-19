@@ -5,6 +5,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { markerColor } from './marker-colors.js';
 import { theme } from './theme.js';
 import { cornerNormals } from './normals.js';
+import { freeName } from './names.js';
 
 const PLANE_EPSILON = 1e-6; // a vertex this close to a cutting plane lies on it
 const MAX_LOOP = 8; // the pencil fills loops of up to this many vertices
@@ -102,7 +103,7 @@ export class EditableMesh {
   }
 
   // Creates an empty object (or, with kind 'group', a group) and returns its
-  // id. A name that is taken gets a numbered suffix: "Cube", "Cube.001", ...
+  // id. A name that is taken gets a numbered suffix: "Cube", "Cube_0", "Cube_1", ...
   addObject(name, kind = 'mesh') {
     const id = this.nextObjectId++;
     this.objects.push({ id, name: this.freeName(name), parent: null, kind });
@@ -112,15 +113,9 @@ export class EditableMesh {
     return id;
   }
 
-  // `name`, or its first numbered variant that no other object has.
+  // `name`, or its first numbered variant that no other object has (see names.js).
   freeName(name, except = null) {
-    const taken = new Set(this.objects.filter((object) => object !== except).map((object) => object.name));
-    if (!taken.has(name)) return name;
-    const base = name.replace(/\.\d{3}$/, '');
-    for (let n = 1; ; n++) {
-      const candidate = `${base}.${String(n).padStart(3, '0')}`;
-      if (!taken.has(candidate)) return candidate;
-    }
+    return freeName(name, new Set(this.objects.filter((object) => object !== except).map((object) => object.name)));
   }
 
   // Makes every vertex of object `gone` part of object `kept`.

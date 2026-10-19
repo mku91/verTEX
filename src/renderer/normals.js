@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 // The normals the surface is lit by, at the corners of its faces - the same
-// for the view and for the files exported (glTF, FBX), so that a model looks
+// for the view and for the glTF files exported, so that a model looks
 // in a game as it does here.
 //
 // An object is flat-shaded, or smooth-shaded with an angle (`smooth`, in

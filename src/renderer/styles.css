@@ -1019,6 +1019,7 @@ body {
 
 .texture-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
 }
@@ -1038,8 +1039,15 @@ body {
   cursor: pointer;
 }
 
-.texture-buttons button:first-child {
+/* Painting in another program: the long caption has a line of its own,
+   the folder and the repacking side by side under it. */
+.texture-buttons button {
   flex: 1;
+  white-space: nowrap;
+}
+
+.texture-buttons button:first-child {
+  flex-basis: 100%;
 }
 
 .texture-buttons button:hover {
@@ -1329,6 +1337,27 @@ body {
 
 .outliner-row:hover {
   background: var(--hover);
+}
+
+/* A name field given a letter it does not take (see names.js): a short shake. */
+input.refused {
+  border-color: var(--axis-x) !important;
+  animation: refused 0.25s;
+}
+
+@keyframes refused {
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+/* A collision shape under its object (the collision mode only): smaller, dimmer. */
+.outliner-shape {
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+.outliner-shape.selected {
+  color: var(--text);
 }
 
 /* An object with something selected in it, and a wholly selected one. */
@@ -2063,6 +2092,67 @@ body {
 }
 
 /* Names the modal operation that is on; slides in from above when one starts. */
+/* The simulation's buttons (see simulation.js): at the top of the view,
+   sliding in with the collision mode; while it runs, the start is the stop,
+   and beside it a button to begin again. */
+#sim-controls {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -18px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+#sim-controls.shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+#sim-controls button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#sim-controls button:hover {
+  background: var(--hover);
+}
+
+#sim-controls i {
+  font-size: 12px;
+}
+
+#sim-controls.running #sim-start {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Begin again: square, and there only while it runs. */
+#sim-restart {
+  padding: 0 !important;
+  width: 30px;
+  justify-content: center;
+}
+
+#sim-controls:not(.running) #sim-restart {
+  display: none;
+}
+
 #operation-banner {
   position: absolute;
   top: 10px;
@@ -3056,23 +3146,164 @@ body {
   padding: 4px 6px;
 }
 
-/* The top bar's way into the sprite render, at its right end. */
-#render-button {
+/* The top bar's other modes, at its right end, after a divider: the
+   collisions (a switch, lit while on) and the sprite render (a screen of its
+   own). One group, as the selection modes are; an icon and a word each. */
+.top-separator {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 -4px;
+  background: var(--border);
+}
+
+#screen-modes button {
+  gap: 7px;
+  padding: 0 12px;
+}
+
+#screen-modes i {
+  width: auto;
+  font-size: 13px;
+}
+
+/* The collision mode's panel (see collisions.js): the body the selected
+   objects make, the shapes to add, the picked shape's list and numbers. */
+#collision-panel p {
+  flex: 1;
+  margin: 0;
+}
+
+#collision-panel .collision-hint {
+  color: var(--text-dim);
+}
+
+#collision-panel .collision-hint[hidden],
+#collision-panel .collision-body[hidden],
+#collision-panel [hidden] {
+  display: none;
+}
+
+#collision-panel button {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 10px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--bg);
   color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
-#render-button:hover {
+#collision-panel button:hover:not(:disabled) {
   background: var(--hover);
+}
+
+#collision-panel button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#collision-panel button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#collision-panel .body-types,
+#collision-panel .collider-add {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+#collision-panel .collider-add {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+#collision-panel .collider-add button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#collision-panel .collider-auto {
+  width: 100%;
+  margin: 8px 0 4px;
+}
+
+#collision-panel .collider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+#collision-panel .collider-row {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: none;
+}
+
+#collision-panel .collider-row.active {
+  border-color: var(--accent);
+}
+
+#collision-panel .collider-empty {
+  color: var(--text-dim);
+}
+
+#collision-panel .collider-tools {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+#collision-panel .collider-refit {
+  flex: 1;
+}
+
+#collision-panel .collider-delete {
+  width: 30px;
+}
+
+#collision-panel .collider-fields > div {
+  margin-top: 8px;
+}
+
+#collision-panel .collider-fields p {
+  color: var(--text-dim);
+}
+
+#collision-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#collision-panel .field-name {
+  flex: 0 0 56px;
+}
+
+#collision-panel input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+#collision-panel input:focus {
+  border-color: var(--accent);
+  outline: 0;
 }
 
 /* The sprite render: a screen over the whole window - the sheet on the
@@ -3404,6 +3635,7 @@ body {
 }
 
 #render-mode [data-render="save"] {
+  flex: 1; /* the whole width of the panel */
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-text);

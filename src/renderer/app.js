@@ -9,7 +9,6 @@ import { scrubbable } from './scrub.js';
 import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles, modelOf, scaledModel } from './project.js';
-import { fbxOf } from './fbx.js';
 import { gltfOf } from './gltf.js';
 import { ColorPopup } from './color-popup.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
@@ -20,6 +19,8 @@ import { Warnings } from './warnings.js';
 import { Welcome } from './welcome.js';
 import { RenderMode } from './render-mode.js';
 import { ModeIndicator } from './mode-indicator.js';
+import { CollisionMode } from './collisions.js';
+import { Simulation } from './simulation.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -32,11 +33,15 @@ const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
-new Outliner(document.getElementById('outliner-section'), editor);
+const outliner = new Outliner(document.getElementById('outliner-section'), editor);
+const collisionMode = new CollisionMode(document.getElementById('collision-panel'), document.getElementById('collision-button'), viewport, editor);
+outliner.shapes = collisionMode;
+collisionMode.onRefresh = () => outliner.update();
+const simulation = new Simulation(document.getElementById('sim-controls'), viewport, editor, collisionMode);
 
 
 const ACTIONS = {
-  delete: () => editor.deleteSelection(),
+  delete: () => deleteSelection(),
   'make-face': () => editor.makeFace(),
   'flip-faces': () => editor.flipFaces(),
   frame: () => {
@@ -58,13 +63,13 @@ const ACTIONS = {
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
   'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
+  'toggle-collisions': () => editor.setCollisions(!editor.collisions),
   // The File menu: the project and its file.
   'project-new': () => project.newProject(),
   'project-open': () => project.open(),
   'project-save': () => project.save(),
   'project-save-as': () => project.saveAs(),
   'project-close': () => project.close(), // the window wants to close
-  'export-fbx': () => exportModel('fbx'),
   'export-gltf': () => exportModel('gltf'),
   'render-sprites': () => renderMode.show(),
   new: () => project.newProject(), // the menu of a program not yet restarted
@@ -99,11 +104,12 @@ const hotkeys = new Hotkeys(
     { id: 'op.extrude', group: 'Режимы', label: 'Экструд', keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
     { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
     { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
+    { id: 'op.collisions', group: 'Режимы', label: 'Коллизии', keys: '', run: () => ACTIONS['toggle-collisions']() },
 
     { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
     { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
     { id: 'edit.flip-faces', group: 'Правка', label: 'Инвертировать грань', keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
-    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : editor.deleteSelection() },
+    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : deleteSelection() },
     // Copying and pasting leave the keys to the system where they have nothing to do.
     { id: 'edit.copy', group: 'Правка', label: 'Копировать', keys: 'Ctrl+KeyC', run: () => pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
     { id: 'edit.cut', group: 'Правка', label: 'Вырезать пиксели', keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
@@ -140,6 +146,8 @@ const hotkeys = new Hotkeys(
 // The marquee in hand (see Editor.setMarquee()): Delete, copy, cut and
 // paste are the atlas' pixels', not the model's.
 const pixelsInHand = () => editor.tool === 'marquee';
+// In the collision mode Delete takes the picked shape away; the model is not changed there.
+const deleteSelection = () => (editor.collisions ? collisionMode.deleteKey() : editor.deleteSelection());
 
 const FIXED_KEYS = {
   // The polygon tool's own keys; they do nothing outside it. (And the
@@ -150,11 +158,13 @@ const FIXED_KEYS = {
   PageUp: () => editor.shiftPolygonPlane(1),
   PageDown: () => editor.shiftPolygonPlane(-1),
   Escape: () =>
+    (simulation.running ? (simulation.stop(), true) : false) ||
     editor.cancelFloating() ||
     (editor.marquee ? (editor.setMarquee(null), true) : false) ||
     orthoViews.cancelBox() ||
     editor.cancelBox() ||
     editor.escapeOperation() ||
+    (editor.collisions ? (editor.setCollisions(false), true) : false) ||
     editor.cancelDrag() ||
     editor.clearSelection(),
   'Ctrl+Shift+KeyZ': () => editor.redo(),
@@ -590,7 +600,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -1072,11 +1082,10 @@ function askExport(title) {
   });
 }
 
-// File -> Export. FBX: the model as an .fbx file, and the atlas' picture as a
-// .png of the same name beside it (see fbx.js). glTF: one file with the
-// picture in it, a .glb or - if the user picks that - a .gltf (see gltf.js).
+// File -> Export to glTF: one file with the atlas' picture in it, a .glb
+// or - if the user picks that - a .gltf (see gltf.js). (glTF only: it is
+// what Godot reads best.)
 const EXPORTS = {
-  fbx: { title: 'Экспорт в FBX', kinds: [{ name: 'Autodesk FBX', extension: 'fbx' }] },
   gltf: {
     title: 'Экспорт в glTF',
     kinds: [{ name: 'glTF, один двоичный файл', extension: 'glb' }, { name: 'glTF, текстовый', extension: 'gltf' }],
@@ -1109,14 +1118,8 @@ async function exportModel(format) {
       ? await atlas.png(options.extrude ? atlas.extruded(places, EXTRUDE_DEPTH) : atlas.canvas)
       : null;
     const sized = options.scale === 1 ? model : scaledModel(model, options.scale);
-    let result;
-    if (format === 'fbx') {
-      const texture = `${target.name}.png`;
-      result = await api.write(target.path, fbxOf(sized, { name: target.name, texture }), picture ? { [texture]: picture } : {});
-    } else {
-      const triangles = (face) => editor.mesh.triangulate(face);
-      result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
-    }
+    const triangles = (face) => editor.mesh.triangulate(face);
+    const result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
     if (result.error) await window.vertex.project.alert('Не удалось экспортировать модель', result.error);
   } finally {
     exporting = false;
@@ -1388,6 +1391,8 @@ function refresh() {
   if (document.activeElement !== $('smooth-angle')) {
     $('smooth-angle').value = smoothed.length === 0 ? SMOOTH_ANGLE : angles.size === 1 ? [...angles][0] : '';
   }
+  // The collision mode has its own panel (see collisions.js): the object's are put away.
+  if (editor.collisions) for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) $(id).hidden = true;
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;

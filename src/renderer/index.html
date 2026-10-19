@@ -109,6 +109,9 @@
         <button id="collision-button" title="Коллизии: фигуры столкновений объектов для Godot — добавить вручную или подобрать автоматически, затем поправить">
           <i class="fa-solid fa-shapes"></i><span>Коллизии</span>
         </button>
+        <button id="animation-button" data-action="toggle-animation" title="Анимация: движение объектов и групп по ключевым кадрам — для экспорта в Godot">
+          <i class="fa-solid fa-film"></i><span>Анимация</span>
+        </button>
         <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
           <i class="fa-solid fa-camera"></i><span>Рендер</span>
         </button>
@@ -247,6 +250,38 @@
     </main>
     <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
     <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
+    <section id="timeline" hidden>
+      <div class="uv-bar tl-bar">
+        <b>АНИМАЦИЯ</b>
+        <select class="clip-select" title="Клип, с которым работаете"></select>
+        <button data-tl="add" title="Новый клип"><i class="fa-solid fa-plus"></i></button>
+        <button data-tl="duplicate" title="Дублировать клип"><i class="fa-regular fa-clone"></i></button>
+        <button data-tl="delete" title="Удалить клип (можно отменить)"><i class="fa-solid fa-trash-can"></i></button>
+        <i class="uv-divider"></i>
+        <label class="tl-field" title="Имя клипа — латиницей: так он будет называться в Godot">Имя<input type="text" name="clip-name" spellcheck="false"></label>
+        <label class="tl-field tl-number" title="Кадров в секунду">FPS<input type="text" name="clip-fps" inputmode="numeric" spellcheck="false"></label>
+        <label class="tl-field tl-number" title="Длина клипа в кадрах">Длина<input type="text" name="clip-length" inputmode="numeric" spellcheck="false"></label>
+        <button class="tl-loop" title="Цикл: клип проигрывается по кругу. В Godot он получит зацикливание"><i class="fa-solid fa-repeat"></i></button>
+        <i class="uv-divider"></i>
+        <button data-tl="first" title="В начало"><i class="fa-solid fa-backward-step"></i></button>
+        <button data-tl="prev" title="Кадр назад"><i class="fa-solid fa-caret-left"></i></button>
+        <button data-tl="play" title="Воспроизвести (Enter)"><i class="fa-solid fa-play"></i></button>
+        <button data-tl="next" title="Кадр вперёд"><i class="fa-solid fa-caret-right"></i></button>
+        <button data-tl="last" title="В конец"><i class="fa-solid fa-forward-step"></i></button>
+        <span class="tl-frame"></span>
+        <button data-tl="autokey" class="worded tl-autokey" title="Автоключ: всякое движение объекта сразу ставит ключ на текущем кадре. Выключен — движение временное, ключ ставит K"><i class="fa-solid fa-circle"></i><span>Автоключ</span></button>
+      </div>
+      <p class="tl-empty" hidden>Клипов пока нет — создайте первый кнопкой «+» вверху</p>
+      <div class="tl-body">
+        <div class="tl-corner"></div>
+        <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — масштаб · средняя кнопка — сдвиг"></canvas>
+        <div class="tl-scroll">
+          <div class="tl-names"></div>
+          <div class="tl-lanes-box"><canvas class="tl-lanes"></canvas></div>
+        </div>
+        <div class="tl-resize" title="Потяните, чтобы изменить ширину колонки имён; двойной щелчок — вернуть исходную"></div>
+      </div>
+    </section>
     <section id="uv-editor" hidden>
       <div class="uv-bar">
         <b>UV</b>

@@ -13,6 +13,10 @@ import { cloneCollider } from './collision-fit.js';
 import { latinName } from './names.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
+// What the editor works on, see Editor.setWorkspace(); and the tools there.
+export const WORKSPACES = ['model', 'collisions', 'animation'];
+const WORKSPACE_TOOLS = ['select', 'move', 'rotate', 'scale'];
+
 export const TOOLS = {
   select: null,
   move: 'translate',
@@ -168,9 +172,13 @@ export class Editor extends EventTarget {
     this.ppu = 16;
     this.uvLook = false; // the UV editor is open, see setUVLook()
     this.preview = false; // the model alone is shown, see setPreview()
-    // The collision mode (see collisions.js, setCollisions()): on, and what it
-    // has to say about a press in the main view - see collisionPress below.
-    this.collisions = false;
+    // What the editor works on (see setWorkspace()): the model itself, or
+    // something over it - its collision shapes ('collisions', collisions.js),
+    // its animations ('animation') - with the model not to be edited.
+    this.workspace = 'model';
+    // The animations (see animation.js): part of the document, as the model is.
+    this.animations = [];
+    // What the collision mode has to say about a press in the main view - see collisionPress below.
     this.collisionPress = null; // (event) -> 'gizmo' | true (taken) | false (the editor's)
     this.collisionDragging = false; // a collision shape's gizmo is being dragged
     this.simulating = false; // the simulation runs (see simulation.js): the model is its, not to be edited
@@ -629,7 +637,7 @@ export class Editor extends EventTarget {
     const entry = this.pivotEntry();
     // The pivot tool needs an object to have a pivot; the others, something to move.
     const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0;
-    if (!mode || nothing || this.operation || this.preview || this.collisions) {
+    if (!mode || nothing || this.operation || this.preview || this.workspace !== 'model') {
       this.gizmo.detach();
     } else {
       // What belongs to a turned object is scaled along that object's own
@@ -855,7 +863,8 @@ export class Editor extends EventTarget {
   }
 
   updatePivotMarker() {
-    const entry = this.operation || this.preview || this.painting ? null : this.pivotEntry();
+    // (In the animation mode the entries are shown posed: their rest pivots are not marked.)
+    const entry = this.operation || this.preview || this.painting || this.workspace === 'animation' ? null : this.pivotEntry();
     const children = entry === null ? [] : this.pivotChildren(entry);
     while (this.pivotRings.length < children.length) {
       const ring = new THREE.Sprite(this.pivotMarker.material);
@@ -1312,18 +1321,54 @@ export class Editor extends EventTarget {
   // The collision mode: the shapes shown and edited, in object mode, with the
   // model itself not to be changed (see collisions.js).
   setCollisions(on) {
-    if (on === this.collisions || this.busy()) return;
-    if (on) {
-      this.setOperation(null);
-      if (this.painting) this.setTool(this.toolBeforePaint);
-      if (this.tool === 'pivot') this.setTool('select');
-      this.setMode('object');
-      if (this.mode !== 'object') return;
+    if (on !== this.collisions) this.setWorkspace(on ? 'collisions' : 'model');
+  }
+
+  get collisions() {
+    return this.workspace === 'collisions';
+  }
+
+  // The collision mode, the animation mode, or the model itself (see the
+  // constructor). A mode over the model works on whole objects, with the
+  // tools that move, turn and scale them; no operation, no painting, no
+  // other selection mode goes on in it, and the model is not edited.
+  setWorkspace(name) {
+    if (!WORKSPACES.includes(name) || name === this.workspace || this.busy()) return;
+    if (name !== 'model') {
+      if (this.workspace === 'model') {
+        this.setOperation(null);
+        if (this.painting) this.setTool(this.toolBeforePaint);
+        if (this.tool === 'pivot') this.setTool('select');
+        this.setMode('object');
+        if (this.mode !== 'object') return;
+      }
     }
     this.cancelDrag();
-    this.collisions = on;
+    this.workspace = name;
     this.refreshHighlight();
     this.placeGizmo();
+    this.emitChange();
+  }
+
+  // Objects that have no pivot point of their own (theirs is the middle of
+  // their bounds, and moves as they are edited) get the one they have now,
+  // to keep: what turns about it - an animation - must not have it wander.
+  // Not an undo step by itself: a part of the edit that needs it.
+  pinPivots(indices) {
+    for (const index of indices) {
+      const object = this.mesh.objects[index];
+      if (object && !object.pivot) object.pivot = this.pivotPoint(index).toArray();
+    }
+  }
+
+  // The animations from now on (see animation.js). One undo step; with
+  // `record` off only shown, for a drag that is made one by its own end.
+  setAnimations(animations, record = true) {
+    if (record) {
+      if (this.busy()) return;
+      this.history.push(this.snapshot());
+    }
+    this.animations = animations;
     this.emitChange();
   }
 
@@ -2252,7 +2297,7 @@ export class Editor extends EventTarget {
   // are what the pointer picks, and LMB drives the operation instead of dragging.
   setOperation(name) {
     if (name === this.operation) return;
-    if (name && this.collisions) this.setCollisions(false);
+    if (name && this.workspace !== 'model') this.setWorkspace('model');
     // The place tool needs one object or group picked whole.
     if (name === 'place' && this.pivotEntry() === null) return;
     // An operation puts the painting tool down: the tool that was in hand
@@ -3153,7 +3198,7 @@ export class Editor extends EventTarget {
 
   dragTo(clientX, clientY) {
     const drag = this.drag;
-    if (this.collisions) return; // only shapes are moved there: a press is a click
+    if (this.workspace !== 'model') return; // the model is not edited there: a press is a click
     if (!drag.start) {
       if (Math.hypot(clientX - drag.x, clientY - drag.y) <= CLICK_TOLERANCE) return;
       this.beginDrag();
@@ -3681,8 +3726,9 @@ export class Editor extends EventTarget {
     this.mesh.faces.forEach((face, index) => {
       if (this.mesh.faceNormal(index).lengthSq() > 0.5) return;
       for (const i of face) {
-        if (hiddenVertices.has(i) || this.isOccluded(this.mesh.vertices[i])) continue;
-        const p = screen.project(this.mesh.vertices[i]);
+        // (Where it is shown: in a pose, see pose.js.)
+        if (hiddenVertices.has(i) || this.isOccluded(this.view.shown[i])) continue;
+        const p = screen.project(this.view.shown[i]);
         const distance = p ? Math.hypot(p.x - screen.x, p.y - screen.y) : Infinity;
         if (distance < bestDistance) {
           best = index;
@@ -3729,8 +3775,8 @@ export class Editor extends EventTarget {
 
   setTool(tool) {
     if (!(tool in TOOLS)) return;
-    // The collision mode's gizmo moves, turns and scales by the tools; any other tool leaves it.
-    if (this.collisions && !['select', 'move', 'rotate', 'scale'].includes(tool)) this.setCollisions(false);
+    // A mode over the model (see setWorkspace()) has the tools that move, turn and scale; any other leaves it.
+    if (this.workspace !== 'model' && !WORKSPACE_TOOLS.includes(tool)) this.setWorkspace('model');
     // The marquee's rectangle is its own: another tool puts down what floats, and forgets it.
     if (tool !== 'marquee' && this.tool === 'marquee') {
       this.commitFloating();
@@ -3763,7 +3809,7 @@ export class Editor extends EventTarget {
 
   setMode(mode) {
     if (!MODES.includes(mode) || mode === this.mode) return;
-    if (this.collisions) return; // shapes belong to objects: object mode only
+    if (this.workspace !== 'model') return; // whole objects only there, see setWorkspace()
     this.cancelDrag();
     // A mode the current operation can't work in leaves the operation for it.
     if (this.operation && !OPERATION_MODES[this.operation].includes(mode)) {
@@ -4322,6 +4368,7 @@ export class Editor extends EventTarget {
     const highest = mesh.objects.reduce((most, object) => Math.max(most, object.id), 0);
     mesh.nextObjectId = Math.max(model.nextObjectId ?? 0, highest + 1);
     mesh.folds = new Map((model.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
+    this.animations = structuredClone(model.animations ?? []);
     // Its texturing: the density, and an atlas of its size - empty until the
     // picture is loaded into it (a project without one gets the template).
     this.ppu = model.ppu ?? 16;
@@ -4470,6 +4517,7 @@ export class Editor extends EventTarget {
       mirror: [...this.mirror.globalAxes],
       ppu: this.ppu,
       atlas: this.atlas.pixels(), // the picture is part of the document
+      animations: structuredClone(this.animations), // and so are the animations
     };
   }
 
@@ -4486,6 +4534,7 @@ export class Editor extends EventTarget {
     this.ppu = state.ppu ?? this.ppu;
     if (state.atlas) this.atlas.setPixels(state.atlas);
     this.mesh.folds = new Map((state.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
+    this.animations = structuredClone(state.animations ?? []);
     this.selection = new Set(state.selection);
     this.target = new Set(state.target);
     this.rebuildView();

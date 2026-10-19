@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ModelPose } from './pose.js';
 
 // The simulation: in the collision mode (see collisions.js), the objects
 // come alive as the bodies their shapes make - the dynamic ones fall, roll
@@ -48,6 +49,7 @@ export class Simulation {
     this.starting = false;
     this.world = null;
     this.held = null; // what the pointer drags: { body, local, plane, target, kinematic }
+    this.pose = new ModelPose(editor); // the model where the bodies are
 
     // The dragged body's line to the pointer.
     this.line = new THREE.Line(
@@ -98,6 +100,7 @@ export class Simulation {
     this.before = editor.snapshot();
     editor.clearSelection();
     this.buildWorld();
+    this.pose.begin();
     this.running = true;
     editor.simulating = true;
     this.collisions.refresh(); // its shapes and gizmo are put away while it runs
@@ -115,8 +118,9 @@ export class Simulation {
     this.world.free();
     this.world = null;
     this.bodies = [];
+    this.pose.end();
     this.editor.simulating = false;
-    this.editor.restore(this.before); // all back where it was; the history is as it was
+    this.editor.restore(this.before); // the selection as it was too; the history is as it was
     this.before = null;
     this.show();
   }
@@ -144,7 +148,7 @@ export class Simulation {
       desc.setTranslation(frame.origin.x, frame.origin.y, frame.origin.z);
       desc.setRotation({ x: frame.quaternion.x, y: frame.quaternion.y, z: frame.quaternion.z, w: frame.quaternion.w });
       const body = this.world.createRigidBody(desc);
-      // Its vertices, in its frame: they go wherever it goes.
+      // Its vertices, in its frame (for a trimesh shape).
       const vertices = [];
       const local = [];
       mesh.vertices.forEach((vertex, i) => {
@@ -158,7 +162,7 @@ export class Simulation {
         if (kind === 'trigger') collider.setSensor(true);
         this.world.createCollider(collider, body);
       }
-      this.bodies.push({ body, vertices, local, kinematic: kind === 'kinematic' });
+      this.bodies.push({ body, id: object.id });
     });
   }
 
@@ -209,17 +213,14 @@ export class Simulation {
 
   // The model where the bodies are now.
   draw() {
-    const { mesh } = this.editor;
-    const position = new THREE.Vector3();
-    const quaternion = new THREE.Quaternion();
-    for (const { body, vertices, local } of this.bodies) {
+    const matrices = new Map();
+    const one = new THREE.Vector3(1, 1, 1);
+    for (const { body, id } of this.bodies) {
       const t = body.translation();
       const r = body.rotation();
-      position.set(t.x, t.y, t.z);
-      quaternion.set(r.x, r.y, r.z, r.w);
-      vertices.forEach((vertex, k) => mesh.vertices[vertex].copy(local[k]).applyQuaternion(quaternion).add(position));
+      matrices.set(id, new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y, t.z), new THREE.Quaternion(r.x, r.y, r.z, r.w), one));
     }
-    this.editor.view.updatePositions();
+    this.pose.apply(matrices);
     if (this.held) {
       const ends = [this.anchor(), this.held.target];
       this.line.geometry.setFromPoints(ends);

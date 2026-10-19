@@ -21,6 +21,7 @@ import { RenderMode } from './render-mode.js';
 import { ModeIndicator } from './mode-indicator.js';
 import { CollisionMode } from './collisions.js';
 import { Simulation } from './simulation.js';
+import { Timeline } from './timeline.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -30,6 +31,7 @@ new AxisGizmo(document.getElementById('axis-gizmo'), viewport, editor);
 new ModeIndicator(document.getElementById('mode-indicator'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
+const timeline = new Timeline(document.getElementById('timeline'), editor);
 new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
@@ -48,8 +50,10 @@ const ACTIONS = {
     editor.frame();
     orthoViews.frame();
   },
-  'toggle-views': () => setBottomPanel(orthoViews.open ? null : 'views'),
-  'toggle-uv': () => setBottomPanel(uvEditor.open ? null : 'uv'),
+  // (In the animation mode the timeline is what is there when they are closed.)
+  'toggle-views': () => setBottomPanel(orthoViews.open ? restingPanel() : 'views'),
+  'toggle-uv': () => setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
+  'toggle-animation': () => editor.setWorkspace(editor.workspace === 'animation' ? 'model' : 'animation'),
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
@@ -105,6 +109,7 @@ const hotkeys = new Hotkeys(
     { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
     { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
     { id: 'op.collisions', group: 'Режимы', label: 'Коллизии', keys: '', run: () => ACTIONS['toggle-collisions']() },
+    { id: 'op.animation', group: 'Режимы', label: 'Анимация', keys: '', run: () => ACTIONS['toggle-animation']() },
 
     { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
     { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
@@ -152,8 +157,9 @@ const deleteSelection = () => (editor.collisions ? collisionMode.deleteKey() : e
 const FIXED_KEYS = {
   // The polygon tool's own keys; they do nothing outside it. (And the
   // marquee's: what floats is put down.)
-  Enter: () => editor.commitFloating() || editor.closePolygon(),
-  NumpadEnter: () => editor.commitFloating() || editor.closePolygon(),
+  // And in the animation mode, play and pause.
+  Enter: () => (editor.workspace === 'animation' ? timeline.play() : editor.commitFloating() || editor.closePolygon()),
+  NumpadEnter: () => (editor.workspace === 'animation' ? timeline.play() : editor.commitFloating() || editor.closePolygon()),
   Backspace: () => editor.undoPolygonPoint(),
   PageUp: () => editor.shiftPolygonPlane(1),
   PageDown: () => editor.shiftPolygonPlane(-1),
@@ -164,7 +170,7 @@ const FIXED_KEYS = {
     orthoViews.cancelBox() ||
     editor.cancelBox() ||
     editor.escapeOperation() ||
-    (editor.collisions ? (editor.setCollisions(false), true) : false) ||
+    (editor.workspace !== 'model' ? (editor.setWorkspace('model'), true) : false) ||
     editor.cancelDrag() ||
     editor.clearSelection(),
   'Ctrl+Shift+KeyZ': () => editor.redo(),
@@ -600,7 +606,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -1172,7 +1178,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor };
+window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline };
 
 // The three-view panel; whether it is open is remembered between launches.
 // The bottom of the workspace holds one panel at a time: the three views
@@ -1183,12 +1189,34 @@ const BOTTOM_PANEL_KEY = 'vertex.bottomPanel';
 function setBottomPanel(panel) {
   orthoViews.toggle(panel === 'views');
   uvEditor.toggle(panel === 'uv');
+  timeline.toggle(panel === 'animation');
   editor.setUVLook(panel === 'uv');
   $('views-splitter').hidden = !panel;
   document.querySelector('[data-action="toggle-views"]').classList.toggle('active', panel === 'views');
   document.querySelector('[data-action="toggle-uv"]').classList.toggle('active', panel === 'uv');
+  // The timeline comes and goes with its mode: it is not what the next start opens.
+  if (panel === 'animation') return;
   localStorage.setItem(VIEWS_OPEN_KEY, panel === 'views' ? '1' : '0');
   localStorage.setItem(BOTTOM_PANEL_KEY, panel ?? '');
+}
+// The bottom panel when the views or the UV editor are closed: none, or in
+// the animation mode its timeline.
+const restingPanel = () => (editor.workspace === 'animation' ? 'animation' : null);
+// The animation mode opens its timeline, and gives back the panel that was
+// there when it is left.
+{
+  let workspace = editor.workspace;
+  let before = null;
+  editor.addEventListener('change', () => {
+    if (editor.workspace === workspace) return;
+    if (editor.workspace === 'animation') {
+      before = orthoViews.open ? 'views' : uvEditor.open ? 'uv' : null;
+      setBottomPanel('animation');
+    } else if (workspace === 'animation') {
+      setBottomPanel(before);
+    }
+    workspace = editor.workspace;
+  });
 }
 {
   const saved = localStorage.getItem(BOTTOM_PANEL_KEY);
@@ -1208,6 +1236,7 @@ function setViewsSize(share) {
   share = Math.min(Math.max(share, min), max);
   $('ortho-views').style.flexBasis = `${share * 100}%`;
   $('uv-editor').style.flexBasis = `${share * 100}%`;
+  $('timeline').style.flexBasis = `${share * 100}%`;
   localStorage.setItem(VIEWS_SIZE_KEY, share);
 }
 {
@@ -1393,8 +1422,8 @@ function refresh() {
   if (document.activeElement !== $('smooth-angle')) {
     $('smooth-angle').value = smoothed.length === 0 ? SMOOTH_ANGLE : angles.size === 1 ? [...angles][0] : '';
   }
-  // The collision mode has its own panel (see collisions.js): the object's are put away.
-  if (editor.collisions) for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) $(id).hidden = true;
+  // A mode over the model (collisions, animation) has its own panels: the object's are put away.
+  if (editor.workspace !== 'model') for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) $(id).hidden = true;
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;
@@ -1440,6 +1469,7 @@ function refresh() {
   $('place-toggle').disabled = editor.operation !== 'place' && editor.pivotEntry() === null;
   for (const button of cutButtons) button.classList.toggle('active', button.dataset.cut === editor.cutDirection);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
+  $('animation-button').classList.toggle('active', editor.workspace === 'animation');
   for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }

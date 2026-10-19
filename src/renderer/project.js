@@ -28,6 +28,8 @@
 import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
 import { cloneCollider } from './collision-fit.js';
+import { localTransforms, worldFrames } from './pose.js';
+import { soundAnimation } from './animation.js';
 
 const FORMAT = 'vertex-project';
 const VERSION = 3;
@@ -57,12 +59,11 @@ function soundCollider(collider) {
 // The scene as plain data.
 export function modelOf(editor) {
   const { mesh } = editor;
-  // Every entry's frame in the world: where its pivot point is, how it is turned.
-  const frames = new Map(mesh.objects.map((object, index) => [
-    object.id,
-    { origin: editor.pivotPoint(index), quaternion: quaternionOf(object.rotation), turned: Boolean(object.rotation) },
-  ]));
+  // Every entry's frame in the world, and its place in its parent (see pose.js).
+  const frames = worldFrames(editor);
+  const locals = localTransforms(editor);
   const triple = (vector) => [round(vector.x), round(vector.y), round(vector.z)];
+  const ids = new Set(mesh.objects.map((object) => object.id));
   return {
     // In the frame of the object each belongs to.
     vertices: mesh.vertices.map((vertex, i) => triple(toLocal(vertex, frames.get(mesh.vertexObject[i])))),
@@ -75,18 +76,16 @@ export function modelOf(editor) {
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body }) => {
-      const frame = frames.get(id);
-      const outer = parent === null || parent === undefined ? null : frames.get(parent) ?? null;
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror, color, atlas, oneSided, smooth, colliders, body }) => {
       // Inside a group that is not turned the angles are the entry's own, as they were set.
-      const turn = outer?.turned ? rotationOf(outer.quaternion.clone().invert().multiply(frame.quaternion)) : rotation ?? null;
+      const { position, rotation: turn } = locals.get(id);
       return {
         id,
         name,
         kind: kind ?? 'mesh',
         parent: parent ?? null,
         ...(hidden ? { hidden: true } : {}),
-        position: triple(outer ? toLocal(frame.origin, outer) : frame.origin),
+        position: position.map(round),
         ...(turn ? { rotation: turn.map(round) } : {}),
         // No pivot point of its own: the position is the middle of its bounds, and follows them.
         ...(pivot ? {} : { autoOrigin: true }),
@@ -107,6 +106,14 @@ export function modelOf(editor) {
     atlas: { width: editor.atlas.width, height: editor.atlas.height },
     // Vertices scaled flat and the sides they came from, see Editor.scaleFlat().
     folds: [...mesh.folds].map(([i, fold]) => [i, { ...fold }]),
+    // The animations (see animation.js); the tracks of objects no longer there are left out.
+    animations: editor.animations.map((clip) => ({
+      ...clip,
+      tracks: clip.tracks.filter((track) => ids.has(track.object)).map((track) => ({
+        ...track,
+        keys: track.keys.map((key) => ({ ...key, value: key.value.map(round) })),
+      })),
+    })),
   };
 }
 
@@ -137,6 +144,15 @@ export function scaledModel(model, times) {
       // The collision shapes too (see collision-fit.js): places and sizes alike.
       ...(object.colliders ? { colliders: object.colliders.map((collider) => scaledCollider(collider, times)) } : {}),
     })),
+    // And where the animations move things to; turns and scales stay as they are.
+    ...(model.animations ? {
+      animations: model.animations.map((clip) => ({
+        ...clip,
+        tracks: clip.tracks.map((track) => (track.property === 'position'
+          ? { ...track, keys: track.keys.map((key) => ({ ...key, value: scaled(key.value) })) }
+          : track)),
+      })),
+    } : {}),
   };
 }
 
@@ -268,6 +284,7 @@ export function readProject(files) {
   if (model.ppu !== undefined && !(Number.isInteger(model.ppu) && model.ppu >= 1 && model.ppu <= 256)) fail('плотность пикселей');
   const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;
   if (model.atlas !== undefined && !(model.atlas && size(model.atlas.width) && size(model.atlas.height))) fail('размер атласа');
+  if (model.animations !== undefined && !(Array.isArray(model.animations) && model.animations.every((clip) => soundAnimation(clip, ids)))) fail('анимации');
   const meshes = new Set(model.objects.filter((object) => object.kind !== 'group').map((object) => object.id));
   if (model.vertexObject.length !== count || !model.vertexObject.every((id) => meshes.has(id))) {
     fail('принадлежность вершин объектам');

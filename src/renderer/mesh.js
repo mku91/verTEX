@@ -1246,6 +1246,9 @@ export function inheritUV(loop, source, before = (vertex) => vertex) {
 export class MeshView {
   constructor(mesh) {
     this.mesh = mesh;
+    // Where the vertices are shown, if not where they are: a pose (see
+    // pose.js) - the model's own data is left as it is.
+    this.posed = null;
     this.group = new THREE.Group();
 
     this.solid = new THREE.Mesh(
@@ -1571,9 +1574,15 @@ export class MeshView {
     );
   }
 
+  // The vertices as they are shown: posed, or the model's. (A pose made for
+  // other vertices than there are now is not used.)
+  get shown() {
+    return this.posed?.length === this.mesh.vertices.length ? this.posed : this.mesh.vertices;
+  }
+
   // Call after vertices moved without topology changes.
   updatePositions() {
-    const { vertices } = this.mesh;
+    const vertices = this.shown;
     const write = (object, indices) => {
       const attribute = object.geometry.getAttribute('position');
       indices.forEach((vertexIndex, i) => {
@@ -1594,7 +1603,8 @@ export class MeshView {
   // The normals the surface is lit by, at its triangles' corners: flat, or
   // smooth for the objects that are (`smooth`, see normals.js).
   updateNormals() {
-    const { vertices, faces, objects, vertexObject } = this.mesh;
+    const { faces, objects, vertexObject } = this.mesh;
+    const vertices = this.shown;
     const smooth = new Map(objects.filter((object) => object.smooth).map((object) => [object.id, object.smooth]));
     const corners = cornerNormals(vertices, faces, (face) => smooth.get(vertexObject[faces[face][0]]) ?? null);
     const attribute = this.solid.geometry.getAttribute('normal');
@@ -1807,7 +1817,7 @@ export class MeshView {
   }
 
   applyHighlight() {
-    const { vertices } = this.mesh;
+    const vertices = this.shown;
 
     for (const name of ['selectedFaces', 'hoveredFaces']) {
       const points = [];

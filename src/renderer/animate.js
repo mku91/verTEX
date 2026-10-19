@@ -71,6 +71,13 @@ export class AnimationMode {
     window.addEventListener('keyup', (event) => { if (event.key === 'Shift') shift(false); });
     window.addEventListener('pointermove', (event) => shift(event.shiftKey));
     window.addEventListener('blur', () => shift(false));
+    // Alt held or let go while scaling: one side, or both (see oneSided()) -
+    // as the editor has it (Editor.altHeld), once it has heard of it.
+    for (const type of ['keydown', 'keyup']) {
+      window.addEventListener(type, (event) => {
+        if (event.key === 'Alt' && this.dragging?.side) queueMicrotask(() => this.drag());
+      });
+    }
     this.gizmo.addEventListener('objectChange', () => this.drag());
     this.gizmo.addEventListener('mouseUp', () => this.endDrag());
     editor.workspacePress.animation = () => (this.gizmo.object && this.gizmo.axis !== null ? 'gizmo' : false);
@@ -215,7 +222,48 @@ export class AnimationMode {
   beginDrag() {
     const entry = this.entry();
     const property = PROPERTY_OF_MODE[this.gizmo.mode];
-    if (entry) this.beginPose(entry.index, property, { ik: this.shiftDown && property === 'position' });
+    if (!entry) return;
+    this.beginPose(entry.index, property, { ik: this.shiftDown && property === 'position' });
+    if (property === 'scale') this.dragging.side = this.sideOf(entry.index);
+  }
+
+  // Scaling with Alt held (as in the editor, see Editor.scaleCenter()): the
+  // side pulled moves, the one opposite stays where it is. A pose scales
+  // about the entry's pivot point, so it is a scale and a move together -
+  // both posed (and keyed). What it takes, from the start of the drag: the
+  // handle's axes, which way along each it was taken (+1 / -1), and the
+  // bounds of what the entry holds, in the entry's own axes as it was then.
+  // null for the middle handle, or nothing in the entry.
+  sideOf(index) {
+    const axes = (this.gizmo.axis ?? '').toLowerCase();
+    if (!axes || axes.length === 3) return null;
+    const { vertices } = this.editor.contents([index]);
+    if (vertices.size === 0) return null;
+    const back = this.dragging.world.clone().invert();
+    const shown = this.editor.view.shown;
+    const box = new THREE.Box3();
+    for (const vertex of vertices) box.expandByPoint(shown[vertex].clone().applyMatrix4(back));
+    const turn = new THREE.Quaternion();
+    this.dragging.world.decompose(new THREE.Vector3(), turn, new THREE.Vector3());
+    const grabbed = this.gizmo.pointStart.clone().applyQuaternion(turn.invert()); // (in the entry's axes)
+    return { axes: [...axes], way: Object.fromEntries([...axes].map((axis) => [axis, grabbed[axis] >= 0 ? 1 : -1])), box };
+  }
+
+  // The world matrix `matrix` (the gizmo's, scaled) as a scale about the
+  // side opposite the one pulled (see sideOf()), not about the pivot point.
+  oneSided(matrix) {
+    const { world, side } = this.dragging;
+    const startScale = new THREE.Vector3();
+    const nowScale = new THREE.Vector3();
+    world.decompose(new THREE.Vector3(), new THREE.Quaternion(), startScale);
+    matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), nowScale);
+    const ratio = new THREE.Vector3(...['x', 'y', 'z'].map((axis) => (startScale[axis] ? nowScale[axis] / startScale[axis] : 1)));
+    const anchor = new THREE.Vector3();
+    for (const axis of side.axes) anchor[axis] = side.way[axis] > 0 ? side.box.min[axis] : side.box.max[axis];
+    return world.clone()
+      .multiply(new THREE.Matrix4().makeTranslation(anchor.x, anchor.y, anchor.z))
+      .multiply(new THREE.Matrix4().makeScale(ratio.x, ratio.y, ratio.z))
+      .multiply(new THREE.Matrix4().makeTranslation(-anchor.x, -anchor.y, -anchor.z));
   }
 
   // The stand-in moved: the entry posed where it is.
@@ -268,11 +316,16 @@ export class AnimationMode {
       this.show();
       return;
     }
-    const local = drag.parent.clone().multiply(matrix);
+    // (scaling with Alt: one side - the place posed too; without, back where it started)
+    const oneSided = drag.property === 'scale' && drag.side && this.editor.altHeld;
+    const local = drag.parent.clone().multiply(oneSided ? this.oneSided(matrix) : matrix);
     const position = new THREE.Vector3();
     const quaternion = new THREE.Quaternion();
     const scale = new THREE.Vector3();
     local.decompose(position, quaternion, scale);
+    if (drag.side) {
+      this.overrides.set(drag.id, { ...this.overrides.get(drag.id), position: oneSided ? position.toArray().map(round) : drag.start.position });
+    }
     let value = drag.property === 'position' ? position.toArray() : scale.toArray();
     if (drag.property === 'rotation') {
       if (drag.start.rotation.length === 4) {
@@ -310,9 +363,10 @@ export class AnimationMode {
       else this.show();
       return;
     }
-    const now = this.values.get(drag.id)?.[drag.property];
-    if (this.timeline.autokey && JSON.stringify(now) !== JSON.stringify(drag.start[drag.property])) {
-      this.writeKeys([drag.index], [drag.property]);
+    // (what was changed: the property - and, scaled on one side, the place too)
+    const changed = PROPERTIES.filter((property) => JSON.stringify(this.values.get(drag.id)?.[property]) !== JSON.stringify(drag.start[property]));
+    if (this.timeline.autokey && changed.length) {
+      this.writeKeys([drag.index], changed);
     } else {
       this.show();
     }
@@ -350,6 +404,8 @@ export class AnimationMode {
     }
     editor.history.push(before);
     editor.setAnimations(clips.map((other) => (other === clip ? changed : other)), false);
+    // (the keys set - new or put over ones that were there - pop in, see Timeline.popKeys())
+    timeline.popKeys(indices.flatMap((index) => properties.map((property) => keyId(editor.mesh.objects[index].id, property, frame))));
   }
 
   // The corner's "+" on the timeline: every property of every entry keyed on

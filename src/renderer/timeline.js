@@ -59,6 +59,12 @@ const INTERPOLATION_NAMES = { linear: 'Линейная', step: 'Шаг', smooth
 const KEY_COLORS = { position: 'keyPosition', rotation: 'keyRotation', scale: 'keyScale' }; // theme's, see theme.js
 const PREVIEW_COLOR = '#8be9fd'; // the frame looked at, while a key's curve is previewed
 const STILL_COLOR = '#ff5555'; // a key that repeats the one before it
+const COPIED_WAVE = 1200; // ms, a wave out of a copied key (see copyKeys())
+const COPIED_REACH = 1.4; // how far it goes, in the key's sizes
+// A key just set pops in: from twice its size down to its own, overshooting
+// a little (Back.Out), in so many ms (see popKeys()).
+const BORN_SCALE = 2;
+const BORN_TIME = 380;
 
 export class Timeline extends EventTarget {
   constructor(section, editor) {
@@ -77,6 +83,8 @@ export class Timeline extends EventTarget {
     this.selected = new Set(); // the keys picked, by their ids (see animation.js)
     this.box = null; // the box keys are being picked by: { x0, y0, x1, y1 } in the lanes
     this.copied = null; // keys copied, see copyKeys()
+    this.copiedFrom = null; // where they were copied from: { clip (its name), ids } - marked by a wave (see draw())
+    this.born = new Map(); // key id -> when it was set, while it pops in (see popKeys())
     // Only the groups: their rows alone, and only they keyed and posed (see
     // setGroupsOnly()). Kept between runs.
     let groupsOnly = false;
@@ -370,6 +378,15 @@ export class Timeline extends EventTarget {
     this.body.hidden = !clip;
     this.showBar();
     this.showNames();
+  }
+
+  // Keys just set (by their ids) - new, or put over ones that were there -
+  // pop in (see draw()): what keys sets them, and pasting. A key moved, or
+  // its value changed in its popup, does not.
+  popKeys(ids) {
+    const now = performance.now();
+    for (const id of ids) this.born.set(id, now);
+    this.draw();
   }
 
   // The entries in the scene tree's order, with their tracks' rows under them.
@@ -723,6 +740,8 @@ export class Timeline extends EventTarget {
     const clip = this.current();
     if (!clip || !this.selected.size) return false;
     this.copied = copyKeys(clip, this.selected);
+    this.copiedFrom = { clip: clip.name, ids: new Set(this.selected) };
+    this.draw();
     return true;
   }
 
@@ -733,6 +752,7 @@ export class Timeline extends EventTarget {
     const { clip: changed, ids } = pasteKeys(clip, this.copied, Math.round(this.frame));
     this.selected = ids;
     this.changeClip(changed);
+    this.popKeys(ids);
     return true;
   }
 
@@ -1461,6 +1481,11 @@ export class Timeline extends EventTarget {
         lanes.restore();
       };
       lanes.lineWidth = 1.5;
+      // The keys copied, in this clip - and how far their wave has got, 0 to 1.
+      const copied = this.copiedFrom?.clip === clip.name ? this.copiedFrom.ids : null;
+      const wave = (performance.now() % COPIED_WAVE) / COPIED_WAVE;
+      let waving = false;
+      let popping = false; // (a key popping in)
       this.rows.forEach((row, k) => {
         const y = k * ROW + ROW / 2;
         const entries = this.keysOfRow(row).sort((a, b) => a.frame - b.frame);
@@ -1481,7 +1506,12 @@ export class Timeline extends EventTarget {
           const picked = keys.some((key) => this.selected.has(key.id));
           lanes.globalAlpha = frame > length ? 0.45 : 1;
           const repeats = Boolean(row.property) && still.has(frame);
-          diamond(x, y, row.property ?? 'position');
+          // (just appeared: popping in - from twice its size down, overshooting a little)
+          const born = Math.max(0, ...keys.map((key) => this.born.get(key.id) ?? 0));
+          const age = born ? (performance.now() - born) / BORN_TIME : 1;
+          const pop = age < 1 ? BORN_SCALE + (1 - BORN_SCALE) * EASE_FAMILIES.back.Out(age) : 1;
+          if (age < 1) popping = true;
+          diamond(x, y, row.property ?? 'position', pop);
           if (row.property) {
             lanes.fillStyle = picked ? colors.text : theme[KEY_COLORS[row.property]]; // (picked: the accent's ring says so)
             lanes.fill();
@@ -1493,9 +1523,22 @@ export class Timeline extends EventTarget {
             }
             // (a key that repeats the one before it: a red heart of its own shape)
             if (repeats) {
-              diamond(x, y, row.property, 0.5);
+              diamond(x, y, row.property, 0.5 * pop);
               lanes.fillStyle = STILL_COLOR;
               lanes.fill();
+            }
+            // (a key copied: a wave runs out of it, one at a time, and fades -
+            // as long as it is where it was copied from)
+            if (copied && keys.some((key) => copied.has(key.id))) {
+              const out = 1 - (1 - wave) ** 2; // fast at first, then slower
+              diamond(x, y, row.property, 1 + out * COPIED_REACH);
+              lanes.save();
+              lanes.globalAlpha *= (1 - wave) * 0.9;
+              lanes.strokeStyle = theme[KEY_COLORS[row.property]];
+              lanes.lineWidth = 1.5;
+              lanes.stroke();
+              lanes.restore();
+              waving = true;
             }
           } else {
             lanes.strokeStyle = picked ? colors.accent : colors.dim;
@@ -1504,6 +1547,10 @@ export class Timeline extends EventTarget {
         }
       });
       lanes.globalAlpha = 1;
+      // (the copied keys' waves go on: drawn again on the next screen frame)
+      cancelAnimationFrame(this.waving);
+      if (waving || popping) this.waving = requestAnimationFrame(() => this.draw());
+      if (!popping) this.born.clear();
     }
     // The box keys are being picked by.
     if (this.box) {

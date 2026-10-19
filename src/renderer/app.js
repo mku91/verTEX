@@ -25,6 +25,7 @@ import { Timeline } from './timeline.js';
 import { AnimationMode } from './animate.js';
 import { ViewsWindow } from './views-window.js';
 import { tell, confirmIt, askSave } from './ask-dialog.js';
+import { toast } from './toast.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -1049,6 +1050,7 @@ const showProject = () => {
   document.title = $('welcome').hidden ? `${project.dirty ? '● ' : ''}${project.name} — verTEX` : 'verTEX';
 };
 project.addEventListener('change', showProject);
+project.addEventListener('saved', () => toast(`Проект «${project.name}» сохранён`));
 new MutationObserver(showProject).observe($('welcome'), { attributes: true, attributeFilter: ['hidden'] });
 showProject();
 

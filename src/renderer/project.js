@@ -313,8 +313,9 @@ export function readProject(files) {
 // The project the editor is working on: its file, whether it has unsaved
 // changes, and the commands of the File menu. `api` is the main process's
 // side (window.vertex.project), absent when the page runs without it.
-// Dispatches 'change' when the name or the unsaved mark changes, and 'open'
-// when the editor has got another project: a new one, or one from a file.
+// Dispatches 'change' when the name or the unsaved mark changes, 'open'
+// when the editor has got another project: a new one, or one from a file -
+// and 'saved' when it has been written.
 export class Project extends EventTarget {
   constructor(editor, api) {
     super();
@@ -395,6 +396,7 @@ export class Project extends EventTarget {
     this.path = result.path;
     this.savedState = this.editor.history.id;
     this.report();
+    this.dispatchEvent(new Event('saved'));
     return true;
   }
 

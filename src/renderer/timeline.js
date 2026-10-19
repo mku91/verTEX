@@ -26,7 +26,7 @@ import {
 // undo step (see Editor.setAnimations()). The frame looked at and the clip
 // worked on are the mode's, not the document's.
 //
-// The keys (see animation.js): diamonds in the colour of what they key, with
+// The keys (see animation.js): a shape of what they key, in its colour, with
 // a line to the next saying how they go on to it - straight, dashed (a
 // step), tildes (smooth); on an entry's own row, an outline for any of its
 // keys on a frame.
@@ -52,10 +52,12 @@ const REVEAL_MARGIN = 8; // px left over the entry's rows, or under them
 const WHEEL_PX = 0.6; // px the frames go by for a pixel of the wheel's travel (a notch: ~60 px)
 const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
-const GROUPS_ONLY_KEY = 'vertex.timelineGroupsOnly';
+const NODES_ONLY_KEY = 'vertex.timelineNodesOnly';
 const NAMES_WIDTH = 220; // px, at first
 const NAMES_MIN = 120;
 const PROPERTY_NAMES = { position: 'Позиция', rotation: 'Поворот', scale: 'Масштаб' };
+const TOOL_OF = { position: 'move', rotation: 'rotate', scale: 'scale' }; // the tool a track's name takes
+const TOOL_NAMES = { position: 'перемещение (W)', rotation: 'поворот (R)', scale: 'масштаб (S)' };
 const NEW_CLIP = { fps: 12, length: 24, loop: true };
 const INTERPOLATION_NAMES = { linear: 'Линейная', step: 'Шаг', smooth: 'Плавная' };
 const KEY_COLORS = { position: 'keyPosition', rotation: 'keyRotation', scale: 'keyScale' }; // theme's, see theme.js
@@ -87,12 +89,12 @@ export class Timeline extends EventTarget {
     this.copied = null; // keys copied, see copyKeys()
     this.copiedFrom = null; // where they were copied from: { clip (its name), ids } - marked by a wave (see draw())
     this.born = new Map(); // key id -> when it was set, while it pops in (see popKeys())
-    // Only the groups: their rows alone, and only they keyed and posed (see
-    // setGroupsOnly()). Kept between runs.
-    let groupsOnly = false;
-    try { groupsOnly = localStorage.getItem(GROUPS_ONLY_KEY) === '1'; } catch { /* off */ }
-    this.groupsOnly = groupsOnly;
-    editor.animationGroupsOnly = groupsOnly;
+    // Only the nodes: their rows alone, and only they keyed and posed (see
+    // setNodesOnly()). Kept between runs.
+    let nodesOnly = false;
+    try { nodesOnly = (localStorage.getItem(NODES_ONLY_KEY) ?? localStorage.getItem('vertex.timelineGroupsOnly')) === '1'; } catch { /* off */ } // (the key it had before nodes were called so)
+    this.nodesOnly = nodesOnly;
+    editor.animationNodesOnly = nodesOnly;
 
     const $ = (selector) => section.querySelector(selector);
     this.select = $('.clip-select');
@@ -120,16 +122,16 @@ export class Timeline extends EventTarget {
     onThemeChange(() => this.draw());
   }
 
-  // Only the groups, or everything: the timeline's rows, what is keyed (see
+  // Only the nodes, or everything: the timeline's rows, what is keyed (see
   // AnimationMode.writeKeys()) and what a press in the main view picks (see
   // Editor.pickOwner()). The objects' own keys stay in the clip, played.
-  setGroupsOnly(on) {
-    this.groupsOnly = on;
-    this.editor.animationGroupsOnly = on;
-    this.section.querySelector('.tl-groups-only').classList.toggle('active', on);
-    try { localStorage.setItem(GROUPS_ONLY_KEY, on ? '1' : '0'); } catch { /* not kept: fine */ }
+  setNodesOnly(on) {
+    this.nodesOnly = on;
+    this.editor.animationNodesOnly = on;
+    this.section.querySelector('.tl-nodes-only').classList.toggle('active', on);
+    try { localStorage.setItem(NODES_ONLY_KEY, on ? '1' : '0'); } catch { /* not kept: fine */ }
     this.showNames();
-    this.dispatchEvent(new Event('groupsonly'));
+    this.dispatchEvent(new Event('nodesonly'));
   }
 
   // The bar's last button, "Вернуть позу" (see AnimationMode.restorePose()):
@@ -259,7 +261,7 @@ export class Timeline extends EventTarget {
     const commands = {
       add: () => this.addClip(),
       keyall: () => this.dispatchEvent(new Event('keyall')), // (see AnimationMode.keyAll())
-      groupsonly: () => this.setGroupsOnly(!this.groupsOnly),
+      nodesonly: () => this.setNodesOnly(!this.nodesOnly),
       duplicate: () => this.current() && this.addClip(this.current()),
       delete: () => this.deleteClip(),
       first: () => this.setFrame(0),
@@ -281,7 +283,7 @@ export class Timeline extends EventTarget {
     for (const button of section.querySelectorAll('[data-tl]')) {
       button.addEventListener('click', () => commands[button.dataset.tl]());
     }
-    section.querySelector('.tl-groups-only').classList.toggle('active', this.groupsOnly);
+    section.querySelector('.tl-nodes-only').classList.toggle('active', this.nodesOnly);
     this.select.addEventListener('change', () => {
       this.play(false);
       this.selected.clear();
@@ -399,15 +401,15 @@ export class Timeline extends EventTarget {
     const clip = this.current();
     const animated = new Set(clip?.tracks.map((track) => track.object) ?? []);
     const signature = JSON.stringify([islands.map((island) => [island.id, island.name, island.kind, island.parentIndex, island.hidden]), [...hand], [...picked], [...this.folded], [...animated],
-      this.editor.mesh.objects.map((object) => object.rotationMode ?? null), this.groupsOnly]);
+      this.editor.mesh.objects.map((object) => object.rotationMode ?? null), this.nodesOnly]);
     if (signature !== this.shownNames) {
       this.shownNames = signature;
       const rows = [];
       const lines = [];
       const add = (index, depth) => {
         const island = islands[index];
-        // (only the groups: an object's row left out, what it holds in its place)
-        if (this.groupsOnly && island.kind !== 'group') {
+        // (only the nodes: an object's row left out, what it holds in its place)
+        if (this.nodesOnly && island.kind !== 'node') {
           for (const child of island.children) add(child, depth);
           return;
         }
@@ -418,7 +420,7 @@ export class Timeline extends EventTarget {
         line.classList.toggle('picked', picked.has(index) || hand.has(index));
         line.classList.toggle('hidden', island.hidden);
         line.classList.toggle('animated', animated.has(island.id));
-        line.innerHTML = `<span class="tl-fold"><i class="fa-solid fa-caret-${folded ? 'right' : 'down'}"></i></span><i class="fa-solid ${island.kind === 'group' ? 'fa-folder' : 'fa-cube'}"></i>`;
+        line.innerHTML = `<span class="tl-fold"><i class="fa-solid fa-caret-${folded ? 'right' : 'down'}"></i></span><i class="fa-solid ${island.kind === 'node' ? 'fa-circle-nodes' : 'fa-cube'}"></i>`;
         const name = document.createElement('span');
         name.textContent = island.name;
         line.append(name);
@@ -431,6 +433,8 @@ export class Timeline extends EventTarget {
           sub.className = 'tl-name tl-track';
           sub.style.paddingLeft = `${26 + depth * 12}px`;
           sub.textContent = PROPERTY_NAMES[property];
+          sub.dataset.track = `${index}:${property}`;
+          sub.title = `Выделить и взять ${TOOL_NAMES[property]}`;
           const plus = document.createElement('button');
           plus.className = `tl-add ${property}`;
           plus.textContent = '+';
@@ -636,6 +640,14 @@ export class Timeline extends EventTarget {
       if (plus) {
         const [index, property] = plus.dataset.add.split(':');
         this.dispatchEvent(new CustomEvent('addkey', { detail: { index: Number(index), property } }));
+        return;
+      }
+      // A track's name: its entry picked, with the tool that changes what it keys.
+      const track = event.target.closest('[data-track]');
+      if (track) {
+        const [index, property] = track.dataset.track.split(':');
+        this.editor.selectObject(Number(index), event.shiftKey);
+        this.editor.setTool(TOOL_OF[property]);
         return;
       }
       const line = event.target.closest('[data-index]');
@@ -1485,14 +1497,21 @@ export class Timeline extends EventTarget {
     // those past the clip's end dimmer. (Always on their lines.)
     if (clip) {
       const size = this.keySize();
-      // A key's shape is what it keys: a position a diamond, a turn a
-      // circle, a scale a square (an entry's row: diamonds).
-      const diamond = (x, y, property = 'position', grow = 1) => {
+      // A key's shape is what it keys: a position a triangle, a turn a
+      // circle, a scale a square (an entry's row - all its keys on a frame,
+      // `property` null: a diamond).
+      const diamond = (x, y, property = null, grow = 1) => {
         const r = size * grow;
         lanes.beginPath();
         if (property === 'rotation') lanes.arc(x, y, r * 0.85, 0, Math.PI * 2);
         else if (property === 'scale') lanes.rect(x - r * 0.75, y - r * 0.75, r * 1.5, r * 1.5);
-        else {
+        else if (property === 'position') {
+          // (pointing up, its middle on the row's)
+          lanes.moveTo(x, y - r * 1.05);
+          lanes.lineTo(x + r * 0.95, y + r * 0.7);
+          lanes.lineTo(x - r * 0.95, y + r * 0.7);
+          lanes.closePath();
+        } else {
           lanes.moveTo(x, y - r);
           lanes.lineTo(x + r, y);
           lanes.lineTo(x, y + r);
@@ -1563,7 +1582,7 @@ export class Timeline extends EventTarget {
           const age = born ? (performance.now() - born) / BORN_TIME : 1;
           const pop = age < 1 ? BORN_SCALE + (1 - BORN_SCALE) * EASE_FAMILIES.back.Out(age) : 1;
           if (age < 1) popping = true;
-          diamond(x, y, row.property ?? 'position', pop);
+          diamond(x, y, row.property ?? null, pop);
           if (row.property) {
             lanes.fillStyle = picked ? colors.text : theme[KEY_COLORS[row.property]]; // (picked: the accent's ring says so)
             lanes.fill();

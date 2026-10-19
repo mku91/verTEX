@@ -139,7 +139,7 @@ export class Simulation {
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
     this.bodies = [];
     mesh.objects.forEach((object, index) => {
-      if (object.kind === 'group' || !object.colliders?.length || hidden(object)) return;
+      if (object.kind === 'node' || !object.colliders?.length || hidden(object)) return;
       const frame = editor.objectFrame(index);
       const kind = object.body ?? 'static';
       const desc = kind === 'dynamic' ? R.RigidBodyDesc.dynamic().setCcdEnabled(true)

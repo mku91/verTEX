@@ -13,7 +13,7 @@ import { freeName } from './names.js';
 // The animation mode at work (see animation.js, timeline.js): the model
 // shown in the pose of the frame looked at, and posed by hand.
 //
-// The entry picked whole (an object or a group, see Editor.pivotEntry()) has
+// The entry picked whole (an object or a node, see Editor.pivotEntry()) has
 // a gizmo of its own here - the editor's moves the model, which is not
 // edited in this mode - moving, turning or scaling it by the tool in hand.
 // What it is moved to is a pose, not the model:
@@ -48,7 +48,7 @@ export class AnimationMode {
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
     this.gizmo.setSize(0.8);
-    themeGizmo(this.gizmo);
+    themeGizmo(this.gizmo, viewport);
     viewport.scene.add(this.gizmo.getHelper());
     this.gizmo.addEventListener('change', () => viewport.requestRender());
     this.gizmo.addEventListener('dragging-changed', (event) => {
@@ -83,6 +83,12 @@ export class AnimationMode {
     editor.workspacePress.animation = () => (this.gizmo.object && this.gizmo.axis !== null ? 'gizmo' : false);
 
     editor.addEventListener('change', () => this.refresh());
+    // Ctrl held or let go: the grid's step in force - for a drag on the way too.
+    editor.addEventListener('finesnap', () => {
+      if (!this.on) return;
+      this.applySnap();
+      if (this.dragging?.property === 'scale') this.drag();
+    });
     // Another frame: what was posed by hand and not keyed is let go - kept
     // aside, for "Вернуть позу" on the timeline to bring back (restorePose()).
     this.lost = null; // { clip, frame, overrides }, or null
@@ -92,7 +98,7 @@ export class AnimationMode {
       this.show();
     });
     timeline.addEventListener('restore', () => this.restorePose());
-    timeline.addEventListener('groupsonly', () => this.show()); // (the gizmo: on a group only, or anything)
+    timeline.addEventListener('nodesonly', () => this.show()); // (the gizmo: on a node only, or anything)
     this.buildPanel();
   }
 
@@ -100,7 +106,7 @@ export class AnimationMode {
     return this.editor.workspace === 'animation';
   }
 
-  // The entry the gizmo and the panel work on: one object or group picked whole.
+  // The entry the gizmo and the panel work on: one object or node picked whole.
   entry() {
     const index = this.editor.pivotEntry();
     return index === null ? null : { index, id: this.editor.mesh.objects[index].id };
@@ -174,7 +180,7 @@ export class AnimationMode {
 
   // Where the sign of IK is now (see ik-sign.js), or null: on the entry's
   // pivot point as it is shown, while Shift would make a move IK - the move
-  // tool in hand, groups above the entry to turn - or, while an IK move goes
+  // tool in hand, nodes above the entry to turn - or, while an IK move goes
   // on, on its target.
   ikSignAt() {
     if (!this.on || !this.pose.on || this.editor.preview || this.editor.simulating) return null;
@@ -199,17 +205,80 @@ export class AnimationMode {
     this.proxy.updateMatrix();
     this.gizmo.setMode(mode);
     this.gizmo.setSpace(mode === 'scale' || this.editor.localAxes ? 'local' : 'world');
-    const snap = this.editor.snapGrid.enabled;
-    this.gizmo.setTranslationSnap(snap ? this.editor.snapGrid.step : null);
-    this.gizmo.setRotationSnap(snap ? 15 * DEGREE : null);
+    this.applySnap();
     if (this.gizmo.object !== this.proxy) this.gizmo.attach(this.proxy);
     this.viewport.requestRender();
   }
 
-  // Whether an entry is posed and keyed: with "Только группы" on the
-  // timeline (see Timeline.setGroupsOnly()), groups only.
+  // Whether an entry is posed and keyed: with "Только узлы" on the
+  // timeline (see Timeline.setNodesOnly()), nodes only.
   mayPose(index) {
-    return !this.timeline.groupsOnly || this.editor.mesh.objects[index]?.kind === 'group';
+    return !this.timeline.nodesOnly || this.editor.mesh.objects[index]?.kind === 'node';
+  }
+
+  // The gizmo on the grid, as the editor's is: a move by the step in force -
+  // the fine one with Ctrl held (Editor.setFineSnap()) - a turn by 15°; a
+  // scale its own way (see snapScale()).
+  applySnap() {
+    const { snapGrid } = this.editor;
+    this.gizmo.setTranslationSnap(snapGrid.enabled ? snapGrid.activeStep : null);
+    this.gizmo.setRotationSnap(snapGrid.enabled ? 15 * DEGREE : null);
+    this.gizmo.setScaleSnap(null);
+  }
+
+  // A scale on the grid, as the editor's (Editor.snapScale()): along each
+  // axis of the handle, the side of what the entry holds farther from the
+  // point that stays (the pivot point - or with Alt the side opposite, see
+  // oneSided()) lands on a line of the grid in force; for an entry turned
+  // off the grid's axes, its size goes in whole steps instead. `box`: those
+  // bounds in the entry's own axes, as it was when the drag began.
+  snapScale() {
+    const { world, box, side } = this.dragging;
+    const { scale } = this.proxy;
+    const step = this.editor.snapGrid.activeStep;
+    const pivot = new THREE.Vector3();
+    const turn = new THREE.Quaternion();
+    const start = new THREE.Vector3();
+    world.decompose(pivot, turn, start);
+    const square = Math.abs(turn.w) > 1 - 1e-6; // (not turned: its axes are the grid's)
+    const oneSided = side && this.editor.altHeld;
+    // The factor along `axis` that puts the far side on the grid, from `factor`.
+    const snapped = (axis, factor) => {
+      const still = oneSided && side.axes.includes(axis) ? (side.way[axis] > 0 ? box.min[axis] : box.max[axis]) : 0;
+      const far = Math.abs(box.max[axis] - still) >= Math.abs(box.min[axis] - still) ? box.max[axis] : box.min[axis];
+      const reach = far - still; // (in the entry's own units)
+      if (Math.abs(reach) < 1e-9) return factor;
+      if (!square) {
+        const extent = (box.max[axis] - box.min[axis]) * start[axis];
+        return extent > 1e-9 ? (Math.max(0, Math.round((extent * (factor / start[axis])) / step)) * step / extent) * start[axis] : factor;
+      }
+      const anchor = pivot[axis] + still * start[axis]; // where the side that stays is, in the world
+      let target = Math.round((anchor + reach * factor) / step) * step - anchor;
+      if (target * Math.sign(reach) < 1e-9) target = 0; // flat at most, never through
+      return target / reach;
+    };
+    const handle = (this.gizmo.axis ?? '').toLowerCase();
+    if (handle.length === 3) {
+      // Uniform: one ratio for all, by the longest side.
+      const size = box.getSize(new THREE.Vector3());
+      const axis = ['x', 'y', 'z'].reduce((best, other) => (size[other] * start[other] > size[best] * start[best] ? other : best));
+      const ratio = start[axis] ? snapped(axis, scale[axis]) / start[axis] : 1;
+      scale.copy(start).multiplyScalar(ratio);
+      return;
+    }
+    for (const axis of handle) scale[axis] = snapped(axis, scale[axis]);
+  }
+
+  // The bounds of what an entry holds (its vertices, as shown), in its own
+  // axes as the drag found it; null with nothing in it.
+  boundsOf(index) {
+    const { vertices } = this.editor.contents([index]);
+    if (vertices.size === 0) return null;
+    const back = this.dragging.world.clone().invert();
+    const shown = this.editor.view.shown;
+    const box = new THREE.Box3();
+    for (const vertex of vertices) box.expandByPoint(shown[vertex].clone().applyMatrix4(back));
+    return box;
   }
 
   // The parent's matrix in the world, as shown (none: the world itself).
@@ -224,7 +293,10 @@ export class AnimationMode {
     const property = PROPERTY_OF_MODE[this.gizmo.mode];
     if (!entry) return;
     this.beginPose(entry.index, property, { ik: this.shiftDown && property === 'position' });
-    if (property === 'scale') this.dragging.side = this.sideOf(entry.index);
+    if (property === 'scale') {
+      this.dragging.box = this.boundsOf(entry.index);
+      this.dragging.side = this.sideOf(entry.index);
+    }
   }
 
   // Scaling with Alt held (as in the editor, see Editor.scaleCenter()): the
@@ -237,12 +309,8 @@ export class AnimationMode {
   sideOf(index) {
     const axes = (this.gizmo.axis ?? '').toLowerCase();
     if (!axes || axes.length === 3) return null;
-    const { vertices } = this.editor.contents([index]);
-    if (vertices.size === 0) return null;
-    const back = this.dragging.world.clone().invert();
-    const shown = this.editor.view.shown;
-    const box = new THREE.Box3();
-    for (const vertex of vertices) box.expandByPoint(shown[vertex].clone().applyMatrix4(back));
+    const box = this.dragging.box ?? this.boundsOf(index);
+    if (!box) return null;
     const turn = new THREE.Quaternion();
     this.dragging.world.decompose(new THREE.Vector3(), turn, new THREE.Vector3());
     const grabbed = this.gizmo.pointStart.clone().applyQuaternion(turn.invert()); // (in the entry's axes)
@@ -269,6 +337,7 @@ export class AnimationMode {
   // The stand-in moved: the entry posed where it is.
   drag() {
     if (!this.dragging) return;
+    if (this.dragging.property === 'scale' && this.dragging.box && this.editor.snapGrid.enabled) this.snapScale();
     this.proxy.updateMatrix();
     this.poseTo(this.proxy.matrix);
   }
@@ -276,7 +345,7 @@ export class AnimationMode {
   // Posing an entry by hand - by the gizmo, or in the three views (see
   // ortho-views.js): one of its properties, from where it is shown now.
   // With `ik`, a move is by inverse kinematics: the entry stays as it is in
-  // its parent, and the groups above it turn to bring it where it is moved
+  // its parent, and the nodes above it turn to bring it where it is moved
   // (see ik.js).
   beginPose(index, property, { ik = false } = {}) {
     const { id } = this.editor.mesh.objects[index];
@@ -291,7 +360,7 @@ export class AnimationMode {
     };
   }
 
-  // The groups above an entry, the nearest first: the joints its IK turns.
+  // The nodes above an entry, the nearest first: the joints its IK turns.
   ikChain(index) {
     const { islands } = this.editor.topology;
     const { objects } = this.editor.mesh;

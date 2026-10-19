@@ -4,7 +4,7 @@ import { rotationOf } from './frames.js';
 import { unwrap } from './animation.js';
 
 // Inverse kinematics for the animation mode (see animate.js): an entry
-// moved with Shift held is not moved in its parent - the groups above it
+// moved with Shift held is not moved in its parent - the nodes above it
 // (the joints, each turning about its pivot point) are turned so that it
 // comes as near as it can to where it is moved.
 //
@@ -12,7 +12,7 @@ import { unwrap } from './animation.js';
 // to the outermost, each in turn is turned the least that points the entry
 // at the target as seen from the joint; round again, until the entry is
 // there or the rounds are used up. Every joint may turn any way (no limits);
-// the chain is every group above the entry.
+// the chain is every node above the entry.
 
 const ROUNDS = 16;
 const NEAR_ENOUGH = 1e-4;

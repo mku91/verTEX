@@ -153,7 +153,7 @@ export class CollisionMode {
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
     this.gizmo.setSize(0.8);
-    themeGizmo(this.gizmo);
+    themeGizmo(this.gizmo, viewport);
     this.gizmo.setSpace('local');
     viewport.scene.add(this.gizmo.getHelper());
     this.gizmo.addEventListener('change', () => viewport.requestRender());
@@ -185,7 +185,7 @@ export class CollisionMode {
 
   // --- what is shown --------------------------------------------------------
 
-  // The objects whose shapes can be seen and edited: shown, not groups.
+  // The objects whose shapes can be seen and edited: shown, not nodes.
   objectIndex(id) {
     return this.editor.mesh.objects.findIndex((object) => object.id === id);
   }
@@ -251,7 +251,7 @@ export class CollisionMode {
     const byId = new Map(mesh.objects.map((object) => [object.id, object]));
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
     mesh.objects.forEach((object, index) => {
-      if (object.kind === 'group' || !object.colliders?.length || hidden(object)) return;
+      if (object.kind === 'node' || !object.colliders?.length || hidden(object)) return;
       const frame = this.editor.objectFrame(index);
       const world = new THREE.Matrix4().compose(frame.origin, frame.quaternion, new THREE.Vector3(1, 1, 1));
       const color = BODY_COLORS[object.body ?? 'static'];

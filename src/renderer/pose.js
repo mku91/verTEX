@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal } from './frames.js';
 import { poseAt } from './animation.js';
 
-// The scene posed: its entries (objects and groups) put somewhere other
+// The scene posed: its entries (objects and nodes) put somewhere other
 // than where the model has them, for a while - by the simulation (see
 // simulation.js), by an animation - with the model itself left as it is.
 //
 // An entry's place in its parent (see frames.js) is what is posed, as glTF
 // and Godot have it: its position in the parent's frame, its turn relative
 // to the parent's, and a scale of its own (the model has none: 1). A child
-// goes wherever its group goes, turns and grows with it. Where the model
+// goes wherever its node goes, turns and grows with it. Where the model
 // has the entries is the rest pose; what a pose does not name stays there.
 //
 // The editor draws the whole model as one mesh, so a pose is shown by its
@@ -21,7 +21,7 @@ import { poseAt } from './animation.js';
 
 // Every entry's place in its parent, as the model has it (the rest pose):
 // Map id -> { parent, position: [x, y, z], rotation: [x, y, z] degrees or
-// null }. Inside a group that is not turned the angles are the entry's own,
+// null }. Inside a node that is not turned the angles are the entry's own,
 // as they were set (they may be past 180); else they are worked out from the
 // turns, as near as they can be.
 export function localTransforms(editor) {
@@ -82,7 +82,7 @@ export function turnOf(rotation) {
 // Every entry's matrix in the world with `pose` on it: Map id -> Matrix4.
 // `pose`: Map id -> { position?, rotation?, scale? } - [x, y, z] each, in
 // the entry's parent, as localTransforms() gives them (rotation in degrees);
-// what it leaves out is the rest pose's. A group's matrix carries its
+// what it leaves out is the rest pose's. A node's matrix carries its
 // children with it.
 // (`locals`: localTransforms() as it is now, when it has been worked out already.)
 export function posedMatrices(editor, pose = new Map(), locals = localTransforms(editor)) {
@@ -105,11 +105,23 @@ export function posedMatrices(editor, pose = new Map(), locals = localTransforms
 }
 
 // The model's vertices, shown moved by a pose for as long as it is on.
+//
+// A vertex goes with its object, as a whole - unless it is in the skin (see
+// mesh.weights, skin.js): then it bends with the nodes it is weighted to,
+// as glTF's skins do (linear blend skinning). Each such node takes it from
+// where the node is at rest to where it is posed - Mᵢ · Bᵢ⁻¹ - and the
+// vertex goes to the mean of those places, by its weights:
+//   v' = Σ wᵢ · Mᵢ · Bᵢ⁻¹ · v
+// (its own object's pose does not move it, as glTF has it).
+const ONE = new THREE.Vector3(1, 1, 1);
+
 export class ModelPose {
   constructor(editor) {
     this.editor = editor;
     this.objects = null; // id -> { vertices, local }, while on
     this.shown = null; // where the vertices are shown
+    this.skin = null; // vertex -> { at (at rest, in the world), weights }, while on
+    this.rest = null; // node id -> its frame at rest, undone (Bᵢ⁻¹)
   }
 
   get on() {
@@ -130,6 +142,50 @@ export class ModelPose {
       entry.vertices.push(i);
       entry.local.push(toLocal(vertex, frames.get(id)));
     });
+    this.skin = new Map();
+    this.rest = new Map();
+    for (const [vertex, weights] of mesh.weights) {
+      if (vertex >= mesh.vertices.length) continue;
+      this.skin.set(vertex, { at: mesh.vertices[vertex].clone(), weights });
+      for (const [node] of weights) {
+        const frame = frames.get(node);
+        if (frame && !this.rest.has(node)) this.rest.set(node, new THREE.Matrix4().compose(frame.origin, frame.quaternion, ONE).invert());
+      }
+    }
+  }
+
+  // Where `matrices` (Map id -> Matrix4, in the world) put the vertices,
+  // written into `out` (Vector3 per vertex): each object's with its frame,
+  // those in the skin bent with their nodes (see the top). What `matrices`
+  // does not name is left as it is in `out` - a node it leaves out is at rest.
+  place(matrices, out) {
+    for (const [id, { vertices, local }] of this.objects) {
+      const matrix = matrices.get(id);
+      if (!matrix) continue;
+      vertices.forEach((vertex, k) => out[vertex].copy(local[k]).applyMatrix4(matrix));
+    }
+    if (this.skin.size === 0) return out;
+    const bends = new Map(); // node id -> Mᵢ · Bᵢ⁻¹
+    for (const [node, back] of this.rest) {
+      const matrix = matrices.get(node);
+      if (matrix) bends.set(node, matrix.clone().multiply(back));
+    }
+    const point = new THREE.Vector3();
+    for (const [vertex, { at, weights }] of this.skin) {
+      const sum = out[vertex].set(0, 0, 0);
+      for (const [node, weight] of weights) {
+        point.copy(at);
+        const bend = bends.get(node);
+        if (bend) point.applyMatrix4(bend);
+        sum.addScaledVector(point, weight);
+      }
+    }
+    return out;
+  }
+
+  // Where `matrices` put the vertices, the view left as it is: a list of its own.
+  placed(matrices) {
+    return this.place(matrices, this.editor.mesh.vertices.map((vertex) => vertex.clone()));
   }
 
   // The objects where `matrices` (Map id -> Matrix4, in the world) put
@@ -137,11 +193,7 @@ export class ModelPose {
   apply(matrices) {
     if (!this.on) return;
     const { view, viewport } = this.editor;
-    for (const [id, { vertices, local }] of this.objects) {
-      const matrix = matrices.get(id);
-      if (!matrix) continue;
-      vertices.forEach((vertex, k) => this.shown[vertex].copy(local[k]).applyMatrix4(matrix));
-    }
+    this.place(matrices, this.shown);
     view.posed = this.shown;
     view.updatePositions();
     viewport.requestRender();
@@ -153,6 +205,8 @@ export class ModelPose {
     const { view, viewport } = this.editor;
     this.objects = null;
     this.shown = null;
+    this.skin = null;
+    this.rest = null;
     view.posed = null;
     view.updatePositions();
     viewport.requestRender();

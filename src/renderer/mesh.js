@@ -71,7 +71,7 @@ function cutChords(outline, on, axis) {
 // Editing model: shared vertices, polygonal faces (loops of vertex indices)
 // and wires: loose edges between two vertices that belong to no face.
 // Every vertex belongs to one of the named objects; a face or a wire belongs
-// to the object of its vertices. Objects can be put into groups: entries of the
+// to the object of its vertices. Objects can be put into nodes: entries of the
 // same list that have no vertices, only a name and what is inside them.
 // This is the source of truth; three.js geometry is derived from it in MeshView.
 export class EditableMesh {
@@ -79,8 +79,8 @@ export class EditableMesh {
     this.vertices = []; // THREE.Vector3[]
     this.faces = []; // number[][], counter-clockwise when seen from outside
     this.wires = []; // [a, b][], edges drawn on their own
-    // { id, name, parent, kind, hidden }[]; `parent` is a group's id or null,
-    // `kind` 'mesh' | 'group', `hidden` set on what is switched off in the scene tree,
+    // { id, name, parent, kind, hidden }[]; `parent` is a node's id or null,
+    // `kind` 'mesh' | 'node', `hidden` set on what is switched off in the scene tree,
     // `rotation` how the entry has been turned as a whole, see frames.js;
     // `pivot` an [x, y, z] the entry turns and scales about - absent until one
     // is set, and then the middle of the entry's bounds stands in for it;
@@ -93,6 +93,10 @@ export class EditableMesh {
     // Which side of the centre a vertex stood on before it was scaled flat
     // (vertex index -> { x?: 1 | -1, ... }): what lets it be scaled back out.
     this.folds = new Map();
+    // The skin (see skin.js): the nodes a vertex bends with, and how much
+    // (vertex index -> [[node id, weight], ...], up to four, adding up to
+    // 1). A vertex with none goes with its own object, as a whole.
+    this.weights = new Map();
   }
 
   // Adds a vertex to the object with the given id.
@@ -102,14 +106,14 @@ export class EditableMesh {
     return this.vertices.length - 1;
   }
 
-  // Creates an empty object (or, with kind 'group', a group) and returns its
+  // Creates an empty object (or, with kind 'node', a node) and returns its
   // id. A name that is taken gets a numbered suffix: "Cube", "Cube_0", "Cube_1", ...
   addObject(name, kind = 'mesh') {
     const id = this.nextObjectId++;
     this.objects.push({ id, name: this.freeName(name), parent: null, kind });
     // Normally an object is put on the atlas by the user (`atlas` on it, see
     // unwrap.js); `autoAtlas` puts every new one there at once.
-    if (this.autoAtlas && kind !== 'group') this.objects[this.objects.length - 1].atlas = ATLAS;
+    if (this.autoAtlas && kind !== 'node') this.objects[this.objects.length - 1].atlas = ATLAS;
     return id;
   }
 
@@ -140,13 +144,62 @@ export class EditableMesh {
     const heirObject = byId.get(heir);
     if (heirObject && gone.has(heirObject.parent)) heirObject.parent = survivor(heirObject.parent);
     this.objects = this.objects.filter((object) => !gone.has(object.id));
+    this.pruneWeights();
+  }
+
+  // --- the skin (see skin.js) ------------------------------------------------
+
+  // The weights of vertex `to` as those of `from` (none if it has none).
+  copyWeights(from, to) {
+    const weights = this.weights.get(from);
+    if (weights) this.weights.set(to, weights.map(([node, weight]) => [node, weight]));
+    else this.weights.delete(to);
+  }
+
+  // The weights of vertex `to`, a point `along` (0 to 1) the way from `a` to
+  // `b`: theirs, mixed in that measure. (An end with none adds nothing: the
+  // point takes the other's.)
+  blendWeights(to, a, b, along) {
+    const wa = this.weights.get(a);
+    const wb = this.weights.get(b);
+    if (!wa && !wb) {
+      this.weights.delete(to);
+      return;
+    }
+    const sum = new Map();
+    const add = (weights, share) => {
+      for (const [node, weight] of weights ?? []) sum.set(node, (sum.get(node) ?? 0) + weight * share);
+    };
+    add(wa, 1 - along);
+    add(wb, along);
+    this.setWeights(to, [...sum]);
+  }
+
+  // Sets a vertex's weights: the four largest kept, adding up to 1; none
+  // (or nothing worth keeping) takes them away.
+  setWeights(vertex, weights) {
+    const kept = weights.filter(([, weight]) => weight > 1e-4).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const total = kept.reduce((sum, [, weight]) => sum + weight, 0);
+    if (total <= 0) this.weights.delete(vertex);
+    else this.weights.set(vertex, kept.map(([node, weight]) => [node, +(weight / total).toFixed(4)]));
+  }
+
+  // Weights on nodes that are no longer there, or no longer nodes, dropped
+  // (and the rest made to add up to 1 again).
+  pruneWeights() {
+    if (this.weights.size === 0) return;
+    const nodes = new Set(this.objects.filter((object) => object.kind === 'node').map((object) => object.id));
+    for (const [vertex, weights] of this.weights) {
+      if (weights.every(([node]) => nodes.has(node))) continue;
+      this.setWeights(vertex, weights.filter(([node]) => nodes.has(node)));
+    }
   }
 
   // Whether `child` may be put into `parent` (object ids; null is the top
-  // level): only a group holds anything, and nothing goes under itself.
+  // level): only a node holds anything, and nothing goes under itself.
   canParent(child, parent) {
     const byId = new Map(this.objects.map((object) => [object.id, object]));
-    if (parent !== null && byId.get(parent)?.kind !== 'group') return false;
+    if (parent !== null && byId.get(parent)?.kind !== 'node') return false;
     for (let id = parent; id !== null && id !== undefined; id = byId.get(id)?.parent ?? null) {
       if (id === child) return false;
     }
@@ -343,6 +396,7 @@ export class EditableMesh {
     this.vertices.push(this.vertices[parent].clone());
     this.vertexObject.push(this.vertexObject[parent]);
     const child = this.vertices.length - 1;
+    this.copyWeights(parent, child);
     this.wires.push([parent, child]);
     return child;
   }
@@ -689,7 +743,10 @@ export class EditableMesh {
       const { loop, on } = this.cutLoop(face, axis, value, (a, b, point) => {
         const key = edgeKey(a, b);
         if (!cutVertices.has(key)) {
-          cutVertices.set(key, this.addVertex(point.x, point.y, point.z, this.vertexObject[a]));
+          const made = this.addVertex(point.x, point.y, point.z, this.vertexObject[a]);
+          const along = this.vertices[a].distanceTo(point) / (this.vertices[a].distanceTo(this.vertices[b]) || 1);
+          this.blendWeights(made, a, b, along);
+          cutVertices.set(key, made);
         }
         return cutVertices.get(key);
       });
@@ -771,6 +828,7 @@ export class EditableMesh {
         if (copies.has(vertex)) continue;
         const { x, y, z } = this.vertices[vertex];
         copies.set(vertex, this.addVertex(x, y, z, this.vertexObject[vertex]));
+        this.copyWeights(vertex, copies.get(vertex));
       }
     }
 
@@ -819,6 +877,7 @@ export class EditableMesh {
       if (!copies.has(vertex)) {
         const { x, y, z } = this.vertices[vertex];
         copies.set(vertex, this.addVertex(x, y, z, this.vertexObject[vertex]));
+        this.copyWeights(vertex, copies.get(vertex));
       }
       return copies.get(vertex);
     };
@@ -834,8 +893,8 @@ export class EditableMesh {
     return [...copies.values()];
   }
 
-  // The objects and groups as { id, name, kind, parent, vertices, faces } with
-  // index lists (empty for a group), in the order of `objects`. (Called
+  // The objects and nodes as { id, name, kind, parent, vertices, faces } with
+  // index lists (empty for a node), in the order of `objects`. (Called
   // "islands" by the callers: before objects had an identity of their own,
   // they were the connected pieces of the mesh.)
   islands() {
@@ -854,7 +913,7 @@ export class EditableMesh {
   // Makes sure every vertex has a known object. Data that carries none (a
   // state saved before objects existed) gets one object per connected piece.
   adoptObjects() {
-    const known = new Set(this.objects.filter((object) => object.kind !== 'group').map((object) => object.id));
+    const known = new Set(this.objects.filter((object) => object.kind !== 'node').map((object) => object.id));
     const complete =
       this.vertexObject.length === this.vertices.length && this.vertexObject.every((id) => known.has(id));
     if (!complete) {
@@ -865,12 +924,12 @@ export class EditableMesh {
         for (const vertex of piece) this.vertexObject[vertex] = id;
       }
     }
-    // Only groups hold anything. An object nested in another object (a state
-    // saved when that was allowed) moves up to the nearest group, or to the top.
+    // Only nodes hold anything. An object nested in another object (a state
+    // saved when that was allowed) moves up to the nearest node, or to the top.
     const byId = new Map(this.objects.map((object) => [object.id, object]));
     for (const object of this.objects) {
       let parent = object.parent ?? null;
-      while (parent !== null && byId.get(parent)?.kind !== 'group') parent = byId.get(parent)?.parent ?? null;
+      while (parent !== null && byId.get(parent)?.kind !== 'node') parent = byId.get(parent)?.parent ?? null;
       object.parent = parent;
     }
   }
@@ -938,11 +997,12 @@ export class EditableMesh {
     this.wires = this.wires
       .filter((wire) => wire.every((i) => remap.has(i)))
       .map((wire) => wire.map((i) => remap.get(i)));
-    // An object with no vertices left is gone; a group never had any and stays.
+    // An object with no vertices left is gone; a node never had any and stays.
     this.vertexObject = this.vertexObject.filter((_, i) => remap.has(i));
     this.folds = new Map([...this.folds].filter(([i]) => remap.has(i)).map(([i, fold]) => [remap.get(i), fold]));
+    this.weights = new Map([...this.weights].filter(([i]) => remap.has(i)).map(([i, weights]) => [remap.get(i), weights]));
     const alive = new Set(this.vertexObject);
-    const gone = this.objects.filter((object) => object.kind !== 'group' && !alive.has(object.id));
+    const gone = this.objects.filter((object) => object.kind !== 'node' && !alive.has(object.id));
     this.dropObjects(new Set(gone.map((object) => object.id)));
     return remap;
   }

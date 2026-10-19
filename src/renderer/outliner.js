@@ -2,9 +2,10 @@ import { scrubbable } from './scrub.js';
 import { MARKER_COLORS, markerColor } from './marker-colors.js';
 import { BODY_COLORS, SHAPE_ICONS, shapeLabel } from './collisions.js';
 import { latinOnly } from './names.js';
+import { boundByNode, selectBound } from './skin.js';
 
 const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
-const GROUP_ICON = '<i class="fa-solid fa-folder"></i>';
+const NODE_ICON = '<i class="fa-solid fa-circle-nodes"></i>'; // a node (the kind 'node')
 const EYE_ICON = '<i class="fa-solid fa-eye"></i>';
 const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
 const INDENT = 14; // px per nesting level
@@ -55,12 +56,12 @@ const PRIMITIVES = {
   },
 };
 
-// The scene tree: objects and groups by name, a group's contents indented under it.
-//   click          - select the object, or everything in the group; Shift+click adds or removes it
+// The scene tree: objects and nodes by name, a node's contents indented under it.
+//   click          - select the object, or everything in the node; Shift+click adds or removes it
 //   double click   - rename
-//   drag onto a group - put it in; onto an object - next to it; onto empty space - top level
-//   the arrow      - fold or unfold a group
-//   the eye        - hide or show the object, or the group with all it holds
+//   drag onto a node - put it in; onto an object - next to it; onto empty space - top level
+//   the arrow      - fold or unfold a node
+//   the eye        - hide or show the object, or the node with all it holds
 //   right click    - a menu: fly the camera to it, hide or show, delete
 // Above the list, "+" opens the menu of things to add.
 export class Outliner {
@@ -95,17 +96,21 @@ export class Outliner {
     // Whole objects are selected only in object mode; elsewhere the object is just being worked on.
     const whole = this.editor.mode === 'object';
     const selected = new Set([...selection].map((vertex) => islandOfVertex[vertex]));
-    // A group is selected only when picked itself, not when what it holds is.
+    // A node is selected only when picked itself, not when what it holds is.
     islands.forEach((island, index) => {
-      if (island.kind === 'group' && whole && picked.has(index)) selected.add(index);
+      if (island.kind === 'node' && whole && picked.has(index)) selected.add(index);
     });
+    // What the nodes bind (the skin, see skin.js): a row under a node for each object.
+    const bound = boundByNode(this.editor.mesh);
+    const focus = this.editor.mode === 'vertex' ? this.editor.skinFocus ?? null : null;
     const signature = JSON.stringify([
       islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden]),
+      [...bound].map(([node, objects]) => [node, objects.map(({ object, vertices }) => [object, vertices.length])]), focus,
       [...selected],
       whole,
       [...this.folded],
       this.editor.mesh.objects.map((object) => object.color ?? null), // the icons' colours
-      this.editor.mesh.objects.map((object) => object.locked ?? false), // the groups' locks
+      this.editor.mesh.objects.map((object) => object.locked ?? false), // the nodes' locks
       // In the collision mode, the shapes: their kinds, the bodies, the one picked.
       this.editor.collisions
         ? [this.editor.mesh.objects.map((object) => [object.body ?? null, (object.colliders ?? []).map((shape) => shape.type)]), this.shapes?.picked ?? null]
@@ -115,7 +120,7 @@ export class Outliner {
     this.shown = signature;
 
     const rows = [];
-    // `within`: a group above this row is selected, and the row with it.
+    // `within`: a node above this row is selected, and the row with it.
     const addRow = (index, depth, within = false) => {
       const island = islands[index];
       const folded = this.folded.has(island.id);
@@ -124,14 +129,15 @@ export class Outliner {
       row.dataset.object = index;
       row.style.paddingLeft = `${6 + depth * INDENT}px`;
       const picked = whole && selected.has(index);
-      if (within) row.classList.add('implied'); // selected through its group: marked faintly
+      if (within) row.classList.add('implied'); // selected through its node: marked faintly
       else if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
 
       const object = this.editor.mesh.objects[index];
-      const shapes = this.editor.collisions && island.kind !== 'group' ? object.colliders ?? [] : [];
+      const shapes = this.editor.collisions && island.kind !== 'node' ? object.colliders ?? [] : [];
       const arrow = document.createElement('span');
       arrow.className = 'outliner-arrow';
-      if (island.children.length || shapes.length) {
+      const binds = island.kind === 'node' ? bound.get(island.id) ?? [] : [];
+      if (island.children.length || shapes.length || binds.length) {
         arrow.innerHTML = `<i class="fa-solid fa-caret-${folded ? 'right' : 'down'}"></i>`;
         arrow.dataset.fold = island.id;
       }
@@ -139,19 +145,19 @@ export class Outliner {
       name.className = 'outliner-name';
       name.textContent = island.name;
       row.append(arrow);
-      const group = island.kind === 'group';
-      row.classList.toggle('group', group);
-      row.insertAdjacentHTML('beforeend', group ? GROUP_ICON : OBJECT_ICON);
+      const node = island.kind === 'node';
+      row.classList.toggle('node', node);
+      row.insertAdjacentHTML('beforeend', node ? NODE_ICON : OBJECT_ICON);
       // Its marker colour, if it has one.
       const marker = markerColor(this.editor.mesh.objects[index].color);
       if (marker) row.lastElementChild.style.color = marker;
       row.append(name);
-      row.title = group
-        ? `Группа: внутри ${island.children.length}`
+      row.title = node
+        ? `Узел: внутри ${island.children.length}`
         : `${island.vertices.length} вершин, ${island.faces.length} граней`;
-      // A group's lock: picked only whole in the main view while it is shut (see Editor.lockedOwner()).
-      if (group) {
-        // Open, shut (picked whole) or 'nearest' (picked as the nearest group).
+      // A node's lock: picked only whole in the main view while it is shut (see Editor.lockedOwner()).
+      if (node) {
+        // Open, shut (picked whole) or 'nearest' (picked as the nearest node).
         const locked = this.editor.mesh.objects[index].locked ?? false;
         const lock = document.createElement('span');
         lock.className = 'outliner-lock';
@@ -159,24 +165,24 @@ export class Outliner {
         lock.classList.toggle('nearest', locked === 'nearest');
         lock.dataset.lock = index;
         lock.title = locked === true
-          ? 'Группа закрыта: в главном виде щелчок по любой её части выделяет всю группу (в дереве и в трёх видах части выделяются как обычно). Нажмите — «ближайшая группа»'
+          ? 'Узел закрыт: в главном виде щелчок по любой его части выделяет весь узел (в дереве и в трёх видах части выделяются как обычно). Нажмите — «ближайший узел»'
           : locked === 'nearest'
-            ? 'Ближайшая группа: в главном виде щелчок по объекту в ней выделяет ближайшую к нему группу вверх по иерархии. Нажмите, чтобы открыть'
-            : 'Группа открыта: её части выделяются по отдельности. Нажмите, чтобы закрыть — тогда в главном виде она будет выделяться целиком';
-        // (nearest: a child - a part picked as the group it is a child of)
+            ? 'Ближайший узел: в главном виде щелчок по объекту в нём выделяет ближайший к нему узел вверх по иерархии. Нажмите, чтобы открыть'
+            : 'Узел открыт: его части выделяются по отдельности. Нажмите, чтобы закрыть — тогда в главном виде он будет выделяться целиком';
+        // (nearest: a child - a part picked as the node it is a child of)
         lock.innerHTML = `<i class="fa-solid ${locked === 'nearest' ? 'fa-child' : locked ? 'fa-lock' : 'fa-lock-open'}"></i>`;
         row.append(lock);
       }
-      // A group's +: something new made in it (see bindAdding()).
-      if (group) {
+      // A node's +: something new made in it (see bindAdding()).
+      if (node) {
         const plus = document.createElement('span');
         plus.className = 'outliner-add';
         plus.dataset.addInto = island.id;
-        plus.title = 'Создать объект в этой группе';
+        plus.title = 'Создать объект в этом узле';
         plus.innerHTML = '<i class="fa-solid fa-plus"></i>';
         row.append(plus);
       }
-      // Hidden, by its own eye or by a group's above it.
+      // Hidden, by its own eye or by a node's above it.
       row.classList.toggle('hidden', island.hidden);
       const eye = document.createElement('span');
       eye.className = 'outliner-eye';
@@ -185,7 +191,7 @@ export class Outliner {
       eye.innerHTML = island.hiddenOwn ? EYE_OFF_ICON : EYE_ICON;
       row.append(eye);
       rows.push(row);
-      const carries = within || (picked && island.kind === 'group');
+      const carries = within || (picked && island.kind === 'node');
       if (folded) return;
       // Its collision shapes first, in the body's colour; the picked one marked.
       shapes.forEach((shape, k) => {
@@ -204,6 +210,22 @@ export class Outliner {
         line.title = 'Фигура столкновения: щелчок — выбрать, двойной щелчок — переименовать, Delete — удалить';
         rows.push(line);
       });
+      // What it binds (a node): an object a row, in the skin's green; a press picks those vertices.
+      for (const { object: id, vertices } of binds) {
+        const owner = this.editor.mesh.objects.find((entry) => entry.id === id);
+        const line = document.createElement('div');
+        line.className = 'outliner-row outliner-skin';
+        line.dataset.skin = `${island.id}:${id}`;
+        line.style.paddingLeft = `${6 + (depth + 1) * INDENT}px`;
+        if (focus?.node === island.id && focus.object === id) line.classList.add('selected');
+        line.innerHTML = '<span class="outliner-arrow"></span><i class="fa-solid fa-link"></i>';
+        const name = document.createElement('span');
+        name.className = 'outliner-name';
+        name.textContent = `${owner?.name ?? '?'} · ${vertices.length}`;
+        line.append(name);
+        line.title = `Вершины объекта «${owner?.name ?? '?'}», привязанные к «${island.name}»: щелчок — выделить их и настроить вес в панели «Скин»`;
+        rows.push(line);
+      }
       for (const child of island.children) addRow(child, depth + 1, carries);
     };
     islands.forEach((island, index) => {
@@ -221,16 +243,16 @@ export class Outliner {
         this.suppressClick = false;
         return;
       }
-      // A group's lock.
+      // A node's lock.
       const lock = event.target.closest('[data-lock]');
       if (lock) {
         const index = Number(lock.dataset.lock);
         // round: open -> shut -> nearest -> open
         const now = editor.mesh.objects[index].locked ?? false;
-        editor.setGroupLock(index, now === true ? 'nearest' : now === 'nearest' ? false : true);
+        editor.setNodeLock(index, now === true ? 'nearest' : now === 'nearest' ? false : true);
         return;
       }
-      // A group's +: the menu of things to add, beside it, for that group.
+      // A node's +: the menu of things to add, beside it, for that node.
       const plus = event.target.closest('[data-add-into]');
       if (plus) {
         this.openAddMenu(Number(plus.dataset.addInto), plus);
@@ -255,6 +277,13 @@ export class Outliner {
         this.shapes?.pickShape(index, k);
         return;
       }
+      // What a node binds: those vertices picked (see skin.js).
+      const skin = event.target.closest('[data-skin]');
+      if (skin) {
+        const [node, object] = skin.dataset.skin.split(':').map(Number);
+        selectBound(editor, node, object);
+        return;
+      }
       const row = rowAt(event.target);
       if (row && !this.renaming) editor.selectObject(Number(row.dataset.object), event.shiftKey);
     });
@@ -269,7 +298,7 @@ export class Outliner {
       if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
     });
 
-    // Dragging a row onto a group puts it into that group.
+    // Dragging a row onto a node puts it into that node.
     list.addEventListener('pointerdown', (event) => {
       this.suppressClick = false; // the last drag's click never came
       const row = rowAt(event.target);
@@ -377,14 +406,14 @@ export class Outliner {
       colorItem.append(colorLabel, colors);
       // Joining: the picked objects into this one, when it is one of them.
       const joined = [index, ...whole.filter((other) => other !== index)].filter(
-        (other) => editor.topology.islands[other].kind !== 'group',
+        (other) => editor.topology.islands[other].kind !== 'node',
       );
       menu.replaceChildren(
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
         item('Дублировать', () => editor.duplicateObjects(whole)),
-        item('Объединить в один объект', () => editor.joinObjects(joined), island.kind !== 'group' && joined.length > 1),
+        item('Объединить в один объект', () => editor.joinObjects(joined), island.kind !== 'node' && joined.length > 1),
         item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
       );
@@ -414,9 +443,9 @@ export class Outliner {
     window.addEventListener('blur', close);
   }
 
-  // Where a dragged row would land: a group's index, null for the top level
+  // Where a dragged row would land: a node's index, null for the top level
   // (empty space of the list), undefined outside the list. Over an object's
-  // row that is the group the object is in: the row lands next to it.
+  // row that is the node the object is in: the row lands next to it.
   dropTarget(event) {
     const element = document.elementFromPoint(event.clientX, event.clientY);
     if (element?.closest('[data-shape]')) return undefined; // a shape's row holds nothing
@@ -424,7 +453,7 @@ export class Outliner {
     if (row && this.list.contains(row)) {
       const index = Number(row.dataset.object);
       const island = this.editor.topology.islands[index];
-      return island.kind === 'group' ? index : island.parentIndex;
+      return island.kind === 'node' ? index : island.parentIndex;
     }
     return element && this.list.contains(element) ? null : undefined;
   }
@@ -438,7 +467,7 @@ export class Outliner {
 
   // Replaces a row's name with a text field; Enter or a click away keeps the
   // new name, Esc drops it.
-  // A row's name made a field to type a new one in: an object's, a group's
+  // A row's name made a field to type a new one in: an object's, a node's
   // or a collision shape's. Latin letters only (see names.js).
   rename(row) {
     const shape = row.dataset.shape?.split(':').map(Number) ?? null;
@@ -472,8 +501,8 @@ export class Outliner {
 
   // --- adding objects ----------------------------------------------------
 
-  // The menu of things to add: under the header's +, or - `into` a group's
-  // id - beside that group's + (`at`), for what is made to go in it.
+  // The menu of things to add: under the header's +, or - `into` a node's
+  // id - beside that node's + (`at`), for what is made to go in it.
   openAddMenu(into = null, at = null) {
     const { menu, addButton } = this;
     this.closeForm();
@@ -493,7 +522,7 @@ export class Outliner {
 
   bindAdding(section) {
     const { menu, form, addButton } = this;
-    this.into = null; // the group what is made goes in (its id), or none
+    this.into = null; // the node what is made goes in (its id), or none
     const closeMenu = () => {
       menu.hidden = true;
       addButton.classList.remove('active');
@@ -507,9 +536,9 @@ export class Outliner {
         else this.editor.addPrimitive(kind, {}, null, this.into);
       });
     }
-    menu.querySelector('[data-group]').addEventListener('click', () => {
+    menu.querySelector('[data-node]').addEventListener('click', () => {
       closeMenu();
-      this.editor.addGroup(this.into);
+      this.editor.addNode(this.into);
     });
     // Buttons must not take the keyboard focus; the form's fields may.
     section.querySelector('.outliner-header').addEventListener('mousedown', (event) => event.preventDefault());
@@ -672,9 +701,9 @@ export class Outliner {
     const { form } = this;
     const { title, fields } = PRIMITIVES[kind];
     form.dataset.kind = kind;
-    // (made in a group: its name says so)
-    const group = this.into === null ? null : this.editor.mesh.objects.find((object) => object.id === this.into);
-    form.querySelector('h3').textContent = group ? `${title} · в группу ${group.name}` : title;
+    // (made in a node: its name says so)
+    const node = this.into === null ? null : this.editor.mesh.objects.find((object) => object.id === this.into);
+    form.querySelector('h3').textContent = node ? `${title} · в узел ${node.name}` : title;
     form.querySelector('.fields').replaceChildren(
       ...fields.map((field) => {
         const label = document.createElement('label');

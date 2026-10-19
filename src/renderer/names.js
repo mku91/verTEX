@@ -1,4 +1,4 @@
-// Names in the scene tree - of objects, groups, collision shapes - are in
+// Names in the scene tree - of objects, nodes, collision shapes - are in
 // Latin letters only: they go into game engines as nodes' names and into
 // code that looks them up (Godot's get_node("Door/Box")), where anything
 // else is trouble. Digits, spaces and _ . - are let through.

@@ -1,4 +1,4 @@
-// The animations: the model's objects and groups moved, turned and scaled
+// The animations: the model's objects and nodes moved, turned and scaled
 // over time, by keyframes - the way glTF has it, and Godot after it (an
 // AnimationPlayer with a clip for each).
 //

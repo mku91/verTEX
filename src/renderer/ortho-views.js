@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { NODE_MARK, nodePlaces } from './node-marks.js';
 import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
 
@@ -32,7 +33,7 @@ const EDGE_PICK_RADIUS = 6; // px, edges (in edge mode)
 const CLICK_TOLERANCE = 4; // px of pointer travel that still counts as a click
 const MIN_GRID_SPACING = 8; // px; denser grid lines and snap dots are not drawn
 const DOT_OPACITY = 0.26;
-const AROUND_WIDTH = 1.5; // px; the other objects of the shown object's group
+const AROUND_WIDTH = 1.5; // px; the other objects of the shown object's node
 const FAR_EDGE_OPACITY = 0.35; // brightness of lines at the farthest point of the object
 const ZOOM_SPEED = 0.0015; // per wheel delta unit
 const MIN_SCALE = 2; // px per world unit
@@ -63,7 +64,7 @@ const VIEWS = [
 // Vertices can be dragged within a view's plane, Shift+drag selects them with
 // a box, RMB pans and the wheel zooms.
 const PIVOT_RADIUS = 5; // px, the ring of the pivot mark shown by the pivot tool
-const PIVOT_INNER_RADIUS = 3.5; // and of those inside a group
+const PIVOT_INNER_RADIUS = 3.5; // and of those inside a node
 
 export class OrthoViews {
   // `container` may be in a window of its own (see views-window.js): its
@@ -478,7 +479,7 @@ export class OrthoViews {
       const inside = new Set(vertices);
       const faces = islands.flatMap((island) => topology.islands[island].faces);
       this.shown = { vertices, faces, edges: topology.edges.filter(([a]) => inside.has(a)) };
-      // What else is in the groups the shown objects are in, up to the
+      // What else is in the nodes the shown objects are in, up to the
       // outermost one: drawn faintly for reference, not to be touched.
       const around = new Set();
       const collect = (index) => {
@@ -674,7 +675,32 @@ export class OrthoViews {
     } else {
       this.drawContent(view);
     }
+    this.drawNodes(view);
     this.drawGizmo(view);
+  }
+
+  // Every node: a hollow square on its pivot point, over everything - as in
+  // the main view (see node-marks.js).
+  drawNodes(view) {
+    const { context } = view;
+    context.save();
+    context.strokeStyle = NODE_MARK.color;
+    const places = nodePlaces(this.editor, this.posing ? this.animation : null);
+    for (const { at, picked, size } of places) {
+      const p = this.project(view, at);
+      context.globalAlpha = picked ? 1 : NODE_MARK.faint;
+      context.lineWidth = NODE_MARK.line * (picked ? 2 : 1);
+      const inset = context.lineWidth / 2;
+      context.strokeRect(Math.round(p.x - size / 2) + inset, Math.round(p.y - size / 2) + inset, size - 2 * inset, size - 2 * inset);
+    }
+    context.restore();
+    // (a square growing or shrinking: the views drawn again on the next frame)
+    if (places.growing && !this.nodesGrowing) {
+      this.nodesGrowing = requestAnimationFrame(() => {
+        this.nodesGrowing = 0;
+        this.draw();
+      });
+    }
   }
 
   // --- the animation mode: the model posed and painted ---------------------------------
@@ -777,7 +803,7 @@ export class OrthoViews {
   }
 
   // A press in a view, in the animation mode: on an object, it is picked (if
-  // what is picked whole is not it, or a group it is in) and posed by the
+  // what is picked whole is not it, or a node it is in) and posed by the
   // tool in hand as the pointer moves - moved in the view's plane, turned
   // about the view's axis round its pivot, scaled from it. On nothing, a
   // click lets go of what was picked.
@@ -853,7 +879,7 @@ export class OrthoViews {
 
     this.drawSnapDots(view);
 
-    // The rest of the group, behind everything: dark lines, for reference only.
+    // The rest of the node, behind everything: dark lines, for reference only.
     if (this.shown.around.length) {
       context.strokeStyle = theme.around;
       context.lineWidth = AROUND_WIDTH;
@@ -918,7 +944,7 @@ export class OrthoViews {
           fill(keys, color);
         } else {
           // An object: all of its edges.
-          const own = new Set(keys.flatMap((key) => topology.islands[key]?.group ?? []));
+          const own = new Set(keys.flatMap((key) => topology.islands[key]?.node ?? []));
           stroke(this.shown.edges.filter(([a]) => own.has(a)), color);
         }
       };
@@ -960,7 +986,7 @@ export class OrthoViews {
     }
 
     // With the pivot tool: the pivot point being edited and, smaller, those of
-    // what a group holds - the same mark as in the main view.
+    // what a node holds - the same mark as in the main view.
     const entry = this.editor.tool === 'pivot' ? this.editor.pivotEntry() : null;
     if (entry !== null) {
       const mark = (index, radius) => {

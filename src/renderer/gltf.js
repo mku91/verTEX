@@ -214,7 +214,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
   };
   const BODY_MOTION = { static: 'static', kinematic: 'kinematic', dynamic: 'dynamic' };
 
-  // What is hidden, itself or by a group above it, is left out.
+  // What is hidden, itself or by a node above it, is left out.
   const byId = new Map(model.objects.map((object) => [object.id, object]));
   const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
   const shown = model.objects.filter((object) => !hidden(object));
@@ -224,7 +224,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
   const extra = [];
   const extraNode = (node) => shown.length + extra.push(node) - 1;
   for (const object of shown) {
-    const mesh = object.kind === 'group' ? null : meshOf(object);
+    const mesh = object.kind === 'node' ? null : meshOf(object);
     const children = shown.filter((other) => other.parent === object.id).map((other) => numbers.get(other.id));
     const node = {
       name: object.name,
@@ -232,7 +232,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       ...(object.rotation ? { rotation: quaternionOf(object.rotation).toArray() } : {}),
       ...(mesh === null ? {} : { mesh }),
     };
-    const colliders = object.kind === 'group' ? [] : object.colliders ?? [];
+    const colliders = object.kind === 'node' ? [] : object.colliders ?? [];
     if (colliders.length) {
       // A body: the mesh a child of it, and a child for every shape.
       const trigger = object.body === 'trigger';

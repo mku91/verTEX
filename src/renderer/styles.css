@@ -793,44 +793,61 @@ body {
   color: var(--text-dim);
 }
 
-/* The key's mark: a diamond, hollow without a key on the frame, filled with
-   one; half-lit when the value is posed by hand and not keyed yet. */
+/* The key's mark: the shape and colour of its keys on the timeline (see
+   timeline.js) - a position a triangle, a turn a circle, a scale a square -
+   always solid, whole: ringed in white with a key on the frame, in orange
+   when the value is posed by hand and not keyed yet. (The
+   shape is the button's ::before, the ring a filter on the button: a clipped
+   shape's own filter would be clipped with it.) */
 #pose-panel .key-mark {
+  --mark: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+
+#pose-panel .key-mark::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  background: var(--mark);
+}
+
+#pose-panel .key-mark[data-key="position"] { --mark: var(--key-position); }
+#pose-panel .key-mark[data-key="rotation"] { --mark: var(--key-rotation); }
+#pose-panel .key-mark[data-key="scale"] { --mark: var(--key-scale); }
+
+#pose-panel .key-mark[data-key="position"]::before {
+  clip-path: polygon(50% 0, 100% 92%, 0 92%);
+}
+
+#pose-panel .key-mark[data-key="rotation"]::before {
+  border-radius: 50%;
+}
+
+#pose-panel .key-mark[data-key="scale"]::before {
   width: 10px;
   height: 10px;
-  padding: 0;
-  border: 1.5px solid var(--text-dim);
-  background: none;
-  transform: rotate(45deg);
-  cursor: pointer;
 }
 
 #pose-panel .key-mark:hover {
-  border-color: var(--accent);
+  filter: brightness(1.2);
 }
 
 #pose-panel .key-mark.keyed {
-  border-color: var(--accent);
-  background: var(--accent);
+  filter: drop-shadow(1px 0 0 #f8f8f2) drop-shadow(-1px 0 0 #f8f8f2) drop-shadow(0 1px 0 #f8f8f2) drop-shadow(0 -1px 0 #f8f8f2);
 }
 
 #pose-panel .key-mark.posed {
-  border-color: var(--axis-x);
+  filter: drop-shadow(1px 0 0 #ffb86c) drop-shadow(-1px 0 0 #ffb86c) drop-shadow(0 1px 0 #ffb86c) drop-shadow(0 -1px 0 #ffb86c);
 }
-
-/* The marks take their keys' shapes and colours (see timeline.js). */
-#pose-panel .key-mark[data-key="rotation"] {
-  border-radius: 50%;
-  transform: none;
-}
-
-#pose-panel .key-mark[data-key="scale"] {
-  transform: none;
-}
-
-#pose-panel .key-mark[data-key="position"].keyed { border-color: var(--key-position); background: var(--key-position); }
-#pose-panel .key-mark[data-key="rotation"].keyed { border-color: var(--key-rotation); background: var(--key-rotation); }
-#pose-panel .key-mark[data-key="scale"].keyed { border-color: var(--key-scale); background: var(--key-scale); }
 
 #pose-panel label[hidden] {
   display: none;
@@ -1107,15 +1124,17 @@ body {
   text-align: center;
 }
 
+/* A track's name: a press picks its entry with the tool for it (see Timeline.bindLanes()). */
 .tl-track {
   border-top: 0;
   color: var(--text-dim);
   font-size: 0.92em;
-  cursor: default;
+  cursor: pointer;
 }
 
 .tl-track:hover {
-  background: none;
+  background: color-mix(in srgb, var(--hover) 50%, transparent);
+  color: var(--text);
 }
 
 .tl-lanes-box {
@@ -1182,7 +1201,7 @@ body {
 .tl-add.position { background: var(--key-position); }
 /* (the corner's: every track of every entry, white) */
 /* "Только группы", by the corner's "+": lit while on. */
-.tl-groups-only {
+.tl-nodes-only {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1197,16 +1216,16 @@ body {
   cursor: pointer;
 }
 
-.tl-groups-only i {
+.tl-nodes-only i {
   font-size: 12px;
 }
 
-.tl-groups-only:hover {
+.tl-nodes-only:hover {
   background: var(--hover);
   color: var(--text);
 }
 
-.tl-groups-only.active {
+.tl-nodes-only.active {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--accent);
 }
@@ -1908,7 +1927,7 @@ body {
 }
 
 /* Not an object: set apart from the primitives. */
-#add-menu button[data-group] {
+#add-menu button[data-node] {
   margin-top: 4px;
   border-top: 1px solid var(--border);
   border-radius: 0 0 4px 4px;
@@ -2092,6 +2111,21 @@ input.refused {
   color: var(--text);
 }
 
+/* What a node binds (the skin): a row an object, in the skin's green. */
+.outliner-skin {
+  color: var(--text-dim);
+  font-size: 0.92em;
+}
+
+.outliner-row.outliner-skin i {
+  color: #50fa7b;
+  font-size: 0.9em;
+}
+
+.outliner-skin.selected {
+  color: var(--text);
+}
+
 /* An object with something selected in it, and a wholly selected one. */
 .outliner-row.active {
   box-shadow: inset 2px 0 0 var(--accent);
@@ -2102,7 +2136,7 @@ input.refused {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* Selected through its group, not by itself: the same colour, barely there. */
+/* Selected through its node, not by itself: the same colour, barely there. */
 .outliner-row.implied {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 35%, transparent);
@@ -2163,7 +2197,7 @@ input.refused {
 }
 
 /* The eye at the end of a row: hides or shows the object. */
-/* A group's lock: dim while open, lit while shut. */
+/* A node's lock: dim while open, lit while shut. */
 .outliner-lock {
   display: flex;
   flex: none;
@@ -2188,7 +2222,7 @@ input.refused {
   opacity: 1;
 }
 
-/* 'Nearest group': a group picked, in the colour of a picked group's bounds. */
+/* 'Nearest node': a node picked, in the colour of a picked node's bounds. */
 .outliner-lock.nearest,
 .outliner-row .outliner-lock.nearest i {
   color: #ffb86c;
@@ -2199,7 +2233,7 @@ input.refused {
   margin-left: 2px;
 }
 
-/* A group's +: an object made in it. */
+/* A node's +: an object made in it. */
 .outliner-add {
   display: flex;
   flex: none;
@@ -2443,6 +2477,7 @@ input.refused {
 #dimensions p,
 #rotation p,
 #object-props p,
+#skin-panel .properties-header p,
 #properties p {
   flex: 1;
   margin: 0;
@@ -4849,9 +4884,81 @@ option::checkmark {
   color: #50fa7b;
 }
 
+.toast[data-tone="warn"] i {
+  color: #ffb86c;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast,
   .toast.shown {
     translate: -50% 0;
   }
+}
+
+/* The skin panel (see skin.js): a node and "Привязать" on one line, the
+   other two under them, and what the selection bends with. */
+#skin-panel .skin-bind,
+#skin-panel .skin-weight,
+#skin-panel .skin-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+#skin-panel select {
+  flex: 1;
+  height: 26px;
+}
+
+#skin-panel button {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+#skin-panel .skin-actions button {
+  flex: 1;
+}
+
+#skin-panel button:hover {
+  background: var(--hover);
+}
+
+#skin-panel .skin-summary {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#skin-panel .skin-weight label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+#skin-panel .skin-weight label > span {
+  color: var(--text-dim);
+}
+
+#skin-panel .skin-weight .scrub-field {
+  flex: 1;
+}
+
+#skin-panel .skin-weight input {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
 }

@@ -26,6 +26,9 @@ import { AnimationMode } from './animate.js';
 import { ViewsWindow } from './views-window.js';
 import { tell, confirmIt, askSave } from './ask-dialog.js';
 import { toast } from './toast.js';
+import { bindToNode, unbind, smoothWeights, skinSummary, setWeight } from './skin.js';
+import { SkinMarks } from './skin-marks.js';
+import { NodeMarks } from './node-marks.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -39,6 +42,7 @@ const timeline = new Timeline(document.getElementById('timeline'), editor);
 const animationMode = new AnimationMode(document.getElementById('pose-panel'), viewport, editor, timeline);
 // The three views pose too, in the animation mode, and show the pose.
 orthoViews.animation = animationMode;
+new NodeMarks(editor, animationMode); // (every node, a hollow square on its pivot point)
 // The views in a window of their own (see views-window.js).
 const viewsWindow = new ViewsWindow(editor, viewport);
 viewsWindow.animation = animationMode;
@@ -54,6 +58,7 @@ timeline.addEventListener('addkey', (event) => animationMode.writeKeys([event.de
 timeline.addEventListener('insertkey', () => animationMode.keyPicked()); // (as K)
 timeline.addEventListener('keyall', () => animationMode.keyAll());
 new PipetteLoupe(editor);
+new SkinMarks(editor); // (what the skin binds to a node picked: its vertices, in green)
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
 const outliner = new Outliner(document.getElementById('outliner-section'), editor);
@@ -106,7 +111,7 @@ const ACTIONS = {
 
 // Physical key codes, so shortcuts work regardless of keyboard layout.
 // The shortcuts the user can rebind (Settings -> Hotkeys): what each is
-// called, its group there, its default keys and what it does.
+// called, its node there, its default keys and what it does.
 const hotkeys = new Hotkeys(
   [
     { id: 'file.new', group: 'Файл', label: 'Новый проект', keys: 'Ctrl+KeyN', run: () => ACTIONS['project-new']() },
@@ -247,6 +252,64 @@ for (const button of toolButtons) {
   button.addEventListener('click', () => editor.setTool(button.dataset.tool));
 }
 
+// The skin (see skin.js): the vertices selected bound to a node, smoothed, let go.
+// Each says what it did (a toast): in the model workspace a skin shows
+// nothing - it bends only as its nodes are posed, in the animation one.
+// (1 вершина привязана, 4 вершины привязаны, 5 вершин привязано)
+const vertexForm = (count) => (count % 10 === 1 && count % 100 !== 11 ? 0 : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 1 : 2);
+const vertexCount = (count) => `${count} ${['вершина', 'вершины', 'вершин'][vertexForm(count)]}`;
+const done = (count, stem) => `${vertexCount(count)} ${stem}${['а', 'ы', 'о'][vertexForm(count)]}`;
+$('skin-bind').addEventListener('click', () => {
+  const id = Number($('skin-node').value);
+  const count = editor.selection.size;
+  const node = editor.mesh.objects.find((object) => object.id === id)?.name;
+  if (id && bindToNode(editor, id)) toast(`${done(count, 'привязан')} к «${node}»`, { icon: 'fa-link' });
+});
+// The weight of the node chosen, set on the selected vertices.
+const skinWeight = () => {
+  const value = parseFloat($('skin-weight-value').value.replace(',', '.'));
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+};
+const applySkinWeight = () => {
+  const id = Number($('skin-node').value);
+  const weight = skinWeight();
+  const node = editor.mesh.objects.find((object) => object.id === id)?.name;
+  const count = editor.selection.size;
+  if (!id || weight === null) return;
+  const done = setWeight(editor, id, weight);
+  if (!done) return;
+  const set = count - done.stuck;
+  const stuck = `${vertexCount(done.stuck)} с весом 1: их объект не в узле, остаток отдать некуда`;
+  if (!done.stuck) toast(`Вес ${weight} к «${node}»: ${vertexCount(count)}`, { icon: 'fa-weight-hanging' });
+  else if (set === 0) toast(`Вес не изменён — ${stuck}`, { icon: 'fa-triangle-exclamation', tone: 'warn' });
+  else toast(`Вес ${weight} к «${node}»: ${vertexCount(set)}; ${stuck}`, { icon: 'fa-weight-hanging' });
+};
+$('skin-weight-set').addEventListener('click', applySkinWeight);
+$('skin-weight-value').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  applySkinWeight();
+  event.target.blur();
+});
+scrubbable($('skin-weight-value'), {
+  read: () => skinWeight() ?? 1,
+  write: (value) => { $('skin-weight-value').value = value; },
+  min: 0,
+  max: 1,
+  step: 0.05,
+});
+$('skin-weight-set').addEventListener('mousedown', (event) => event.preventDefault());
+$('skin-smooth').addEventListener('click', () => {
+  const count = editor.selection.size;
+  if (smoothWeights(editor)) toast(`Веса сглажены: ${vertexCount(count)}`, { icon: 'fa-wave-square' });
+});
+$('skin-unbind').addEventListener('click', () => {
+  const count = editor.selection.size;
+  if (unbind(editor)) toast(`${done(count, 'отвязан')}`, { icon: 'fa-link-slash' });
+});
+$('skin-node').addEventListener('change', (event) => event.target.blur());
+for (const id of ['skin-bind', 'skin-smooth', 'skin-unbind']) $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
+
 // The objects' properties (see refresh()): of every object the selection is in.
 $('back-faces').addEventListener('change', (event) => {
   editor.setBackFaces(editor.objectsInHand(), event.target.checked);
@@ -364,7 +427,7 @@ for (const input of sizeInputs) {
   });
 }
 
-// The rotation panel: how the object or group has been turned, in degrees; a
+// The rotation panel: how the object or node has been turned, in degrees; a
 // new angle turns it about its pivot point.
 for (const input of rotationInputs) {
   const axis = input.dataset.rotation;
@@ -1139,7 +1202,7 @@ async function exportModel(format) {
   try {
     const model = modelOf(editor);
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(model.objects.find((other) => other.id === object.parent)));
-    const meshes = model.objects.filter((object) => object.kind !== 'group' && !hidden(object));
+    const meshes = model.objects.filter((object) => object.kind !== 'node' && !hidden(object));
     if (!model.faces.some((face) => meshes.some((object) => object.id === model.vertexObject[face[0]]))) {
       await tell('Нечего экспортировать', 'В сцене нет ни одной видимой грани.');
       return;
@@ -1335,7 +1398,7 @@ function setViewsSize(share) {
   } catch {
     // Not a list: nothing is folded.
   }
-  for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) {
+  for (const id of ['dimensions', 'properties', 'rotation', 'object-props', 'skin-panel']) {
     const panel = $(id);
     const header = panel.querySelector('.properties-header');
     const caret = document.createElement('i');
@@ -1404,6 +1467,43 @@ function setPanelWidth(width) {
   setPanelWidth(wanted);
 }
 
+// The skin panel (see skin.js): with something selected and nodes to bend
+// with. The node offered is the one the selection bends with most - or the
+// one picked last - and under it what the selection bends with now.
+function showSkin() {
+  const nodes = editor.mesh.objects.filter((object) => object.kind === 'node');
+  const panel = $('skin-panel');
+  panel.hidden = editor.selection.size === 0 || nodes.length === 0;
+  if (panel.hidden) return;
+  const summary = skinSummary(editor);
+  const select = $('skin-node');
+  const chosen = Number(select.value);
+  const names = nodes.map((node) => `${node.id}:${node.name}`).join('|');
+  if (select.dataset.names !== names) {
+    select.dataset.names = names;
+    select.replaceChildren(...nodes.map((node) => new Option(node.name, node.id)));
+  }
+  // (another selection: the node of the skin row it was picked by, or the
+  // one it bends with most, offered; the same: the one picked kept)
+  const vertices = [...editor.selection];
+  const key = `${vertices.length}:${Math.min(...vertices)}:${Math.max(...vertices)}`;
+  const kept = select.dataset.selection === key && nodes.some((node) => node.id === chosen);
+  const focus = editor.mode === 'vertex' ? editor.skinFocus?.node : null;
+  select.value = kept ? chosen : focus ?? summary.nodes[0]?.id ?? nodes[0].id;
+  select.dataset.selection = key;
+  // The weight field: the selection's mean weight to that node.
+  if (document.activeElement !== $('skin-weight-value')) {
+    const share = summary.nodes.find((entry) => entry.id === Number(select.value))?.share ?? 0;
+    $('skin-weight-value').value = +share.toFixed(2);
+  }
+  const parts = summary.nodes.slice(0, 3).map(({ name, share }) => `${name} ${Math.round(share * 100)}%`);
+  if (summary.nodes.length > 3) parts.push('…');
+  const line = summary.bound === 0
+    ? `Не в скине${parts.length ? ` — двигается с объектом (${parts.join(', ')})` : ''}`
+    : `${parts.join(' · ')}${summary.free ? ` · без узла ${summary.free}` : ''}`;
+  panel.querySelector('.skin-summary').textContent = `${summary.bound} из ${summary.count} в скине · ${line}`;
+}
+
 // 532 -> "532 Б", 20480 -> "20 КБ", 1572864 -> "1.5 МБ".
 function formatBytes(bytes) {
   const units = ['Б', 'КБ', 'МБ', 'ГБ'];
@@ -1462,7 +1562,7 @@ function refresh() {
     input.value = +size[input.dataset.size].toFixed(5);
   }
   $('properties').hidden = picked.size === 0; // only while something is selected
-  // The rotation panel: an object or a group picked whole, in object mode.
+  // The rotation panel: an object or a node picked whole, in object mode.
   const rotation = editor.objectRotation();
   $('rotation').hidden = !rotation;
   for (const input of rotationInputs) {
@@ -1485,8 +1585,9 @@ function refresh() {
   if (document.activeElement !== $('smooth-angle')) {
     $('smooth-angle').value = smoothed.length === 0 ? SMOOTH_ANGLE : angles.size === 1 ? [...angles][0] : '';
   }
+  showSkin();
   // A mode over the model (collisions, animation) has its own panels: the object's are put away.
-  if (editor.workspace !== 'model') for (const id of ['dimensions', 'properties', 'rotation', 'object-props']) $(id).hidden = true;
+  if (editor.workspace !== 'model') for (const id of ['dimensions', 'properties', 'rotation', 'object-props', 'skin-panel']) $(id).hidden = true;
   // The statistics are those of the objects holding the selection; of the
   // whole scene if nothing is selected.
   const { islands, islandOfVertex, edges } = editor.topology;
@@ -1528,7 +1629,7 @@ function refresh() {
   $('cut-options').classList.toggle('shown', editor.operation === 'cut');
   $('place-options').classList.toggle('shown', editor.placed());
   for (const button of placeButtons) button.classList.toggle('active', button.dataset.place === editor.placeSide);
-  // The place tool takes one object or group picked whole.
+  // The place tool takes one object or node picked whole.
   $('place-toggle').disabled = editor.operation !== 'place' && editor.pivotEntry() === null;
   for (const button of cutButtons) button.classList.toggle('active', button.dataset.cut === editor.cutDirection);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css

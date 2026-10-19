@@ -16,7 +16,8 @@ const FINEST_STEP = 0.01; // with Alt held
 //   begin / end   -> called around a drag, e.g. to make it one undo step
 //   whole         -> the value is an integer: Ctrl and Alt make no difference
 //   min, max      -> limits
-export function scrubbable(input, { read, write, begin, end, whole = false, min = -Infinity, max = Infinity }) {
+//   step          -> a step, if not 1 (Ctrl and Alt make it a tenth, a hundredth)
+export function scrubbable(input, { read, write, begin, end, whole = false, min = -Infinity, max = Infinity, step: unit = STEP }) {
   const field = document.createElement('div');
   field.className = 'scrub-field';
   const handle = document.createElement('i');
@@ -53,7 +54,7 @@ export function scrubbable(input, { read, write, begin, end, whole = false, min 
     // so pressing Ctrl or Alt mid-drag doesn't make the value jump.
     const steps = Math.round((press.y - event.clientY) / PIXELS_PER_STEP);
     if (steps === press.steps) return;
-    const step = whole ? STEP : event.altKey ? FINEST_STEP : event.ctrlKey ? FINE_STEP : STEP;
+    const step = unit * (whole ? 1 : event.altKey ? FINEST_STEP : event.ctrlKey ? FINE_STEP : 1);
     const next = press.value + (steps - press.steps) * step;
     press.steps = steps;
     press.value = Math.min(Math.max(+next.toFixed(5), min), max);

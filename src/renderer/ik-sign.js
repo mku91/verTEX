@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // run out of it and fade, as a ripple on water does. Drawn over the model,
 // the same size on the screen however far it is.
 
-const COLOR = 0x50fa7b; // Dracula's green: not the selection's, a group's or the preview's
+const COLOR = 0x50fa7b; // Dracula's green: not the selection's, a node's or the preview's
 const CORE_SIZE = 40; // px across, the ring at rest
 const WAVE_SIZE = 130; // px across, a wave as it is gone
 const BEAT = 0.9; // s, one beat of the ring

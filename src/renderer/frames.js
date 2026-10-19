@@ -3,7 +3,7 @@ import * as THREE from 'three';
 // An object's own frame.
 //
 // The editor works on vertices in world coordinates, but every entry of the
-// objects list - an object or a group - also has a frame of its own: an
+// objects list - an object or a node - also has a frame of its own: an
 // origin (its pivot point) and a rotation, how the entry has been turned as a
 // whole. `rotation` on the entry is Euler angles in degrees, [x, y, z], order
 // XYZ, absent when it has not been turned. Local coordinates - what a project

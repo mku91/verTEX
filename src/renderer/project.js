@@ -16,7 +16,7 @@
 //
 // Since version 2 the model is stored the way such files usually are: every
 // entry of the scene tree has a transform - `position` and `rotation` (Euler
-// degrees, order XYZ) relative to the group it is in - and the vertices of an
+// degrees, order XYZ) relative to the node it is in - and the vertices of an
 // object are in that object's own frame. (Version 1 had the vertices and the
 // pivot points in world coordinates, and no rotation.) The editor itself
 // works in world coordinates: modelOf() and worldModel() go between the two.
@@ -33,7 +33,27 @@ import { soundAnimation } from './animation.js';
 import { tell } from './ask-dialog.js';
 
 const FORMAT = 'vertex-project';
-const VERSION = 3;
+const VERSION = 4;
+
+// How a model written in an older version of the format is brought up to the
+// next one: applied in turn, from the file's own version up to VERSION, before
+// the model is checked - what the program reads is always of the latest kind,
+// and is written so. (Versions 1 and 2 are read as they are: their vertices
+// and transforms are put into the world after, see worldModel().)
+const MIGRATIONS = {
+  // 3 -> 4: the entries that hold others are nodes (kind 'node'), not groups.
+  3: (model) => ({
+    ...model,
+    objects: Array.isArray(model.objects) ? model.objects.map((object) => (object?.kind === 'group' ? { ...object, kind: 'node' } : object)) : model.objects,
+  }),
+};
+
+// A model of format `version` as of the latest one (see MIGRATIONS).
+export function upgradeModel(model, version) {
+  let out = model;
+  for (let at = Math.max(1, version); at < VERSION; at++) if (MIGRATIONS[at] && out) out = MIGRATIONS[at](out);
+  return out;
+}
 const UNTITLED = 'Без названия';
 
 const round = (value) => +value.toFixed(6);
@@ -76,9 +96,9 @@ export function modelOf(editor) {
     // And those whose shape there was changed by hand, which the unwrap does not lay flat again.
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
-    // Every vertex belongs to an object, by id; groups hold objects and groups.
+    // Every vertex belongs to an object, by id; nodes hold objects and nodes.
     objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => {
-      // Inside a group that is not turned the angles are the entry's own, as they were set.
+      // Inside a node that is not turned the angles are the entry's own, as they were set.
       const { position, rotation: turn } = locals.get(id);
       return {
         id,
@@ -100,8 +120,8 @@ export function modelOf(editor) {
         ...(body && body !== 'static' ? { body } : {}),
         // How its animations turn it: by angles (left out) or by quaternions.
         ...(rotationMode === 'quaternion' ? { rotationMode } : {}),
-        // A group picked only whole: a press on anything in it picks it.
-        ...(locked && kind === 'group' ? { locked: locked === 'nearest' ? 'nearest' : true } : {}),
+        // A node picked only whole: a press on anything in it picks it.
+        ...(locked && kind === 'node' ? { locked: locked === 'nearest' ? 'nearest' : true } : {}),
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -111,6 +131,8 @@ export function modelOf(editor) {
     atlas: { width: editor.atlas.width, height: editor.atlas.height },
     // Vertices scaled flat and the sides they came from, see Editor.scaleFlat().
     folds: [...mesh.folds].map(([i, fold]) => [i, { ...fold }]),
+    // The skin: the nodes the vertices bend with, and how much (see skin.js).
+    weights: [...mesh.weights].map(([i, weights]) => [i, weights.map(([node, weight]) => [node, weight])]),
     // The animations (see animation.js); the tracks of objects no longer there are left out.
     animations: editor.animations.map((clip) => ({
       ...clip,
@@ -181,7 +203,7 @@ function worldModel(model) {
   const frames = new Map();
   const frameOf = (object, above = new Set()) => {
     if (frames.has(object.id)) return frames.get(object.id);
-    if (above.has(object.id)) throw new Error('модель повреждена: группа вложена сама в себя');
+    if (above.has(object.id)) throw new Error('модель повреждена: узел вложен сам в себя');
     above.add(object.id);
     const own = { origin: new THREE.Vector3(...object.position), quaternion: quaternionOf(object.rotation) };
     const parent = object.parent === null || object.parent === undefined ? null : byId.get(object.parent);
@@ -190,7 +212,7 @@ function worldModel(model) {
       ? {
           origin: toWorld(own.origin, outer),
           quaternion: outer.quaternion.clone().multiply(own.quaternion),
-          // As in modelOf(): the angles are kept as they are unless a group above turns them.
+          // As in modelOf(): the angles are kept as they are unless a node above turns them.
           rotation: outer.rotation ? rotationOf(outer.quaternion.clone().multiply(own.quaternion)) : object.rotation ?? null,
         }
       : { ...own, rotation: object.rotation ?? null };
@@ -241,7 +263,7 @@ export function readProject(files) {
     throw new Error(`файл сохранён более новой версией программы (формат ${manifest.version}, эта читает до ${VERSION})`);
   }
 
-  const model = parse('model.json');
+  const model = upgradeModel(parse('model.json'), manifest.version);
   const fail = (what) => {
     throw new Error(`модель повреждена: ${what}`);
   };
@@ -266,6 +288,7 @@ export function readProject(files) {
   for (const object of model.objects) {
     const sound =
       object && Number.isInteger(object.id) && !ids.has(object.id) && typeof object.name === 'string' && axes(object.mirror) &&
+      (object.kind === undefined || object.kind === 'mesh' || object.kind === 'node') &&
       (object.color === undefined || typeof object.color === 'string') &&
       (object.oneSided === undefined || typeof object.oneSided === 'boolean') &&
       (object.smooth === undefined || (Number.isFinite(object.smooth) && object.smooth > 0 && object.smooth <= 180)) &&
@@ -292,9 +315,18 @@ export function readProject(files) {
   const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;
   if (model.atlas !== undefined && !(model.atlas && size(model.atlas.width) && size(model.atlas.height))) fail('размер атласа');
   if (model.animations !== undefined && !(Array.isArray(model.animations) && model.animations.every((clip) => soundAnimation(clip, ids)))) fail('анимации');
-  const meshes = new Set(model.objects.filter((object) => object.kind !== 'group').map((object) => object.id));
+  const meshes = new Set(model.objects.filter((object) => object.kind !== 'node').map((object) => object.id));
   if (model.vertexObject.length !== count || !model.vertexObject.every((id) => meshes.has(id))) {
     fail('принадлежность вершин объектам');
+  }
+  if (model.weights !== undefined) {
+    // [vertex, [[node id, weight], ...]]: up to four nodes, each once, weights from 0 to 1.
+    const nodes = new Set(model.objects.filter((object) => object.kind === 'node').map((object) => object.id));
+    const sound = Array.isArray(model.weights) && model.weights.every((entry) => Array.isArray(entry) && isIndex(entry[0], count) &&
+      Array.isArray(entry[1]) && entry[1].length >= 1 && entry[1].length <= 4 &&
+      new Set(entry[1].map(([node]) => node)).size === entry[1].length &&
+      entry[1].every((pair) => Array.isArray(pair) && nodes.has(pair[0]) && Number.isFinite(pair[1]) && pair[1] >= 0 && pair[1] <= 1));
+    if (!sound) fail('веса скина');
   }
 
   let view = null;
@@ -382,8 +414,11 @@ export class Project extends EventTarget {
 
   // Writes the project; asks where if it has no file yet or `elsewhere` is
   // set. Returns whether it was written.
+  // (Nothing changed since the file was written: there is nothing to write -
+  // unless it is to go elsewhere.)
   async write(elsewhere) {
     if (this.editor.busy()) return false;
+    if (!elsewhere && this.path && !this.dirty) return true;
     const files = await projectFilesWithTextures(this.editor);
     const picture = await this.picture?.();
     if (picture) files['preview.png'] = picture;

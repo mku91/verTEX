@@ -33,13 +33,18 @@ export class PoseGhost {
     const moved = new Set();
     if (pose?.on && keyed) {
       for (const [id, matrix] of keyed) if (shown.has(id) && differ(matrix, shown.get(id))) moved.add(id);
+      // (an object in the skin moves when a node it bends with does)
+      for (const [vertex, { weights }] of pose.skin) {
+        if (weights.some(([node]) => moved.has(node))) moved.add(this.editor.mesh.vertexObject[vertex]);
+      }
     }
     const { mesh, view, viewport } = this.editor;
     const at = new Map(); // vertex -> where the keys have it
+    const placed = moved.size ? pose.placed(keyed) : null;
     for (const id of moved) {
       const object = pose.objects.get(id);
       if (!object) continue;
-      object.vertices.forEach((vertex, k) => at.set(vertex, object.local[k].clone().applyMatrix4(keyed.get(id))));
+      for (const vertex of object.vertices) at.set(vertex, placed[vertex]);
     }
     const triangles = [];
     const drawn = new Set(); // (the vertices of the faces drawn: not those hidden)

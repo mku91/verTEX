@@ -1,3 +1,6 @@
+import * as THREE from 'three';
+import { GizmoDial } from './gizmo-dial.js';
+
 // Colour themes. Every colour in the app comes from the current theme, by role:
 // the interface reads them as CSS variables, the views read `theme` directly.
 
@@ -33,7 +36,7 @@ export const THEMES = {
     hoveredFocus: '#f1fa8c',
     cut: '#50fa7b',
     pivot: '#f1fa8c', // pivot point markers outside the pivot tool
-    around: '#44475a', // the rest of the group, in the three views
+    around: '#44475a', // the rest of the node, in the three views
     snapDot: '#f8f8f2',
     faceFront: '#8be9fd', // face orientation display: the side a face looks to
     faceBack: '#ff5555', // ...and its reverse
@@ -138,8 +141,66 @@ export function axisColor(axis) {
 // A gizmo (TransformControls) in the theme's colours: its axes as the
 // world's, the one under the pointer as the hovered vertex in focus - and
 // again whenever the theme changes.
-export function themeGizmo(gizmo) {
+// (`viewport`: where its rotation rings become a dial while held, see gizmo-dial.js)
+export function themeGizmo(gizmo, viewport = null) {
   const paint = () => gizmo.setColors(theme.axisX, theme.axisY, theme.axisZ, theme.hoveredFocus);
   paint();
   onThemeChange(paint);
+  thickenRings(gizmo);
+  thickenShafts(gizmo);
+  if (viewport) new GizmoDial(gizmo, viewport);
+}
+
+// The gizmos' lines, all of one thickness - thicker than TransformControls
+// draws them (0.0075, three-sided), and round. (What the pointer takes them
+// by is TransformControls' own, wider still.)
+const LINE_RADIUS = 0.014;
+
+// The rotation gizmo's rings: rebuilt as it builds them - a torus turned
+// into the plane of its axis - with a tube of LINE_RADIUS.
+const RING_TUBE = LINE_RADIUS;
+// The two rings that are not an axis' - turning freely (XYZE, grey) and
+// about the line of sight (E, the outer one) - fainter, so that the axes'
+// stand out; lit whole while under the pointer, as every handle is.
+const RING_OPACITY = { XYZE: 0.25, E: 0.15 };
+const RING_TURNS = { XYZE: [0, Math.PI / 2, 0], X: [0, 0, 0], Y: [0, 0, -Math.PI / 2], Z: [0, Math.PI / 2, 0], E: [0, Math.PI / 2, 0] };
+function thickenRings(gizmo) {
+  for (const handle of gizmo._gizmo?.gizmo?.rotate?.children ?? []) {
+    const { parameters } = handle.geometry ?? {};
+    const turn = RING_TURNS[handle.name];
+    if (!turn || handle.geometry.type !== 'TorusGeometry' || !parameters) continue;
+    const ring = new THREE.TorusGeometry(parameters.radius, RING_TUBE, 6, 96, parameters.arc);
+    ring.rotateY(Math.PI / 2);
+    ring.rotateX(Math.PI / 2);
+    ring.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...turn)));
+    handle.geometry.dispose();
+    handle.geometry = ring;
+    if (RING_OPACITY[handle.name] !== undefined) {
+      // (a material of its own: TransformControls shares its grey and its yellow with other handles)
+      handle.material = handle.material.clone();
+      handle.material.opacity = handle.material._opacity = RING_OPACITY[handle.name];
+    }
+  }
+}
+
+// The move and scale gizmos' shafts (cylinders from the middle out along an
+// axis, turned there): rebuilt round and LINE_RADIUS thick, along the axis
+// and about the middle they had.
+function thickenShafts(gizmo) {
+  const { translate, scale } = gizmo._gizmo?.gizmo ?? {};
+  for (const handle of [...(translate?.children ?? []), ...(scale?.children ?? [])]) {
+    const { type, parameters } = handle.geometry ?? {};
+    if (type !== 'CylinderGeometry' || parameters?.radiusTop !== parameters?.radiusBottom || !(parameters?.radiusTop < 0.01)) continue;
+    handle.geometry.computeBoundingBox();
+    const box = handle.geometry.boundingBox;
+    const size = box.getSize(new THREE.Vector3());
+    const axis = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
+    const shaft = new THREE.CylinderGeometry(LINE_RADIUS, LINE_RADIUS, size[axis], 8);
+    if (axis === 'x') shaft.rotateZ(-Math.PI / 2);
+    if (axis === 'z') shaft.rotateX(Math.PI / 2);
+    const middle = box.getCenter(new THREE.Vector3());
+    shaft.translate(middle.x, middle.y, middle.z);
+    handle.geometry.dispose();
+    handle.geometry = shaft;
+  }
 }

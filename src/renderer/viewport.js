@@ -303,7 +303,7 @@ export class Viewport {
 
   render() {
     this.renderQueued = false;
-    // (what follows the scene as it is drawn - a group's bounds - first)
+    // (what follows the scene as it is drawn - a node's bounds - first)
     for (const listener of this.beforeRender ?? []) listener();
     // The camera's matrices are brought up to date by the main pass, which
     // comes after the depth pass - so the depth pass does it first, or it

@@ -66,7 +66,7 @@ export class Mirror {
   // its own, through its pivot point, or else the scene's. Empty = none.
   planesFor(objectIndex) {
     const object = this.editor.mesh.objects[objectIndex];
-    if (!object || object.kind === 'group') return [];
+    if (!object || object.kind === 'node') return [];
     if (object.mirror?.length) {
       const pivot = this.editor.pivotPoint(objectIndex);
       return object.mirror.map((axis) => ({ axis, value: pivot[axis], local: true }));
@@ -87,7 +87,7 @@ export class Mirror {
     const lists = subsets([...this.globalAxes].map((axis) => ({ axis, value: 0 })));
     const points = new Map(); // object id -> where its vertices stand
     for (const object of objects) {
-      if (object.kind !== 'group' && !object.mirror?.length) points.set(object.id, []);
+      if (object.kind !== 'node' && !object.mirror?.length) points.set(object.id, []);
     }
     vertices.forEach((p, i) => points.get(vertexObject[i])?.push(p));
     const placeOf = (list) => list.map(keyOf).sort().join(';');

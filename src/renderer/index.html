@@ -109,7 +109,7 @@
         <button id="collision-button" title="Коллизии: фигуры столкновений объектов для Godot — добавить вручную или подобрать автоматически, затем поправить">
           <i class="fa-solid fa-shapes"></i><span>Коллизии</span>
         </button>
-        <button id="animation-button" data-action="toggle-animation" title="Анимация: движение объектов и групп по ключевым кадрам — для экспорта в Godot">
+        <button id="animation-button" data-action="toggle-animation" title="Анимация: движение объектов и узлов по ключевым кадрам — для экспорта в Godot">
           <i class="fa-solid fa-film"></i><span>Анимация</span>
         </button>
         <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
@@ -283,8 +283,8 @@
       <p class="tl-empty" hidden>Клипов пока нет — создайте первый кнопкой «+» вверху</p>
       <div class="tl-body">
         <div class="tl-corner">
-          <button class="tl-groups-only" data-tl="groupsonly" title="Только группы: в таймлайне видны только группы, ключи ставятся только им, а щелчок по объекту в виде выделяет его группу. Ключи самих объектов остаются в клипе и проигрываются, но не видны"><i class="fa-solid fa-folder"></i></button>
-          <button class="tl-add tl-add-all" data-tl="keyall" title="Ключ на всё: позиция, поворот и масштаб всех объектов и групп на текущем кадре, как они показаны">+</button>
+          <button class="tl-nodes-only" data-tl="nodesonly" title="Только узлы: в таймлайне видны только узлы, ключи ставятся только им, а щелчок по объекту в виде выделяет его узел. Ключи самих объектов остаются в клипе и проигрываются, но не видны"><i class="fa-solid fa-circle-nodes"></i></button>
+          <button class="tl-add tl-add-all" data-tl="keyall" title="Ключ на всё: позиция, поворот и масштаб всех объектов и узлов на текущем кадре, как они показаны">+</button>
         </div>
         <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — прокрутка · Ctrl+колесо — масштаб · средняя кнопка — сдвиг"></canvas>
         <div class="tl-scroll">
@@ -348,7 +348,7 @@
           <button data-primitive="cone">Конус…</button>
           <button data-primitive="cylinder">Цилиндр…</button>
           <button data-primitive="sphere">Сфера…</button>
-          <button data-group>Группа</button>
+          <button data-node>Узел</button>
         </div>
         <form id="add-form" hidden>
           <h3></h3>
@@ -480,6 +480,24 @@
           <input type="text" id="smooth-angle" class="angle" inputmode="numeric" spellcheck="false" title="Рёбра острее этого угла (в градусах) не сглаживаются">
           <span class="unit">°</span>
         </label>
+      </div>
+      <div id="skin-panel" hidden>
+        <div class="properties-header">
+          <p>Скин</p>
+        </div>
+        <div class="skin-bind">
+          <select id="skin-node" title="Узел-кость, к которому привязать выделенные вершины"></select>
+          <button type="button" id="skin-bind" title="Выделенные вершины гнутся целиком с этим узлом (вес 1). Опорная точка узла — сустав">Привязать</button>
+        </div>
+        <div class="skin-weight">
+          <label title="Насколько выделенные вершины гнутся с этим узлом: 1 — целиком, 0.5 — наполовину. Остальное — тем, с чем они гнулись (или узлу их объекта)"><span>Вес</span><input type="text" id="skin-weight-value" inputmode="decimal" spellcheck="false"></label>
+          <button type="button" id="skin-weight-set" title="Задать этот вес выбранного узла выделенным вершинам">Задать</button>
+        </div>
+        <div class="skin-actions">
+          <button type="button" id="skin-smooth" title="Веса выделенных вершин становятся похожи на веса соседей по рёбрам — сустав гнётся плавно, а не на одном ребре. Можно нажать несколько раз">Сгладить</button>
+          <button type="button" id="skin-unbind" title="Выделенные вершины больше не гнутся: двигаются целиком со своим объектом">Отвязать</button>
+        </div>
+        <p class="skin-summary"></p>
       </div>
       </section>
       <section id="texture-section">

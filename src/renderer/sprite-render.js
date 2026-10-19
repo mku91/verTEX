@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { keepToFaces } from './mesh.js';
-import { ModelPose, clipValues, posedMatrices } from './pose.js';
+import { clipValues, posedMatrices, localTransforms, worldFrames } from './pose.js';
 import { spriteFrames } from './animation.js';
 
 // The model drawn into a sprite sheet: one frame for every direction it is
@@ -58,15 +58,13 @@ import { spriteFrames } from './animation.js';
 // What is drawn is what the editor shows: the visible objects' faces - no
 // grid, edges, points or selection.
 //
-// The model may be drawn in its animation clips' poses too (clipSheets()):
+// The model may be drawn in its animation clips' poses too (render()):
 // every clip at `spriteFps` frames a second of its own (see spriteFrames()
 // in animation.js), and every frame from every direction - a strip of the
 // clip's frames for each direction, laid out as the sheet's grid says. All
 // the frames of all the clips are drawn about one and the same point - the
 // middle of all the poses' bounds - so that the model does not shift from
 // one frame to the next, nor from one clip to another.
-
-const ALPHA_CUT = 128; // a pixel is there from this alpha on
 
 export const SPRITE_DEFAULTS = {
   directions: 8,
@@ -221,17 +219,285 @@ export class SpriteRenderer {
     });
   }
 
-  // The frames: an ImageData for every direction, in order; [] with nothing
-  // to draw. `fixed`: the point drawn about and how far the model reaches
-  // from it ({ center, radius }), if not the model's own bounds' as it is.
-  frames(settings, fixed = null) {
+  // --- the render, bit by bit ------------------------------------------------------
+  //
+  // render() makes the sheets without holding the page up, however many
+  // frames there are:
+  //   - the surface drawn is a copy of the view's, posed here for every pose
+  //     of a clip - the model on the screen is left as it is;
+  //   - the frames are drawn side by side, each in a cell of one large
+  //     picture, and read back from the graphics card a whole batch at a
+  //     time, without waiting for it (readRenderTargetPixelsAsync);
+  //   - what is read back is cut into frames and laid out on the sheets in a
+  //     worker, on a thread of its own (see sprite-worker.js) - and made PNG
+  //     there, for export;
+  //   - the drawing goes on in slices of a few milliseconds, the page
+  //     breathing between them; a render that is no longer wanted
+  //     (`cancelled()`) stops at the next slice.
+  // One render at a time: the next waits for the one before to stop.
+  // (The cells start on multiples of 4 px, the dithering's pattern - laid
+  // by the picture's pixels, see inSteps() - lies on every frame as it
+  // would on a picture of its own.)
+
+  // The worker the frames are laid out in.
+  worker() {
+    this.layoutWorker ??= new Worker(new URL('./sprite-worker.js', import.meta.url));
+    return this.layoutWorker;
+  }
+
+  // The surface to draw - the view's, coloured as in the preview look - a
+  // copy of its own: as it is shown, or (`rest`) as the model has it at
+  // rest, the animation mode's pose put aside meanwhile.
+  surface(rest) {
+    const { view } = this.editor;
+    const before = rest ? view.posed : null;
+    if (before) {
+      view.posed = null;
+      view.updatePositions();
+    }
+    try {
+      return this.withBareSurface((geometry) => geometry.clone());
+    } finally {
+      if (before) {
+        view.posed = before;
+        view.updatePositions();
+      }
+    }
+  }
+
+  // Points of the model at rest, in the frames of their objects: for
+  // `vertices` (indices) { objects (ids), places (x, y, z each) } - and, with
+  // `geometry` (the surface, a corner a vertex of `vertices`), the corners'
+  // normals too, for posing it (see posed()).
+  restPoints(vertices, geometry = null) {
+    const { mesh } = this.editor;
+    const frames = worldFrames(this.editor);
+    const back = new Map(); // id -> its frame's turn, undone
+    const objects = new Array(vertices.length);
+    const places = new Float32Array(vertices.length * 3);
+    const normals = geometry ? new Float32Array(vertices.length * 3) : null;
+    const normal = geometry?.getAttribute('normal');
+    const point = new THREE.Vector3();
+    vertices.forEach((vertex, i) => {
+      const id = mesh.vertexObject[vertex];
+      const frame = frames.get(id);
+      if (!back.has(id)) back.set(id, frame.quaternion.clone().invert());
+      objects[i] = id;
+      point.copy(mesh.vertices[vertex]).sub(frame.origin).applyQuaternion(back.get(id)).toArray(places, i * 3);
+      if (normals) point.fromBufferAttribute(normal, i).applyQuaternion(back.get(id)).toArray(normals, i * 3);
+    });
+    return { objects, places, normals };
+  }
+
+  // Every point of `points` (see restPoints()) where the pose `matrices`
+  // (Map id -> Matrix4, see posedMatrices()) puts it: `visit(x, y, z)`.
+  eachPosed(points, matrices, visit) {
+    const { objects, places } = points;
+    for (let i = 0; i < objects.length; i++) {
+      const e = matrices.get(objects[i])?.elements;
+      const x = places[i * 3];
+      const y = places[i * 3 + 1];
+      const z = places[i * 3 + 2];
+      if (e) visit(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]);
+    }
+  }
+
+  // The copy of the surface put in the pose `matrices`: its corners' places
+  // and normals (`corners`: restPoints() of its corners, with the normals).
+  posed(geometry, corners, matrices) {
+    const position = geometry.getAttribute('position');
+    const normal = geometry.getAttribute('normal');
+    const p = position.array;
+    const n = normal.array;
+    const { objects, places, normals } = corners;
+    const turns = new Map(); // id -> its normal matrix's elements
+    let at = 0;
+    this.eachPosed(corners, matrices, (x, y, z) => {
+      // (eachPosed() leaves out no corner: every object is in a pose)
+      while (!matrices.has(objects[at])) at++;
+      const i = at * 3;
+      p[i] = x;
+      p[i + 1] = y;
+      p[i + 2] = z;
+      const id = objects[at];
+      let m = turns.get(id);
+      if (!m) {
+        m = new THREE.Matrix3().getNormalMatrix(matrices.get(id)).elements;
+        turns.set(id, m);
+      }
+      const a = normals[i];
+      const b = normals[i + 1];
+      const c = normals[i + 2];
+      const nx = m[0] * a + m[3] * b + m[6] * c;
+      const ny = m[1] * a + m[4] * b + m[7] * c;
+      const nz = m[2] * a + m[5] * b + m[8] * c;
+      const length = Math.hypot(nx, ny, nz) || 1;
+      n[i] = nx / length;
+      n[i + 1] = ny / length;
+      n[i + 2] = nz / length;
+      at++;
+    });
+    position.needsUpdate = true;
+    normal.needsUpdate = true;
+  }
+
+  // The vertices drawn: those of the faces shown, each once.
+  shownVertices() {
+    return [...new Set(this.editor.view.triangleIndices ?? [])];
+  }
+
+  // Every pose of the clips a sprite takes, worked out as it is asked for:
+  // [{ clip, frames, matrices(i) }] - the matrices of its i-th frame.
+  clipPoses(clips, spriteFps) {
+    const locals = localTransforms(this.editor);
+    return clips.map((clip) => {
+      const frames = spriteFrames(clip, spriteFps);
+      const matrices = (i) => posedMatrices(this.editor, clipValues(this.editor, clip, frames[i], new Map(), locals), locals);
+      return { clip, frames, matrices };
+    });
+  }
+
+  // The point all the clips' frames are drawn about - the middle of the
+  // bounds of all their poses - and how far the model reaches from it (as
+  // bounds() has it); null with nothing to draw. `poses`: clipPoses(); every
+  // pose's matrices kept on it (`matrices.all`) for the drawing.
+  async reachOf(points, poses, breathe = async () => {}) {
+    const box = new THREE.Box3();
+    const point = new THREE.Vector3();
+    for (const pose of poses) {
+      pose.all = [];
+      for (let i = 0; i < pose.frames.length; i++) {
+        const matrices = pose.matrices(i);
+        pose.all.push(matrices);
+        this.eachPosed(points, matrices, (x, y, z) => box.expandByPoint(point.set(x, y, z)));
+        await breathe();
+      }
+    }
+    if (box.isEmpty()) return null;
+    return { center: box.getCenter(new THREE.Vector3()), radius: Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3) };
+  }
+
+  // The smallest frame size every pose of the clips fits in, from every
+  // direction of the settings, a pixel to spare all round; null with nothing
+  // to draw. (fit(), for the clips.)
+  async fitClips(settings, clips) {
+    const points = this.restPoints(this.shownVertices());
+    const poses = this.clipPoses(clips, settings.spriteFps);
+    const reach = await this.reachOf(points, poses);
+    if (!reach) return null;
+    const unit = this.pixelsPerUnit(settings);
+    let x = 0;
+    let y = 0;
+    for (let k = 0; k < settings.directions; k++) {
+      this.aim(settings, k, reach.center, reach.radius);
+      const e = this.camera.matrixWorldInverse.elements;
+      for (const pose of poses) {
+        for (const matrices of pose.all) {
+          this.eachPosed(points, matrices, (px, py, pz) => {
+            x = Math.max(x, Math.abs(e[0] * px + e[4] * py + e[8] * pz + e[12]));
+            y = Math.max(y, Math.abs(e[1] * px + e[5] * py + e[9] * pz + e[13]));
+          });
+        }
+      }
+    }
+    return { width: 2 * Math.ceil(x * unit) + 2, height: 2 * Math.ceil(y * unit) + 2 };
+  }
+
+  // The sheets, bit by bit (see above): the model as it is shown - one sheet,
+  // a frame for every direction - or, with `clips`, those of them `drawn` in
+  // their poses (drawn about the point of all of them): a sheet for every
+  // clip's direction. Each sheet { canvas (an ImageBitmap) - or, with `png`,
+  // png (its bytes) - width, height, frames: [{ x, y, w, h, angle }], columns,
+  // rows }:
+  //   - as it is shown: that sheet;
+  //   - the clips: [{ name, loop, fps, frames (how many), directions:
+  //     [{ angle, ...a sheet }] }].
+  // { empty: true } with nothing to draw; null if cancelled. `progress(part)`
+  // is told how far it has got, 0 to 1.
+  async render(settings, { clips = null, drawn = clips, png = false } = {}, { cancelled = () => false, progress = () => {} } = {}) {
+    const before = this.running;
+    let finished;
+    this.running = new Promise((resolve) => {
+      finished = resolve;
+    });
+    await before;
+    try {
+      return cancelled() ? null : await this.draw(settings, { clips, drawn, png }, cancelled, progress);
+    } finally {
+      finished();
+    }
+  }
+
+  async draw(settings, { clips, drawn, png }, cancelled, progress) {
     const { renderer } = this.editor.viewport;
     const { atlas } = this.editor;
     this.atlasSize.set(atlas.width, atlas.height);
-    return this.withBareSurface((geometry) => {
-      const own = this.bounds(geometry);
-      const reach = own && (fixed ?? own);
-      if (!reach) return [];
+    const geometry = this.surface(Boolean(clips));
+    const job = (this.jobs = (this.jobs ?? 0) + 1);
+    const worker = this.worker();
+    let target = null;
+    let drawing = null; // the renderer's state before a slice of drawing, while one goes on
+    const leave = () => {
+      if (!drawing) return;
+      renderer.setRenderTarget(drawing.target);
+      renderer.setClearColor(drawing.color, drawing.alpha);
+      drawing = null;
+    };
+    const enter = () => {
+      if (drawing) return;
+      drawing = { target: renderer.getRenderTarget(), color: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
+      renderer.setClearColor(0x000000, 0);
+    };
+    // A breath between slices: the page goes on, then the render - unless it is no longer wanted.
+    let slice = performance.now();
+    const breathe = async (now = false) => {
+      if (!now && performance.now() - slice < SLICE) return;
+      leave();
+      await (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0)));
+      if (cancelled()) throw CANCELLED;
+      slice = performance.now();
+    };
+    try {
+      // What is drawn: the poses (none: as shown), each from every direction, and the sheets they go on.
+      const { directions, width, height } = settings;
+      let reach;
+      let samples; // [{ matrices, sheet(k), frame(k) }]
+      let sheets; // [{ layout, angle }]
+      let corners = null;
+      let shown = null;
+      if (!clips) {
+        reach = this.bounds(geometry);
+        if (!reach) return { empty: true };
+        sheets = [{ layout: sheetLayout(directions, settings), angle: null }];
+        samples = [{ matrices: null, sheet: () => 0, frame: (k) => k }];
+      } else {
+        const vertices = this.shownVertices();
+        corners = this.restPoints(this.editor.view.triangleIndices ?? [], geometry);
+        const poses = this.clipPoses(clips, settings.spriteFps);
+        reach = await this.reachOf(this.restPoints(vertices), poses, breathe);
+        if (!reach) return { empty: true };
+        shown = poses.filter(({ clip }) => drawn.includes(clip));
+        sheets = [];
+        samples = [];
+        shown.forEach((pose) => {
+          const base = sheets.length;
+          for (let k = 0; k < directions; k++) sheets.push({ layout: sheetLayout(pose.frames.length, settings), angle: directionAngle(settings, k) });
+          pose.all.forEach((matrices, i) => samples.push({ matrices, sheet: (k) => base + k, frame: () => i }));
+        });
+      }
+      worker.postMessage({ type: 'begin', job, sheets: sheets.map(({ layout }) => ({ w: layout.w, h: layout.h })) });
+
+      // The batch picture: cells a frame each, as many as fit (or are wanted).
+      const total = samples.length * directions;
+      const cellW = Math.ceil(width / 4) * 4;
+      const cellH = Math.ceil(height / 4) * 4;
+      const largest = Math.min(BATCH_SIZE, renderer.capabilities.maxTextureSize);
+      const columns = Math.max(1, Math.min(total, Math.floor(largest / cellW)));
+      const rows = Math.max(1, Math.min(Math.ceil(total / columns), Math.floor(largest / cellH)));
+      target = new THREE.WebGLRenderTarget(columns * cellW, rows * cellH, { samples: 0 });
+      target.texture.colorSpace = THREE.SRGBColorSpace; // the colours as the screen has them
+      target.scissorTest = true;
+
       this.mesh.geometry = geometry;
       this.mesh.material = this.materialsFor(settings);
       const { ambient, head, sun, sky } = this.lights;
@@ -240,178 +506,110 @@ export class SpriteRenderer {
       sun.intensity = settings.lightStrength;
       sun.target.position.copy(reach.center);
       sun.position.copy(reach.center).addScaledVector(lightDirection(settings.lightAzimuth, settings.lightElevation), reach.radius * 4 + 1);
-      const target = new THREE.WebGLRenderTarget(settings.width, settings.height, { samples: 0 });
-      target.texture.colorSpace = THREE.SRGBColorSpace; // the colours as the screen has them
-      const before = { target: renderer.getRenderTarget(), color: renderer.getClearColor(new THREE.Color()), alpha: renderer.getClearAlpha() };
-      const bytes = new Uint8Array(settings.width * settings.height * 4);
-      const frames = [];
-      try {
-        renderer.setRenderTarget(target);
-        renderer.setClearColor(0x000000, 0);
-        for (let k = 0; k < settings.directions; k++) {
+
+      let tiles = [];
+      // The cells drawn so far, read back and sent to the worker.
+      const flush = async () => {
+        if (tiles.length === 0) return;
+        leave();
+        const used = Math.ceil(tiles.length / columns) * cellH;
+        const buffer = new Uint8Array(target.width * used * 4);
+        await renderer.readRenderTargetPixelsAsync(target, 0, 0, target.width, used, buffer);
+        if (cancelled()) throw CANCELLED;
+        worker.postMessage({ type: 'tiles', job, buffer: buffer.buffer, width: target.width, tiles }, [buffer.buffer]);
+        tiles = [];
+      };
+      let done = 0;
+      for (const sample of samples) {
+        if (sample.matrices) this.posed(geometry, corners, sample.matrices);
+        for (let k = 0; k < directions; k++) {
+          enter();
+          const cell = tiles.length;
+          const gx = (cell % columns) * cellW;
+          const gy = Math.floor(cell / columns) * cellH;
+          target.viewport.set(gx, gy, width, height);
+          target.scissor.set(gx, gy, width, height);
+          renderer.setRenderTarget(target);
           this.aim(settings, k, reach.center, reach.radius);
-          renderer.clear();
-          renderer.render(this.scene, this.camera);
-          renderer.readRenderTargetPixels(target, 0, 0, settings.width, settings.height, bytes);
-          frames.push(this.toImage(bytes, settings.width, settings.height));
-        }
-      } finally {
-        renderer.setRenderTarget(before.target);
-        renderer.setClearColor(before.color, before.alpha);
-        target.dispose();
-        this.editor.viewport.requestRender();
-      }
-      return frames;
-    });
-  }
-
-  // The pixels read back (rows from the bottom) as an ImageData (rows from the
-  // top), every pixel there or not.
-  toImage(bytes, width, height) {
-    const image = new ImageData(width, height);
-    for (let row = 0; row < height; row++) {
-      image.data.set(bytes.subarray((height - 1 - row) * width * 4, (height - row) * width * 4), row * width * 4);
-    }
-    for (let i = 3; i < image.data.length; i += 4) {
-      if (image.data[i] < ALPHA_CUT) image.data.fill(0, i - 3, i + 1);
-      else image.data[i] = 255;
-    }
-    return image;
-  }
-
-  // The sheet: { canvas, frames: [{ x, y, w, h, angle }], columns, rows } -
-  // the frames laid out in the grid of the settings (see the top); null
-  // with nothing to draw.
-  sheet(settings) {
-    const images = this.frames(settings);
-    if (images.length === 0) return null;
-    return this.compose(images, settings, (k) => directionAngle(settings, k));
-  }
-
-  // Images (of the settings' frame size) laid out on a sheet in the grid of
-  // the settings, as sheet() gives it; `angleOf(k)`: the turn frame k is
-  // seen at.
-  compose(images, settings, angleOf) {
-    const { columns, rows } = sheetGrid(images.length, settings);
-    const canvas = document.createElement('canvas');
-    const pot = (size) => (settings.pot ? 2 ** Math.ceil(Math.log2(size)) : size);
-    canvas.width = pot(columns * settings.width + (columns - 1) * settings.padding);
-    canvas.height = pot(rows * settings.height + (rows - 1) * settings.padding);
-    const context = canvas.getContext('2d');
-    const frames = images.map((image, k) => {
-      const x = (k % columns) * (settings.width + settings.padding);
-      const y = Math.floor(k / columns) * (settings.height + settings.padding);
-      context.putImageData(image, x, y);
-      return { x, y, w: settings.width, h: settings.height, angle: angleOf(k) };
-    });
-    return { canvas, frames, columns, rows };
-  }
-
-  // --- the clips ----------------------------------------------------------------
-
-  // Runs `draw(pose)` with a ModelPose of its own, for the clips' poses to
-  // be put on the view by; the view is given back as it was after - with
-  // the pose the animation mode shows, if any.
-  withPose(draw) {
-    const { view } = this.editor;
-    const before = view.posed;
-    const pose = new ModelPose(this.editor);
-    pose.begin();
-    try {
-      return draw(pose);
-    } finally {
-      pose.end();
-      if (before) {
-        view.posed = before;
-        view.updatePositions();
-      }
-    }
-  }
-
-  // Every pose of the clips a sprite takes: [{ clip, frames, matrices[] }].
-  clipPoses(clips, spriteFps) {
-    return clips.map((clip) => {
-      const frames = spriteFrames(clip, spriteFps);
-      return { clip, frames, matrices: frames.map((frame) => posedMatrices(this.editor, clipValues(this.editor, clip, frame))) };
-    });
-  }
-
-  // Where the vertices drawn (those of the faces shown) are in every pose
-  // of `poses` (see clipPoses()): the points of all of them together.
-  posedPoints(pose, poses) {
-    const shown = new Set(this.editor.view.triangleIndices ?? []);
-    const points = [];
-    for (const { matrices } of poses) {
-      for (const placed of matrices) {
-        for (const [id, { vertices, local }] of pose.objects) {
-          const matrix = placed.get(id);
-          vertices.forEach((vertex, k) => {
-            if (shown.has(vertex)) points.push(matrix ? local[k].clone().applyMatrix4(matrix) : this.editor.mesh.vertices[vertex].clone());
-          });
+          renderer.render(this.scene, this.camera); // (cleared first: the cell, by the scissor)
+          const sheet = sample.sheet(k);
+          const place = sheets[sheet].layout.places[sample.frame(k)];
+          tiles.push({ gx, gy, w: width, h: height, sheet, x: place.x, y: place.y });
+          done++;
+          if (tiles.length === columns * rows) await flush();
+          if (performance.now() - slice >= SLICE) {
+            progress(done / total);
+            await breathe(true);
+          }
         }
       }
-    }
-    return points;
-  }
+      await flush();
+      progress(1);
 
-  // The point all the clips' frames are drawn about - the middle of the
-  // bounds of all their poses - and how far the model reaches from it; null
-  // with nothing to draw.
-  reachOf(points) {
-    if (points.length === 0) return null;
-    const center = new THREE.Box3().setFromPoints(points).getCenter(new THREE.Vector3());
-    let far = 0;
-    for (const point of points) far = Math.max(far, point.distanceToSquared(center));
-    return { center, radius: Math.max(Math.sqrt(far), 1e-3) };
-  }
-
-  // The smallest frame size every pose of the clips fits in, from every
-  // direction of the settings, a pixel to spare all round; null with nothing
-  // to draw. (fit(), for the clips.)
-  fitClips(settings, clips) {
-    return this.withPose((pose) => {
-      const points = this.posedPoints(pose, this.clipPoses(clips, settings.spriteFps));
-      const reach = this.reachOf(points);
-      if (!reach) return null;
-      const unit = this.pixelsPerUnit(settings);
-      const point = new THREE.Vector3();
-      let x = 0;
-      let y = 0;
-      for (let k = 0; k < settings.directions; k++) {
-        this.aim(settings, k, reach.center, reach.radius);
-        for (const each of points) {
-          point.copy(each).applyMatrix4(this.camera.matrixWorldInverse);
-          x = Math.max(x, Math.abs(point.x));
-          y = Math.max(y, Math.abs(point.y));
-        }
-      }
-      return { width: 2 * Math.ceil(x * unit) + 2, height: 2 * Math.ceil(y * unit) + 2 };
-    });
-  }
-
-  // The clips' sheets, for those of `all` that are `drawn` (the point they
-  // are drawn about is that of all of them): [{ name, loop, fps, frames (how
-  // many), directions: [{ angle, ...a sheet (see sheet()) }] }]; null with
-  // nothing to draw.
-  clipSheets(settings, all, drawn = all) {
-    return this.withPose((pose) => {
-      const poses = this.clipPoses(all, settings.spriteFps);
-      const reach = this.reachOf(this.posedPoints(pose, poses));
-      if (!reach) return null;
-      return poses.filter(({ clip }) => drawn.includes(clip)).map(({ clip, frames, matrices }) => {
-        const shots = Array.from({ length: settings.directions }, () => []);
-        for (const placed of matrices) {
-          pose.apply(placed);
-          this.frames(settings, reach).forEach((image, k) => shots[k].push(image));
-        }
-        const directions = shots.map((images, k) => {
-          const angle = directionAngle(settings, k);
-          return { angle, ...this.compose(images, settings, () => angle) };
-        });
-        return { name: clip.name, loop: clip.loop, fps: settings.spriteFps, frames: frames.length, directions };
+      // The sheets, from the worker.
+      const results = await new Promise((resolve) => {
+        const listen = ({ data }) => {
+          if (data.job !== job) return;
+          worker.removeEventListener('message', listen);
+          resolve(data.results);
+        };
+        worker.addEventListener('message', listen);
+        worker.postMessage({ type: 'end', job, png });
       });
-    });
+      if (cancelled()) return null;
+      const made = sheets.map(({ layout, angle }, i) => ({
+        [png ? 'png' : 'canvas']: results[i],
+        width: layout.w,
+        height: layout.h,
+        columns: layout.columns,
+        rows: layout.rows,
+        frames: layout.places.map(({ x, y }, k) => ({ x, y, w: width, h: height, angle: angle ?? directionAngle(settings, k) })),
+      }));
+      if (!clips) return made[0];
+      return shown.map(({ clip, frames }, c) => ({
+        name: clip.name,
+        loop: clip.loop,
+        fps: settings.spriteFps,
+        frames: frames.length,
+        directions: made.slice(c * directions, (c + 1) * directions).map((sheet, k) => ({ angle: directionAngle(settings, k), ...sheet })),
+      }));
+    } catch (error) {
+      if (error !== CANCELLED) throw error;
+      worker.postMessage({ type: 'cancel', job });
+      return null;
+    } finally {
+      leave();
+      target?.dispose();
+      this.mesh.geometry = EMPTY;
+      geometry.dispose();
+      this.editor.viewport.requestRender();
+    }
   }
+}
+
+// A slice of drawing, ms, before the page has its turn (see render()).
+const SLICE = 8;
+// The largest batch picture, px each way.
+const BATCH_SIZE = 4096;
+const CANCELLED = Symbol('cancelled');
+const EMPTY = new THREE.BufferGeometry();
+
+// Where `count` frames of the settings' size lie on a sheet in the settings'
+// grid (see the top): { w, h (the sheet's size), columns, rows, places:
+// [{ x, y }] }.
+export function sheetLayout(count, settings) {
+  const { columns, rows } = sheetGrid(count, settings);
+  const pot = (size) => (settings.pot ? 2 ** Math.ceil(Math.log2(size)) : size);
+  return {
+    w: pot(columns * settings.width + (columns - 1) * settings.padding),
+    h: pot(rows * settings.height + (rows - 1) * settings.padding),
+    columns,
+    rows,
+    places: Array.from({ length: count }, (_, k) => ({
+      x: (k % columns) * (settings.width + settings.padding),
+      y: Math.floor(k / columns) * (settings.height + settings.padding),
+    })),
+  };
 }
 
 // The turn direction k is seen at (see the top), in degrees, 0 to 360.
@@ -468,7 +666,7 @@ export function clipsJSON(stem, sheets, settings) {
       clip: clip.name,
       angle: +direction.angle.toFixed(4),
       image: clipImageName(stem, clip, direction),
-      size: { w: direction.canvas.width, h: direction.canvas.height },
+      size: { w: direction.width, h: direction.height },
       loop: clip.loop,
       fps: clip.fps,
       frames: direction.frames.map(({ x, y, w, h }) => ({ x, y, w, h })),
@@ -569,7 +767,7 @@ export function sheetJSON(name, image, sheet, settings) {
       app: 'verTEX',
       image,
       format: 'RGBA8888',
-      size: { w: sheet.canvas.width, h: sheet.canvas.height },
+      size: { w: sheet.width, h: sheet.height },
       scale: '1',
       directions: settings.directions,
       elevation: settings.elevation,

@@ -4470,6 +4470,51 @@ input.refused {
   background: color-mix(in srgb, var(--accent) 25%, var(--bg));
 }
 
+/* The sheets being made (see RenderMode.showBusy()): a spinner and how far
+   it has got, over the preview - shown only once it takes a moment, so that
+   a quick one does not flicker. */
+#render-mode .render-preview {
+  position: relative;
+}
+
+#render-mode .render-busy {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+  animation: render-busy-in 0.15s 0.12s both;
+}
+
+#render-mode .render-busy[hidden] {
+  display: none;
+}
+
+#render-mode .render-busy i {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+@keyframes render-busy-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+#render-mode [data-render="save"]:disabled,
+#render-mode [data-render="fit"]:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 #render-mode .form-buttons {
   margin-top: auto;
   padding-top: 12px;

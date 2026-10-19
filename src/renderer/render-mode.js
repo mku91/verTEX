@@ -17,12 +17,18 @@ import { scrubbable } from './scrub.js';
 // shortcuts are off - the model is not to be changed from under it.
 //
 // With animation clips in the model, "Анимация" may have them drawn instead
-// of the model at rest (see clipSheets() in sprite-render.js): a PNG for
+// of the model at rest (see render() in sprite-render.js): a PNG for
 // every clip's direction, a strip of its frames, at the sprite's own rate.
 // The one clip picked is what is shown - its directions' strips one under
 // another, the player going round the frames of the direction picked in
 // them - and "Export" writes them all: the PNGs, Godot's SpriteFrames (a
 // .tres naming them) and a JSON of their frames.
+//
+// The sheets are made in the background (see SpriteRenderer.render()), the
+// screen going on meanwhile: a setting changed starts them anew - what was
+// being made for the one before is dropped - and till they are there the
+// ones before stay, under a spinner that tells how far it has got. Export
+// makes its own, a spinner on its button.
 //
 //   wheel             zoom the sheet (whole steps: pixels stay square)
 //   RMB / MMB drag    move it
@@ -232,6 +238,9 @@ export class RenderMode {
   close() {
     this.element.hidden = true;
     this.sheet = null;
+    this.renderJob = (this.renderJob ?? 0) + 1; // (what was being made: dropped)
+    cancelAnimationFrame(this.renderStart);
+    this.showBusy(null);
     cancelAnimationFrame(this.ticking);
     document.activeElement?.blur();
   }
@@ -300,30 +309,68 @@ export class RenderMode {
     this.form.elements.json.closest('label').hidden = this.clipsOn; // (with the clips the JSON is always written)
     for (const button of this.element.querySelectorAll('[data-light]')) button.classList.toggle('active', button.dataset.light === this.settings.light);
     if (!this.open) return;
-    const size = this.element.querySelector('.render-size');
-    if (this.clipsOn) {
-      const clip = this.shownClip();
-      const [shown] = this.renderer.clipSheets(this.settings, clips, [clip]) ?? [];
-      this.sheet = shown ? this.strips(shown) : null;
-      const strip = shown?.directions[0].canvas;
-      size.textContent = shown
-        ? `${clip.name}: ${shown.directions.length} × ${shown.frames} кадр${plural(shown.frames)} по ${this.settings.width} × ${this.settings.height} · ` +
-          `${shown.directions.length} PNG по ${strip.width} × ${strip.height} px`
-        : '';
-      this.element.querySelector('.render-clip-info').textContent = shown
-        ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop ? ' · цикл' : ''}`
-        : '';
-    } else {
-      this.sheet = this.renderer.sheet(this.settings);
-      size.textContent = this.sheet
-        ? `${this.sheet.frames.length} кадр${plural(this.sheet.frames.length)} по ${this.settings.width} × ${this.settings.height} · ` +
-          `${this.sheet.columns} × ${this.sheet.rows} · лист ${this.sheet.canvas.width} × ${this.sheet.canvas.height} px`
-        : '';
-    }
-    this.element.querySelector('.render-empty').hidden = Boolean(this.sheet);
-    if (this.sheet) this.player.frame %= this.sheet.frames.length;
-    this.draw();
-    this.drawPlayer();
+    this.rerender();
+  }
+
+  // The sheets made anew, in the background (see the top): started on the
+  // next screen frame - settings changed in the meantime go into the same
+  // start - and shown as soon as they are there, if they are still wanted.
+  rerender() {
+    const job = (this.renderJob = (this.renderJob ?? 0) + 1);
+    const refit = this.zoom === 0; // (fitted to what is coming, not to what is shown meanwhile)
+    this.showBusy(0);
+    cancelAnimationFrame(this.renderStart);
+    this.renderStart = requestAnimationFrame(async () => {
+      const settings = structuredClone(this.settings);
+      const clips = this.editor.animations;
+      const clip = this.clipsOn ? this.shownClip() : null;
+      const wanted = () => job === this.renderJob && this.open;
+      let made;
+      try {
+        made = await this.renderer.render(settings, clip ? { clips, drawn: [clip] } : {}, {
+          cancelled: () => !wanted(),
+          progress: (part) => wanted() && this.showBusy(part),
+        });
+      } catch (error) {
+        if (wanted()) this.showBusy(null);
+        throw error;
+      }
+      if (made === null || !wanted()) return;
+      this.showBusy(null);
+      if (refit) this.zoom = 0;
+      const size = this.element.querySelector('.render-size');
+      const empty = made.empty === true;
+      if (clip) {
+        const shown = empty ? null : made[0];
+        this.sheet = shown ? this.strips(shown) : null;
+        const strip = shown?.directions[0];
+        size.textContent = shown
+          ? `${clip.name}: ${shown.directions.length} × ${shown.frames} кадр${plural(shown.frames)} по ${settings.width} × ${settings.height} · ` +
+            `${shown.directions.length} PNG по ${strip.width} × ${strip.height} px`
+          : '';
+        this.element.querySelector('.render-clip-info').textContent = shown
+          ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop ? ' · цикл' : ''}`
+          : '';
+      } else {
+        this.sheet = empty ? null : made;
+        size.textContent = this.sheet
+          ? `${this.sheet.frames.length} кадр${plural(this.sheet.frames.length)} по ${settings.width} × ${settings.height} · ` +
+            `${this.sheet.columns} × ${this.sheet.rows} · лист ${this.sheet.width} × ${this.sheet.height} px`
+          : '';
+      }
+      this.element.querySelector('.render-empty').hidden = Boolean(this.sheet);
+      if (this.sheet) this.player.frame = Math.min(this.player.frame, this.sheet.frames.length - 1);
+      this.draw();
+      this.drawPlayer();
+    });
+  }
+
+  // The spinner over the preview: how far the sheets have got (0 to 1), or
+  // hidden (null). (It shows only if they take a moment, see the stylesheet.)
+  showBusy(part) {
+    const busy = this.element.querySelector('.render-busy');
+    busy.hidden = part === null;
+    if (part !== null) busy.querySelector('span').textContent = `${Math.round(part * 100)}%`;
   }
 
   // A clip's sheets (see clipSheets()) as one picture to show: its
@@ -495,7 +542,7 @@ export class RenderMode {
     this.player.frame = k;
     this.player.since = performance.now();
     this.drawPlayer();
-    this.draw();
+    this.requestDraw();
   }
 
   // Every screen frame while the render is open: the next frame of the sheet
@@ -553,27 +600,48 @@ export class RenderMode {
   }
 
   // Chequers in a rectangle: what is clear in a picture laid over them shows as such.
-  chequers(context, x0, y0, w, h, tile) {
+  // (One fill of a pattern of four tiles, laid from the rectangle's corner -
+  // made once for every size and colours - and only where it can be seen:
+  // `bounds`, { width, height } of the canvas, if not all of it.)
+  chequers(context, x0, y0, w, h, tile, bounds = null) {
+    const left = Math.max(x0, 0);
+    const top = Math.max(y0, 0);
+    const right = bounds ? Math.min(x0 + w, bounds.width) : x0 + w;
+    const bottom = bounds ? Math.min(y0 + h, bounds.height) : y0 + h;
+    if (right <= left || bottom <= top) return;
     const style = getComputedStyle(this.element);
     const light = style.getPropertyValue('--bg-raised');
     const dark = style.getPropertyValue('--bg');
-    context.save();
-    context.beginPath();
-    context.rect(x0, y0, w, h);
-    context.clip();
-    for (let y = 0; y * tile < h; y++) {
-      for (let x = 0; x * tile < w; x++) {
-        context.fillStyle = (x + y) % 2 ? light : dark;
-        context.fillRect(x0 + x * tile, y0 + y * tile, tile, tile);
-      }
+    const key = `${tile} ${light} ${dark}`;
+    this.patterns ??= new Map();
+    if (!this.patterns.has(key)) {
+      const cells = document.createElement('canvas');
+      cells.width = cells.height = tile * 2;
+      const draw = cells.getContext('2d');
+      draw.fillStyle = dark;
+      draw.fillRect(0, 0, tile * 2, tile * 2);
+      draw.fillStyle = light;
+      draw.fillRect(tile, 0, tile, tile);
+      draw.fillRect(0, tile, tile, tile);
+      this.patterns.set(key, cells);
     }
-    context.restore();
+    const pattern = context.createPattern(this.patterns.get(key), 'repeat');
+    pattern.setTransform(new DOMMatrix().translate(x0, y0));
+    context.fillStyle = pattern;
+    context.fillRect(left, top, right - left, bottom - top);
   }
 
   // The frame made to fit the model, in every direction.
   // (With the clips: in every pose of all of them.)
-  fit() {
-    const size = this.clipsOn ? this.renderer.fitClips(this.settings, this.editor.animations) : this.renderer.fit(this.settings);
+  async fit() {
+    const button = this.element.querySelector('[data-render="fit"]');
+    button.disabled = true;
+    let size;
+    try {
+      size = this.clipsOn ? await this.renderer.fitClips(this.settings, this.editor.animations) : this.renderer.fit(this.settings);
+    } finally {
+      button.disabled = false;
+    }
     if (!size) return;
     this.settings.width = Math.min(FIELDS.width.max, size.width);
     this.settings.height = Math.min(FIELDS.height.max, size.height);
@@ -583,16 +651,24 @@ export class RenderMode {
 
   // Draws the sheet on the preview, pixel for pixel at the zoom, over
   // chequers that show what is clear; the frames' bounds lightly outlined.
+  //
+  // Only what can be seen is drawn - the strips, the frames' outlines and the
+  // tabs in the canvas - and the canvas is sized anew only when it changes:
+  // moved about or zoomed, a large sheet goes as smoothly as a small one.
   draw() {
+    cancelAnimationFrame(this.drawing);
+    this.drawing = 0;
     const { canvas, preview, sheet } = this;
     const width = preview.clientWidth;
     const height = preview.clientHeight;
     if (!this.open || width === 0) return;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
+    if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+      canvas.width = Math.round(width * ratio);
+      canvas.height = Math.round(height * ratio);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+    }
     const context = canvas.getContext('2d');
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
@@ -610,27 +686,34 @@ export class RenderMode {
     const { zoom, offset } = this;
     const w = image.width * zoom;
     const h = image.height * zoom;
+    const style = getComputedStyle(this.element);
+    // Whether a rectangle of the canvas (with `margin` round it) can be seen.
+    const seen = (x, y, rw, rh, margin = 0) => x + rw + margin > 0 && y + rh + margin > 0 && x - margin < width && y - margin < height;
+    const shown = strips.map((strip, d) => ({ strip, d, at: this.place(0, strip.y, d) }))
+      .filter(({ strip, at }) => seen(at.x, at.y, strip.w * zoom, strip.h * zoom, STRIP_TAB + STRIP_BORDER));
     // The chequers, under the sheet only; the sheet over them, strip by strip.
     context.imageSmoothingEnabled = false;
-    strips.forEach((strip, d) => {
-      const at = this.place(0, strip.y, d);
-      this.chequers(context, at.x, at.y, strip.w * zoom, strip.h * zoom, Math.max(4, zoom * 2));
+    for (const { strip, at } of shown) {
+      this.chequers(context, at.x, at.y, strip.w * zoom, strip.h * zoom, Math.max(4, zoom * 2), { width, height });
       context.drawImage(image, 0, strip.y, strip.w, strip.h, at.x, at.y, strip.w * zoom, strip.h * zoom);
-    });
+    }
+    // The frames' outlines, in one go.
     context.lineWidth = 1;
+    context.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    context.beginPath();
     sheet.frames.forEach((frame, k) => {
       if (k === this.player.frame) return;
       const at = this.place(frame.x, frame.y, frame.direction);
-      context.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-      context.strokeRect(at.x - 0.5, at.y - 0.5, frame.w * zoom + 1, frame.h * zoom + 1);
+      if (seen(at.x, at.y, frame.w * zoom, frame.h * zoom, 1)) context.rect(at.x - 0.5, at.y - 0.5, frame.w * zoom + 1, frame.h * zoom + 1);
     });
+    context.stroke();
     // A clip's strips: each in its frame, its size on the tab.
     if (sheet.strips) {
       context.font = '12px "Segoe UI", system-ui, sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
-      strips.forEach((strip, d) => {
-        const at = this.place(0, strip.y, d);
+      const tabText = style.getPropertyValue('--bg');
+      for (const { strip, at } of shown) {
         const outer = { x: at.x - STRIP_BORDER, y: at.y - STRIP_BORDER, w: strip.w * zoom + 2 * STRIP_BORDER, h: strip.h * zoom + 2 * STRIP_BORDER };
         context.strokeStyle = STRIP_COLOR;
         context.lineWidth = STRIP_BORDER;
@@ -639,16 +722,16 @@ export class RenderMode {
         const tab = Math.ceil(context.measureText(label).width) + 14;
         context.fillStyle = STRIP_COLOR;
         context.fillRect(outer.x + outer.w - tab, outer.y - STRIP_TAB, tab, STRIP_TAB);
-        context.fillStyle = getComputedStyle(this.element).getPropertyValue('--bg');
+        context.fillStyle = tabText;
         context.fillText(label, outer.x + outer.w - tab / 2, outer.y - STRIP_TAB / 2 + 0.5);
-      });
+      }
     }
     // The frame being played: in the accent colour, over its neighbours' lines.
     const played = sheet.frames[this.player.frame];
     if (played) {
       const at = this.place(played.x, played.y, played.direction);
       context.lineWidth = 2;
-      context.strokeStyle = getComputedStyle(this.element).getPropertyValue('--accent');
+      context.strokeStyle = style.getPropertyValue('--accent');
       context.strokeRect(at.x - 1, at.y - 1, played.w * zoom + 2, played.h * zoom + 2);
     }
     if (sheet.strips) return; // (their sizes are on their tabs)
@@ -659,8 +742,14 @@ export class RenderMode {
     context.textBaseline = 'alphabetic';
     const label = `${image.width} × ${image.height}`;
     const right = Math.max(context.measureText(label).width + 6, Math.min(offset.x + w, width - 6));
-    context.fillStyle = getComputedStyle(this.element).getPropertyValue('--text-dim');
+    context.fillStyle = style.getPropertyValue('--text-dim');
     context.fillText(label, right, Math.min(Math.max(offset.y - 6, 16), height - 6));
+  }
+
+  // draw() on the next screen frame, however many times it is asked for
+  // before then: what moves the sheet about or zooms it asks so.
+  requestDraw() {
+    if (!this.drawing) this.drawing = requestAnimationFrame(() => this.draw());
   }
 
   // The frame of the sheet at a point of its canvas (client coordinates), or -1.
@@ -687,7 +776,7 @@ export class RenderMode {
       const before = { x: (at.x - this.offset.x) / this.zoom, y: (at.y - this.offset.y) / this.zoom };
       this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom + (event.deltaY < 0 ? 1 : -1)));
       this.offset = { x: Math.round(at.x - before.x * this.zoom), y: Math.round(at.y - before.y * this.zoom) };
-      this.draw();
+      this.requestDraw();
     }, { passive: false });
     let drag = null;
     canvas.addEventListener('pointerdown', (event) => {
@@ -706,7 +795,7 @@ export class RenderMode {
     canvas.addEventListener('pointermove', (event) => {
       if (!drag) return;
       this.offset = { x: drag.offset.x + event.clientX - drag.x, y: drag.offset.y + event.clientY - drag.y };
-      this.draw();
+      this.requestDraw();
     });
     const stop = () => {
       drag = null;
@@ -719,21 +808,36 @@ export class RenderMode {
   // beside it, under the same name, if asked.
   async save() {
     const { sheet, files } = this;
-    if (!sheet || !files.pick) return;
+    if (!sheet || !files.pick || this.exporting) return;
     if (this.clipsOn) return this.saveClips();
     const target = await files.pick(`${files.name()}_sprites`, [{ name: 'Изображение PNG', extension: 'png' }]);
     if (!target) return;
-    const bytes = await new Promise((resolve) => {
-      sheet.canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
-    });
-    if (!bytes) return;
+    const settings = structuredClone(this.settings);
+    const made = await this.exported(() => this.renderer.render(settings, { png: true }, { cancelled: () => !this.open }));
+    if (!made?.png) return;
     const beside = {};
-    if (this.settings.json) {
+    if (settings.json) {
       const image = target.path.split(/[\\/]/).pop();
-      beside[image.replace(/\.png$/i, '.json')] = new TextEncoder().encode(sheetJSON(target.name, image, sheet, this.settings));
+      beside[image.replace(/\.png$/i, '.json')] = new TextEncoder().encode(sheetJSON(target.name, image, made, settings));
     }
-    const result = await files.write(target.path, bytes, beside);
+    const result = await files.write(target.path, made.png, beside);
     if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
+  }
+
+  // Runs `make` (the sheets for export) with a spinner on the Export button.
+  async exported(make) {
+    const button = this.element.querySelector('[data-render="save"]');
+    const text = button.innerHTML;
+    this.exporting = true;
+    button.disabled = true;
+    button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Экспорт…';
+    try {
+      return await make();
+    } finally {
+      this.exporting = false;
+      button.disabled = false;
+      button.innerHTML = text;
+    }
   }
 
   // The clips: asks where Godot's SpriteFrames (.tres) goes, and writes it
@@ -743,27 +847,20 @@ export class RenderMode {
     const { files } = this;
     const target = await files.pick(`${files.name()}_sprites`, [{ name: 'Godot SpriteFrames', extension: 'tres' }]);
     if (!target) return;
-    const sheets = this.renderer.clipSheets(this.settings, this.editor.animations);
-    if (!sheets) return;
+    const settings = structuredClone(this.settings);
+    const sheets = await this.exported(() => this.renderer.render(settings, { clips: this.editor.animations, png: true }, { cancelled: () => !this.open }));
+    if (!Array.isArray(sheets)) return;
     const encoder = new TextEncoder();
     const beside = {};
     for (const clip of sheets) {
-      for (const direction of clip.directions) {
-        beside[clipImageName(target.name, clip, direction)] = await pngOf(direction.canvas);
-      }
+      for (const direction of clip.directions) beside[clipImageName(target.name, clip, direction)] = direction.png;
     }
-    beside[`${target.name}.json`] = encoder.encode(clipsJSON(target.name, sheets, this.settings));
+    beside[`${target.name}.json`] = encoder.encode(clipsJSON(target.name, sheets, settings));
     const result = await files.write(target.path, encoder.encode(clipsTres(target.name, sheets)), beside);
     if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
   }
 }
 
-// A canvas as the bytes of a PNG.
-function pngOf(canvas) {
-  return new Promise((resolve) => {
-    canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
-  });
-}
 
 // Radians in degrees.
 function degrees(radians) {

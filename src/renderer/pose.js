@@ -45,10 +45,11 @@ export function localTransforms(editor) {
 // `overrides` (Map id -> { position?, rotation?, scale? }) over it: Map id ->
 // { position, rotation, scale } - the rotation a quaternion for an entry
 // turned by them (see Editor.setRotationMode()), else angles.
-export function clipValues(editor, clip, frame, overrides = new Map()) {
+// (`locals`: localTransforms() as it is now, when it has been worked out already.)
+export function clipValues(editor, clip, frame, overrides = new Map(), locals = localTransforms(editor)) {
   const posed = clip ? poseAt(clip, frame) : new Map();
   const values = new Map();
-  for (const [id, place] of localTransforms(editor)) {
+  for (const [id, place] of locals) {
     const own = { ...posed.get(id), ...overrides.get(id) };
     const angles = place.rotation ?? [0, 0, 0];
     const quaternion = editor.mesh.objects.find((object) => object.id === id)?.rotationMode === 'quaternion';

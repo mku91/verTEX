@@ -55,6 +55,7 @@ const FIELDS = {
 // own - in a frame of this colour, its size on a tab over its top right
 // corner; so many screen px from one strip to the next, whatever the zoom.
 const STRIP_COLOR = '#bd93f9';
+const PLAYED_COLOR = '#ff79c6'; // the frame being played, outlined on the sheet
 const STRIP_TAB = 18; // px, the tab's height
 const STRIP_BORDER = 2; // px
 const STRIP_SPACE = 36; // px from a strip's bottom to the next one's top (its tab and frame in it)
@@ -64,6 +65,10 @@ const SUN_COLOR = '#f1fa8c';
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 32;
 const FPS = { min: 1, max: 60, initial: 8 }; // the player's frames a second
+// The settings' panel: as wide as its left edge is dragged to, remembered.
+const PANEL_WIDTH_KEY = 'vertex.renderPanelWidth';
+const PANEL_WIDTH = { initial: 300, min: 260 }; // px
+const PREVIEW_MIN_WIDTH = 360; // px left to the preview
 
 export class RenderMode {
   constructor(element, editor, { pick, write, name, alert }) {
@@ -204,10 +209,50 @@ export class RenderMode {
     this.bindPreview();
     new ResizeObserver(() => this.draw()).observe(this.preview);
     new ResizeObserver(() => this.drawPlayer()).observe(this.player.pane);
+    this.bindPanelWidth();
   }
 
   get open() {
     return !this.element.hidden;
+  }
+
+  // The settings' panel, as wide as its edge is dragged to (as the editor's
+  // side panel, see app.js): a double click puts it back; a narrow window
+  // squeezes it, and gives it back what was set as it widens.
+  bindPanelWidth() {
+    const splitter = this.element.querySelector('.render-splitter');
+    const body = this.element.querySelector('.render-body');
+    let wanted = PANEL_WIDTH.initial;
+    try { wanted = parseFloat(localStorage.getItem(PANEL_WIDTH_KEY)) || PANEL_WIDTH.initial; } catch { /* the default */ }
+    const apply = () => {
+      const room = body.clientWidth - splitter.offsetWidth - PREVIEW_MIN_WIDTH;
+      const width = Math.round(Math.min(Math.max(wanted, PANEL_WIDTH.min), Math.max(room, PANEL_WIDTH.min)));
+      this.element.style.setProperty('--render-panel', `${width}px`);
+      return width;
+    };
+    const set = (width) => {
+      wanted = width;
+      wanted = apply();
+      try { localStorage.setItem(PANEL_WIDTH_KEY, wanted); } catch { /* not kept: fine */ }
+    };
+    // The pointer holds the middle of the strip; the panel starts at its right edge.
+    const follow = (event) => set(body.getBoundingClientRect().right - event.clientX - splitter.offsetWidth / 2);
+    splitter.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      splitter.setPointerCapture(event.pointerId);
+      splitter.classList.add('dragging');
+      splitter.addEventListener('pointermove', follow);
+    });
+    const stop = () => {
+      splitter.classList.remove('dragging');
+      splitter.removeEventListener('pointermove', follow);
+    };
+    splitter.addEventListener('pointerup', stop);
+    splitter.addEventListener('pointercancel', stop);
+    splitter.addEventListener('dblclick', () => set(PANEL_WIDTH.initial));
+    new ResizeObserver(apply).observe(body);
+    apply();
   }
 
   // The clips drawn instead of the model at rest: asked for, and there are some.
@@ -726,12 +771,12 @@ export class RenderMode {
         context.fillText(label, outer.x + outer.w - tab / 2, outer.y - STRIP_TAB / 2 + 0.5);
       }
     }
-    // The frame being played: in the accent colour, over its neighbours' lines.
+    // The frame being played: in its own colour, over its neighbours' lines.
     const played = sheet.frames[this.player.frame];
     if (played) {
       const at = this.place(played.x, played.y, played.direction);
       context.lineWidth = 2;
-      context.strokeStyle = style.getPropertyValue('--accent');
+      context.strokeStyle = PLAYED_COLOR;
       context.strokeRect(at.x - 1, at.y - 1, played.w * zoom + 2, played.h * zoom + 2);
     }
     if (sheet.strips) return; // (their sizes are on their tabs)

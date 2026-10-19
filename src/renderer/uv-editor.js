@@ -1,5 +1,6 @@
 import { theme, onThemeChange } from './theme.js';
 import { facePixels } from './atlas.js';
+import { confirmIt } from './ask-dialog.js';
 
 // The UV editor: the atlas, flat, with the faces drawn on it.
 //
@@ -176,8 +177,12 @@ export class UVEditor {
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;
-      if (all && !window.confirm('Перегенерировать весь атлас?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) return;
-      this.editor.regenerateCharts(faces);
+      if (!all) {
+        this.editor.regenerateCharts(faces);
+        return;
+      }
+      confirmIt('Перегенерировать весь атлас?', 'Всё нарисованное на текстуре будет потеряно. Действие можно отменить.', 'Перегенерировать')
+        .then((yes) => yes && this.editor.regenerateCharts(faces));
     }
   }
 

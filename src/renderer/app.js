@@ -24,6 +24,7 @@ import { Simulation } from './simulation.js';
 import { Timeline } from './timeline.js';
 import { AnimationMode } from './animate.js';
 import { ViewsWindow } from './views-window.js';
+import { tell, confirmIt, askSave } from './ask-dialog.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -326,7 +327,7 @@ const colorPopup = new ColorPopup({
   button: $('paint-color'),
   popup: $('color-popup'),
   editor,
-  alert: (message, detail) => (window.vertex?.project ? window.vertex.project.alert(message, detail) : window.alert(`${message}\n\n${detail}`)),
+  alert: tell,
 });
 for (const button of modeButtons) {
   button.addEventListener('click', () => editor.setMode(button.dataset.mode));
@@ -1041,7 +1042,8 @@ const warnings = new Warnings(editor, {
 });
 
 // The project: its file and its unsaved changes, named in the window's title.
-const project = new Project(editor, window.vertex?.project);
+// (Its questions and messages in the program's own dialogs, see ask-dialog.js.)
+const project = new Project(editor, window.vertex?.project && { ...window.vertex.project, confirm: askSave, alert: tell });
 // On the welcome screen no project is open yet: the program's name alone.
 const showProject = () => {
   document.title = $('welcome').hidden ? `${project.dirty ? '● ' : ''}${project.name} — verTEX` : 'verTEX';
@@ -1127,7 +1129,7 @@ let exporting = false;
 async function exportModel(format) {
   const api = window.vertex?.export;
   if (!api) {
-    window.alert('Экспорт заработает после перезапуска программы.');
+    await tell('Экспорт заработает после перезапуска программы.');
     return;
   }
   if (exporting || editor.busy()) return;
@@ -1137,7 +1139,7 @@ async function exportModel(format) {
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(model.objects.find((other) => other.id === object.parent)));
     const meshes = model.objects.filter((object) => object.kind !== 'group' && !hidden(object));
     if (!model.faces.some((face) => meshes.some((object) => object.id === model.vertexObject[face[0]]))) {
-      await window.vertex.project.alert('Нечего экспортировать', 'В сцене нет ни одной видимой грани.');
+      await tell('Нечего экспортировать', 'В сцене нет ни одной видимой грани.');
       return;
     }
     const options = await askExport(EXPORTS[format].title);
@@ -1152,7 +1154,7 @@ async function exportModel(format) {
     const sized = options.scale === 1 ? model : scaledModel(model, options.scale);
     const triangles = (face) => editor.mesh.triangulate(face);
     const result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
-    if (result.error) await window.vertex.project.alert('Не удалось экспортировать модель', result.error);
+    if (result.error) await tell('Не удалось экспортировать модель', result.error);
   } finally {
     exporting = false;
   }
@@ -1170,7 +1172,7 @@ const renderMode = new RenderMode($('render-mode'), editor, {
   pick: window.vertex?.export?.pick,
   write: window.vertex?.export?.write,
   name: () => project.name,
-  alert: (message, detail) => window.vertex?.project.alert(message, detail),
+  alert: tell,
 });
 
 // Texturing: the atlas as a file beside the project, painted in another program.
@@ -1195,8 +1197,8 @@ const renderMode = new RenderMode($('render-mode'), editor, {
 const atlasLink = new AtlasLink(editor, project, window.vertex?.atlas);
 $('atlas-open').addEventListener('click', () => atlasLink.open());
 $('atlas-reveal').addEventListener('click', () => atlasLink.reveal());
-$('atlas-repack').addEventListener('click', () => {
-  if (window.confirm('Разложить все грани на атласе заново?\n\nВсё нарисованное на текстуре будет потеряно. Действие можно отменить.')) editor.repackAtlas();
+$('atlas-repack').addEventListener('click', async () => {
+  if (await confirmIt('Разложить все грани на атласе заново?', 'Всё нарисованное на текстуре будет потеряно. Действие можно отменить.', 'Разложить')) editor.repackAtlas();
 });
 for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus

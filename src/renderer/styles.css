@@ -908,12 +908,6 @@ body {
 #timeline .tl-bar select {
   flex: none;
   width: 170px; /* the same whatever the name: what follows stays where it is */
-  height: 28px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
 }
 
 .tl-field {
@@ -3647,12 +3641,6 @@ input.refused {
 
 .dialog select {
   flex: 1;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
 }
 
 .dialog-buttons {
@@ -3920,6 +3908,60 @@ input.refused {
 .dialog:not(.settings) {
   width: 440px;
   padding: 20px;
+}
+
+/* A question or a message (see ask-dialog.js): over everything, the render
+   screen too; its text dim under the title, its buttons as the other
+   dialogs' - the primary one in the accent, the one that throws something
+   away set apart on the left. */
+.ask-dialog {
+  z-index: 40;
+}
+
+.ask-dialog .ask-detail {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-dialog .form-buttons button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.ask-dialog .form-buttons button.aside {
+  margin-right: auto;
+}
+
+/* What a button does to the work, in its colour: kept green, lost red. */
+.ask-dialog .form-buttons button[data-tone="keep"] {
+  --tone: #50fa7b;
+}
+
+.ask-dialog .form-buttons button[data-tone="lose"] {
+  --tone: #ff5555;
+}
+
+.ask-dialog .form-buttons button[data-tone] {
+  border-color: var(--tone);
+  background: var(--tone);
+  color: var(--bg);
+}
+
+.ask-dialog .form-buttons button[data-tone]:focus-visible {
+  outline-color: var(--tone);
+}
+
+.ask-dialog .form-buttons button:hover {
+  filter: brightness(1.15);
+}
+
+.ask-dialog .form-buttons button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .dialog h2 {
@@ -4242,13 +4284,45 @@ input.refused {
 
 #render-mode .render-settings {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 8px;
-  width: 300px;
+  width: var(--render-panel, 300px); /* (dragged by the strip before it, see RenderMode.bindPanelWidth()) */
   padding: 16px;
   overflow-y: auto;
+  background: var(--bg-raised);
+}
+
+/* The strip the settings' panel is widened by: as the editor's side panel's. */
+#render-mode .render-splitter {
+  position: relative;
+  flex: none;
+  width: 7px;
   border-left: 1px solid var(--border);
   background: var(--bg-raised);
+  cursor: ew-resize;
+}
+
+#render-mode .render-splitter::after {
+  --dot: var(--text-dim);
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 21px;
+  margin: -10.5px 0 0 -2px;
+  background: radial-gradient(circle, var(--dot) 1.5px, transparent 2px) center top / 4px 7px repeat-y;
+}
+
+#render-mode .render-splitter:hover,
+#render-mode .render-splitter.dragging {
+  background: var(--text-dim);
+}
+
+#render-mode .render-splitter:hover::after,
+#render-mode .render-splitter.dragging::after {
+  --dot: var(--text);
 }
 
 #render-mode h3 {
@@ -4390,13 +4464,7 @@ input.refused {
 
 #render-mode .render-clips select {
   flex: 0 0 120px;
-  min-width: 0;
-  padding: 3px 4px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
+  height: 26px;
 }
 
 #render-mode .render-clip-info {
@@ -4542,4 +4610,195 @@ input.refused {
 /* "Faces whole" belongs to the dithering: set in under it. */
 #render-mode .render-dither-faces .choice {
   margin: 0 0 0 24px;
+}
+
+/* Drop-down lists: the native <select>, drawn our way - Chromium's
+   customizable select (appearance: base-select) - so that the keyboard, the
+   `change` event and the code that fills them work as they did. The button:
+   the value shown (cut short if long) and an arrow that turns as it opens;
+   the list: a raised panel, faded in, its options rounded, the one chosen
+   in the accent with a check. */
+select,
+::picker(select) {
+  appearance: base-select;
+}
+
+select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+
+select:hover {
+  background: color-mix(in srgb, var(--hover) 40%, var(--bg));
+}
+
+select:focus-visible,
+select:open {
+  border-color: var(--accent);
+  outline: none;
+}
+
+select selectedcontent {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+select::picker-icon {
+  color: var(--text-dim);
+  font-size: 9px;
+  transition: rotate 0.15s;
+}
+
+select:open::picker-icon {
+  rotate: 180deg;
+}
+
+::picker(select) {
+  margin-block: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  translate: 0 -4px;
+  transition: opacity 0.12s, translate 0.12s, display 0.12s allow-discrete, overlay 0.12s allow-discrete;
+}
+
+::picker(select):popover-open {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@starting-style {
+  ::picker(select):popover-open {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+option:hover,
+option:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+option:checked {
+  color: var(--accent);
+}
+
+option::checkmark {
+  order: 1;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+/* Popups come in, not just appear: as they are shown (their `hidden` taken
+   off, or a menu's display turned on) the animation runs from the start.
+   Menus drop a little from where they open, popups grow a little into
+   place, the dialogs' backdrops fade in and the dialogs rise into place.
+   (`scale` and `translate` are the properties of their own, so the
+   popups that are placed by `transform` stay where they are put.) */
+@keyframes popup-menu-in {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+@keyframes popup-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes popup-dialog-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+    translate: 0 8px;
+  }
+}
+
+#add-menu,
+#shading-menu,
+#mirror-popup,
+.grid-popup,
+.tool-flyout,
+.context-menu,
+.submenu {
+  transform-origin: top left;
+  animation: popup-menu-in 0.14s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+#color-popup,
+.key-popup,
+#add-form,
+#extrude-popup,
+#polygon-popup {
+  animation: popup-in 0.16s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.modal,
+#settings-dialog {
+  animation: popup-backdrop-in 0.16s ease-out;
+}
+
+.modal .dialog,
+#settings-dialog .dialog {
+  animation: popup-dialog-in 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* (Those who ask the system for less motion get none.) */
+@media (prefers-reduced-motion: reduce) {
+  #add-menu,
+  #shading-menu,
+  #mirror-popup,
+  .grid-popup,
+  .tool-flyout,
+  .context-menu,
+  .submenu,
+  #color-popup,
+  .key-popup,
+  #add-form,
+  #extrude-popup,
+  #polygon-popup,
+  .modal,
+  #settings-dialog,
+  .modal .dialog,
+  #settings-dialog .dialog {
+    animation: none;
+  }
 }

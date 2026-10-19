@@ -30,6 +30,7 @@ import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
 import { cloneCollider } from './collision-fit.js';
 import { localTransforms, worldFrames } from './pose.js';
 import { soundAnimation } from './animation.js';
+import { tell } from './ask-dialog.js';
 
 const FORMAT = 'vertex-project';
 const VERSION = 3;
@@ -351,7 +352,7 @@ export class Project extends EventTarget {
     if (this.working) return;
     const restart = 'Сохранение и открытие проектов заработают после перезапуска программы.';
     if (!this.api) {
-      window.alert(restart);
+      await tell(restart);
       return;
     }
     this.working = true;
@@ -360,9 +361,7 @@ export class Project extends EventTarget {
     } catch (error) {
       // The main process does not answer: it is older than this page (the
       // page was reloaded after an update, the program was not restarted).
-      window.alert(`${restart}
-
-(${error.message})`);
+      await tell(restart, error.message);
     } finally {
       this.working = false;
     }

@@ -105,6 +105,7 @@ export class Outliner {
       whole,
       [...this.folded],
       this.editor.mesh.objects.map((object) => object.color ?? null), // the icons' colours
+      this.editor.mesh.objects.map((object) => object.locked ?? false), // the groups' locks
       // In the collision mode, the shapes: their kinds, the bodies, the one picked.
       this.editor.collisions
         ? [this.editor.mesh.objects.map((object) => [object.body ?? null, (object.colliders ?? []).map((shape) => shape.type)]), this.shapes?.picked ?? null]
@@ -148,6 +149,33 @@ export class Outliner {
       row.title = group
         ? `Группа: внутри ${island.children.length}`
         : `${island.vertices.length} вершин, ${island.faces.length} граней`;
+      // A group's lock: picked only whole in the main view while it is shut (see Editor.lockedOwner()).
+      if (group) {
+        // Open, shut (picked whole) or 'nearest' (picked as the nearest group).
+        const locked = this.editor.mesh.objects[index].locked ?? false;
+        const lock = document.createElement('span');
+        lock.className = 'outliner-lock';
+        lock.classList.toggle('shut', locked === true);
+        lock.classList.toggle('nearest', locked === 'nearest');
+        lock.dataset.lock = index;
+        lock.title = locked === true
+          ? 'Группа закрыта: в главном виде щелчок по любой её части выделяет всю группу (в дереве и в трёх видах части выделяются как обычно). Нажмите — «ближайшая группа»'
+          : locked === 'nearest'
+            ? 'Ближайшая группа: в главном виде щелчок по объекту в ней выделяет ближайшую к нему группу вверх по иерархии. Нажмите, чтобы открыть'
+            : 'Группа открыта: её части выделяются по отдельности. Нажмите, чтобы закрыть — тогда в главном виде она будет выделяться целиком';
+        // (nearest: a child - a part picked as the group it is a child of)
+        lock.innerHTML = `<i class="fa-solid ${locked === 'nearest' ? 'fa-child' : locked ? 'fa-lock' : 'fa-lock-open'}"></i>`;
+        row.append(lock);
+      }
+      // A group's +: something new made in it (see bindAdding()).
+      if (group) {
+        const plus = document.createElement('span');
+        plus.className = 'outliner-add';
+        plus.dataset.addInto = island.id;
+        plus.title = 'Создать объект в этой группе';
+        plus.innerHTML = '<i class="fa-solid fa-plus"></i>';
+        row.append(plus);
+      }
       // Hidden, by its own eye or by a group's above it.
       row.classList.toggle('hidden', island.hidden);
       const eye = document.createElement('span');
@@ -193,6 +221,21 @@ export class Outliner {
         this.suppressClick = false;
         return;
       }
+      // A group's lock.
+      const lock = event.target.closest('[data-lock]');
+      if (lock) {
+        const index = Number(lock.dataset.lock);
+        // round: open -> shut -> nearest -> open
+        const now = editor.mesh.objects[index].locked ?? false;
+        editor.setGroupLock(index, now === true ? 'nearest' : now === 'nearest' ? false : true);
+        return;
+      }
+      // A group's +: the menu of things to add, beside it, for that group.
+      const plus = event.target.closest('[data-add-into]');
+      if (plus) {
+        this.openAddMenu(Number(plus.dataset.addInto), plus);
+        return;
+      }
       const eye = event.target.closest('[data-eye]');
       if (eye) {
         const index = Number(rowAt(eye).dataset.object);
@@ -217,7 +260,7 @@ export class Outliner {
     });
     list.addEventListener('dblclick', (event) => {
       const row = rowAt(event.target);
-      if (row && !event.target.closest('[data-fold], [data-eye]')) this.rename(row);
+      if (row && !event.target.closest('[data-fold], [data-eye], [data-add-into], [data-lock]')) this.rename(row);
       const shape = event.target.closest('[data-shape]');
       if (shape) this.rename(shape);
     });
@@ -230,7 +273,7 @@ export class Outliner {
     list.addEventListener('pointerdown', (event) => {
       this.suppressClick = false; // the last drag's click never came
       const row = rowAt(event.target);
-      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye]')) return;
+      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye], [data-add-into], [data-lock]')) return;
       this.press = { index: Number(row.dataset.object), x: event.clientX, y: event.clientY, dragging: false };
     });
     window.addEventListener('pointermove', (event) => {
@@ -429,43 +472,60 @@ export class Outliner {
 
   // --- adding objects ----------------------------------------------------
 
+  // The menu of things to add: under the header's +, or - `into` a group's
+  // id - beside that group's + (`at`), for what is made to go in it.
+  openAddMenu(into = null, at = null) {
+    const { menu, addButton } = this;
+    this.closeForm();
+    const again = !menu.hidden && this.into === into;
+    menu.hidden = again;
+    this.into = again ? null : into;
+    addButton.classList.toggle('active', !menu.hidden && into === null);
+    if (menu.hidden) return;
+    if (at) {
+      const place = at.getBoundingClientRect();
+      const section = menu.offsetParent.getBoundingClientRect();
+      menu.style.top = `${place.bottom - section.top + 4}px`;
+    } else {
+      menu.style.top = '';
+    }
+  }
+
   bindAdding(section) {
     const { menu, form, addButton } = this;
+    this.into = null; // the group what is made goes in (its id), or none
     const closeMenu = () => {
       menu.hidden = true;
       addButton.classList.remove('active');
     };
-    addButton.addEventListener('click', () => {
-      this.closeForm();
-      menu.hidden = !menu.hidden;
-      addButton.classList.toggle('active', !menu.hidden);
-    });
+    addButton.addEventListener('click', () => this.openAddMenu(null));
     for (const item of menu.querySelectorAll('[data-primitive]')) {
       item.addEventListener('click', () => {
         closeMenu();
         const kind = item.dataset.primitive;
         if (PRIMITIVES[kind].fields.length) this.openForm(kind);
-        else this.editor.addPrimitive(kind);
+        else this.editor.addPrimitive(kind, {}, null, this.into);
       });
     }
     menu.querySelector('[data-group]').addEventListener('click', () => {
       closeMenu();
-      this.editor.addGroup();
+      this.editor.addGroup(this.into);
     });
     // Buttons must not take the keyboard focus; the form's fields may.
     section.querySelector('.outliner-header').addEventListener('mousedown', (event) => event.preventDefault());
     menu.addEventListener('mousedown', (event) => event.preventDefault());
     // A press anywhere else closes the menu.
     window.addEventListener('pointerdown', (event) => {
-      if (!menu.contains(event.target) && !addButton.contains(event.target)) closeMenu();
+      if (!menu.contains(event.target) && !addButton.contains(event.target) && !event.target.closest?.('[data-add-into]')) closeMenu();
     }, true);
 
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       const options = this.formOptions();
       const side = this.attachSide();
+      const into = this.into;
       this.closeForm();
-      this.editor.addPrimitive(form.dataset.kind, options, side);
+      this.editor.addPrimitive(form.dataset.kind, options, side, into);
     });
     // Put up against the selection, or not; and on which side. Off at every
     // launch (it is not always wanted); what was chosen stays while the program runs.
@@ -546,7 +606,7 @@ export class Outliner {
   }
 
   showPreview() {
-    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions(), this.attachSide());
+    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions(), this.attachSide(), this.into);
   }
 
   // The form's part that says where the object goes: a box - up against the
@@ -612,7 +672,9 @@ export class Outliner {
     const { form } = this;
     const { title, fields } = PRIMITIVES[kind];
     form.dataset.kind = kind;
-    form.querySelector('h3').textContent = title;
+    // (made in a group: its name says so)
+    const group = this.into === null ? null : this.editor.mesh.objects.find((object) => object.id === this.into);
+    form.querySelector('h3').textContent = group ? `${title} · в группу ${group.name}` : title;
     form.querySelector('.fields').replaceChildren(
       ...fields.map((field) => {
         const label = document.createElement('label');
@@ -651,6 +713,7 @@ export class Outliner {
   closeForm() {
     if (this.form.hidden) return;
     this.form.hidden = true;
+    this.into = null;
     this.editor.previewPrimitive(null);
     document.activeElement?.blur(); // give the keyboard back to the editor shortcuts
   }

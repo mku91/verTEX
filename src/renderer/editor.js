@@ -10,6 +10,8 @@ import { surfacePath, barycentric } from './surface-path.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
 import { theme, onThemeChange } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
+import { turnOf } from './pose.js';
+import { unwrap as nearAngles } from './animation.js';
 import { latinName } from './names.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -35,8 +37,24 @@ export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'rect', 'ellipse', 'marq
 
 const PIVOT_MARKER_SIZE = 18; // px
 const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected group holds
+const GROUP_COLOR = 0xffb86c; // a picked group's bounds (see updateGroupBounds())
+const GROUP_DOT_SIZE = 11; // px; a picked group that holds nothing
 
 // The pivot marker's picture: a ring with a dot and four ticks, white, to be tinted.
+// A dot, as a vertex is drawn: a picked group that holds nothing.
+function dotTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#fff';
+  context.beginPath();
+  context.arc(32, 32, 28, 0, Math.PI * 2);
+  context.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function pivotTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 64;
@@ -223,6 +241,7 @@ export class Editor extends EventTarget {
     };
 
     this.setupGizmo();
+    this.setupGroupBounds();
     this.setupPointer();
     this.applyTheme();
     onThemeChange(() => this.applyTheme());
@@ -290,6 +309,11 @@ export class Editor extends EventTarget {
     this.gizmo.addEventListener('mouseDown', () => {
       this.gizmoUsed = true;
       this.gizmoBefore = this.snapshot();
+      // An empty group gets a pivot point of its own, where it is, to be moved.
+      const entry = this.pivotEntry();
+      if (entry !== null && !this.mesh.objects[entry].pivot && this.contents([entry]).vertices.size === 0) {
+        this.mesh.objects[entry].pivot = this.pivotPoint(entry).toArray();
+      }
       this.pivotStart = this.pivot.position.clone();
       this.pivot.updateMatrix();
       this.dragStartInverse = this.pivot.matrix.clone().invert();
@@ -638,7 +662,9 @@ export class Editor extends EventTarget {
     const mode = TOOLS[this.tool];
     const entry = this.pivotEntry();
     // The pivot tool needs an object to have a pivot; the others, something to move.
-    const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0;
+    // (A group picked whole that holds nothing has no vertices, but it has a
+    // place - its pivot point - and a turn: those are what the gizmo moves.)
+    const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0 && entry === null;
     if (!mode || nothing || this.operation || this.preview || this.workspace !== 'model') {
       this.gizmo.detach();
     } else {
@@ -1363,6 +1389,44 @@ export class Editor extends EventTarget {
     }
   }
 
+  // How an entry's animations turn it (Blender's rotation mode): by angles
+  // ('euler', the default: they may go past 360 - two turns between two
+  // keys) or by quaternions ('quaternion': the short way, along the sphere,
+  // never stuck). Its turns' keys in every clip are made the other kind -
+  // angles out of a quaternion are put as near the key before as they go;
+  // a quaternion out of angles loses whole turns. One undo step.
+  setRotationMode(index, mode) {
+    const object = this.mesh.objects[index];
+    if (!object || (object.rotationMode ?? 'euler') === mode || this.busy()) return;
+    this.history.push(this.snapshot());
+    if (mode === 'quaternion') object.rotationMode = mode;
+    else delete object.rotationMode;
+    const round = (value) => +value.toFixed(6);
+    this.animations = this.animations.map((clip) => ({
+      ...clip,
+      tracks: clip.tracks.map((track) => {
+        if (track.object !== object.id || track.property !== 'rotation') return track;
+        let before = null;
+        return {
+          ...track,
+          keys: track.keys.map((key) => {
+            let value;
+            if (mode === 'quaternion') {
+              const q = turnOf(key.value);
+              if (before && q.x * before[0] + q.y * before[1] + q.z * before[2] + q.w * before[3] < 0) q.set(-q.x, -q.y, -q.z, -q.w);
+              value = q.toArray();
+            } else {
+              value = nearAngles(rotationOf(turnOf(key.value)) ?? [0, 0, 0], before);
+            }
+            before = value;
+            return { ...key, value: value.map(round) };
+          }),
+        };
+      }),
+    }));
+    this.emitChange();
+  }
+
   // The animations from now on (see animation.js). One undo step; with
   // `record` off only shown, for a drag that is made one by its own end.
   setAnimations(animations, record = true) {
@@ -1607,6 +1671,11 @@ export class Editor extends EventTarget {
         // is grabbed, selected or deselected while it is in hand.
         if (this.tool === 'pivot') return;
         const key = this.pickElement(event.clientX, event.clientY);
+        // A part of a locked group, in any mode: the group, picked whole.
+        if (this.pressLocked(key, () => this.pickFace(event.clientX, event.clientY))) {
+          event.stopImmediatePropagation();
+          return;
+        }
         if (event.shiftKey) {
           // Shift: a drag draws a selection box, even when it starts on an element.
           event.stopImmediatePropagation();
@@ -3649,7 +3718,7 @@ export class Editor extends EventTarget {
       case 'face': return this.pickFace(clientX, clientY);
       case 'object': {
         const face = this.pickFace(clientX, clientY);
-        return face === null ? null : this.topology.islandOfFace[face];
+        return face === null ? null : this.lockedOwner(this.topology.islandOfFace[face]);
       }
       default: return this.pickVertex(clientX, clientY);
     }
@@ -3952,19 +4021,172 @@ export class Editor extends EventTarget {
   // Shows, as a wireframe in the scene, the object addPrimitive() would make
   // with these arguments; a null kind takes the preview away. Nothing is added
   // to the model.
-  previewPrimitive(kind, options = {}, side = null) {
+  previewPrimitive(kind, options = {}, side = null, into = null) {
     const draft = new EditableMesh();
     const made = kind && buildPrimitive(draft, kind, options);
-    if (made) this.attachPrimitive(draft, made, this.primitiveAnchor(side));
+    const anchor = this.primitiveAnchor(side);
+    const group = this.groupIndex(into);
+    if (made && anchor) this.attachPrimitive(draft, made, anchor);
+    else if (made && group !== null) this.centerPrimitive(draft, made, this.pivotPoint(group));
     this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
     this.viewport.requestRender();
   }
 
-  // Adds an empty group to the scene tree.
-  addGroup() {
+  // A locked group (`locked` on it) is picked only whole in the main view: a
+  // press there on anything in it picks the group. (The scene tree and the
+  // three views pick its parts as they are.) What an entry (index in the
+  // objects list) is picked as there: the outermost locked group it is in,
+  // or itself.
+  //
+  // A lock is one of two: `true` - the group picked whole, the outermost such
+  // one winning - or 'nearest': anything in the group is picked as the
+  // nearest group above it (itself, or one inside it).
+  lockedOwner(index) {
+    const { islands } = this.topology;
+    let whole = null;
+    let nearest = false;
+    for (let at = islands[index]?.parentIndex ?? null; at !== null && at !== undefined; at = islands[at].parentIndex) {
+      const locked = this.mesh.objects[at]?.locked;
+      if (locked === 'nearest') nearest = true;
+      else if (locked) whole = at;
+    }
+    if (whole !== null) return whole;
+    return nearest ? islands[index].parentIndex : index;
+  }
+
+  // A press outside object mode on what is in a locked group - an element
+  // (`key`, of the mode's) or, if there is none under the pointer, a face
+  // (`faceAt()`, its index or null): the group's. It is picked whole, in
+  // object mode, and its parts are not to be edited until it is opened.
+  // Returns whether the press was so taken.
+  pressLocked(key, faceAt) {
+    if (this.mode === 'object') return false;
+    const { islandOfVertex, islandOfFace } = this.topology;
+    let island = null;
+    if (key !== null && key !== undefined) island = islandOfVertex[this.elementVertices(key)[0]] ?? null;
+    if (island === null) {
+      const face = faceAt();
+      if (face !== null && face !== undefined) island = islandOfFace[face];
+    }
+    if (island === null || island === undefined) return false;
+    const owner = this.lockedOwner(island);
+    if (owner === island) return false;
+    this.setMode('object');
+    if (this.mode !== 'object') return false;
+    this.select(owner, false);
+    return true;
+  }
+
+  // A group's lock (see lockedOwner()): false (open), true (picked whole) or
+  // 'nearest'. One undo step.
+  setGroupLock(index, lock) {
+    const group = this.mesh.objects[index];
+    if (!group || group.kind !== 'group' || (group.locked ?? false) === lock || this.busy()) return;
+    this.history.push(this.snapshot());
+    if (lock) group.locked = lock;
+    else delete group.locked;
+    this.emitChange();
+  }
+
+  // --- a picked group, seen as one ----------------------------------------
+  //
+  // A group picked in object mode is shown as a whole: a wireframe box round
+  // everything in it (along the group's own axes, a step of the fine grid
+  // larger on every side), or - for a group that holds nothing - a dot where
+  // its pivot point is. Brought up to date every time the view is drawn.
+
+  setupGroupBounds() {
+    this.groupBox = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: GROUP_COLOR, depthTest: false, transparent: true }),
+    );
+    this.groupBox.renderOrder = 8;
+    this.groupBox.frustumCulled = false;
+    this.viewport.scene.add(this.groupBox);
+    this.groupDotMaterial = new THREE.SpriteMaterial({ map: dotTexture(), color: GROUP_COLOR, sizeAttenuation: false, depthTest: false, transparent: true });
+    this.groupDots = [];
+    this.viewport.beforeRender = [...(this.viewport.beforeRender ?? []), () => this.updateGroupBounds()];
+  }
+
+  updateGroupBounds() {
+    const { islands } = this.topology;
+    const groups = this.mode === 'object' && !this.preview && !this.painting && !this.simulating
+      ? [...this.picked].filter((key) => islands[key]?.kind === 'group')
+      : [];
+    const shown = this.view.shown; // (posed, in the animation mode)
+    const pad = this.snapGrid.step / this.snapGrid.fineDivisor;
+    const lines = [];
+    const dots = [];
+    for (const index of groups) {
+      const { vertices } = this.contents([index]);
+      if (vertices.size === 0) {
+        dots.push(this.pivotPoint(index));
+        continue;
+      }
+      const turn = quaternionOf(this.mesh.objects[index].rotation);
+      const back = turn.clone().invert();
+      const box = new THREE.Box3();
+      for (const vertex of vertices) box.expandByPoint(shown[vertex].clone().applyQuaternion(back));
+      box.expandByScalar(pad);
+      const corner = (i) => new THREE.Vector3(i & 4 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 1 ? box.max.z : box.min.z).applyQuaternion(turn);
+      for (const [a, b] of [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]]) {
+        lines.push(...corner(a).toArray(), ...corner(b).toArray());
+      }
+    }
+    this.groupBox.geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
+    this.groupBox.visible = lines.length > 0;
+    while (this.groupDots.length < dots.length) {
+      const dot = new THREE.Sprite(this.groupDotMaterial);
+      dot.renderOrder = 8;
+      this.viewport.scene.add(dot);
+      this.groupDots.push(dot);
+    }
+    const size = (GROUP_DOT_SIZE / this.viewport.container.clientHeight) * 2 * Math.tan(THREE.MathUtils.degToRad(this.viewport.camera.fov / 2));
+    this.groupDots.forEach((dot, i) => {
+      dot.visible = i < dots.length;
+      if (!dot.visible) return;
+      dot.position.copy(dots[i]);
+      dot.scale.set(size, size, 1);
+    });
+  }
+
+  // Groups without a pivot point of their own get the one they have now (the
+  // middle of what they hold), to keep: a group's place is its own. Not an
+  // undo step by itself.
+  pinGroups() {
+    this.mesh.objects.forEach((object, index) => {
+      if (object.kind === 'group' && !object.pivot) object.pivot = this.pivotPoint(index).toArray();
+    });
+  }
+
+  // A group's index in the objects list by its id; null if there is none such.
+  groupIndex(id) {
+    if (id === null || id === undefined) return null;
+    const index = this.mesh.objects.findIndex((object) => object.id === id && object.kind === 'group');
+    return index < 0 ? null : index;
+  }
+
+  // Moves the given vertices of a mesh (a freshly built primitive) so that
+  // the middle of their bounds is on `point`.
+  centerPrimitive(mesh, vertices, point) {
+    const box = new THREE.Box3().setFromPoints(vertices.map((i) => mesh.vertices[i]));
+    const offset = point.clone().sub(box.getCenter(new THREE.Vector3()));
+    for (const i of vertices) mesh.vertices[i].add(offset);
+  }
+
+  // Adds an empty group to the scene tree; `into`: a group's id it goes in.
+  // A group has a place of its own from the start (its pivot point): at the
+  // origin, or in the group it is made in, where that one's is - not the
+  // middle of what it holds, which would move as that does.
+  addGroup(into = null) {
     if (this.busy()) return;
     this.history.push(this.snapshot());
+    const outer = this.groupIndex(into);
+    const at = outer === null ? new THREE.Vector3() : this.pivotPoint(outer);
     this.mesh.addObject('Group', 'group');
+    const group = this.mesh.objects[this.mesh.objects.length - 1];
+    group.pivot = at.toArray();
+    if (outer !== null) group.parent = into;
     this.updateTopology();
     this.emitChange();
   }
@@ -4094,12 +4316,12 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the group it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
         const top = roots.has(index);
         return {
           id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
-          colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null,
+          colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null, rotationMode: rotationMode ?? null, locked: locked ?? false,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
         };
       }),
@@ -4137,6 +4359,8 @@ export class Editor extends EventTarget {
       if (source.smooth) object.smooth = source.smooth;
       if (source.colliders) object.colliders = source.colliders.map(cloneCollider);
       if (source.body) object.body = source.body;
+      if (source.rotationMode) object.rotationMode = source.rotationMode;
+      if (source.locked) object.locked = source.locked;
       // A copy of an object that is on the atlas is on it too, with its picture.
       if (source.atlas) object.atlas = source.atlas;
       else delete object.atlas;
@@ -4163,6 +4387,7 @@ export class Editor extends EventTarget {
     this.selection = new Set(clip.vertices.map((_, k) => base + k));
     this.edited(before);
     this.rebuildView();
+    this.pinGroups(); // (a copy of a group from before groups had places of their own)
     // The copies themselves are what is picked, groups included.
     const roots = clip.objects.filter((source) => source.parent === null).map((source) => made.get(source.id));
     this.picked = new Set(roots.map((object) => mesh.objects.indexOf(object)));
@@ -4222,14 +4447,19 @@ export class Editor extends EventTarget {
   // Adds a new object and selects it: 'cube', 'cone' ({ sides, size }),
   // 'cylinder' ({ sides, size, height }) or 'sphere' ({ segments, size }) -
   // at the origin, or with `side` up against the selection (see primitiveAnchor()).
-  addPrimitive(kind, options = {}, side = null) {
+  // `into`: a group's id - the object is made in it, in the middle of it
+  // (where its pivot point is), unless it is put up against the selection.
+  addPrimitive(kind, options = {}, side = null, into = null) {
     if (this.busy()) return;
     this.previewPrimitive(null);
     const before = this.snapshot();
     const anchor = this.primitiveAnchor(side); // from the selection as it is now
+    const group = this.groupIndex(into);
     const vertices = buildPrimitive(this.mesh, kind, options);
     if (!vertices) return;
-    this.attachPrimitive(this.mesh, vertices, anchor);
+    if (anchor) this.attachPrimitive(this.mesh, vertices, anchor);
+    else if (group !== null) this.centerPrimitive(this.mesh, vertices, this.pivotPoint(group));
+    if (group !== null) this.mesh.objects[this.mesh.objects.length - 1].parent = into;
     this.selection = new Set(vertices);
     this.commit(before);
     this.rebuildView();
@@ -4350,7 +4580,7 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
       id,
       name,
       kind: kind === 'group' ? 'group' : 'mesh',
@@ -4365,6 +4595,8 @@ export class Editor extends EventTarget {
       ...(smooth ? { smooth } : {}),
       ...(kind !== 'group' && colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
       ...(kind !== 'group' && body && body !== 'static' ? { body } : {}),
+      ...(rotationMode === 'quaternion' ? { rotationMode } : {}),
+      ...(locked && kind === 'group' ? { locked: locked === 'nearest' ? 'nearest' : true } : {}),
     }));
     this.mirror.globalAxes = new Set(model.mirror ?? []);
     mesh.vertexObject = [...model.vertexObject];
@@ -4383,6 +4615,7 @@ export class Editor extends EventTarget {
     this.selection = new Set();
     this.target = new Set();
     this.rebuildView();
+    this.pinGroups(); // (groups from before they had places of their own: where they are)
     // The first object is the one being edited, as after a start.
     const first = this.topology.islands.find((island) => island.kind !== 'group' && !island.hidden);
     this.target = new Set(first?.vertices ?? []);
@@ -4569,7 +4802,8 @@ export class Editor extends EventTarget {
   // changed since then.
   commit(before) {
     const { vertices, faces, wires } = this.mesh;
-    const pivots = (objects) => JSON.stringify(objects.map((object) => object.pivot ?? null));
+    // (the entries' places and turns too: an empty group has nothing else to change)
+    const pivots = (objects) => JSON.stringify(objects.map((object) => [object.pivot ?? null, object.rotation ?? null]));
     const changed =
       pivots(this.mesh.objects) !== pivots(before.objects) ||
       vertices.length !== before.vertices.length ||

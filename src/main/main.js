@@ -32,6 +32,21 @@ function createWindow() {
   // the same). The editor gets both - see 'window:editor' below.
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
+  // The page opens one window of its own: its views (see views-window.js).
+  // Nothing else.
+  win.webContents.setWindowOpenHandler(({ url }) => (url.endsWith('/views.html')
+    ? {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        width: 1280,
+        height: 860,
+        title: 'verTEX — виды',
+        autoHideMenuBar: true,
+        backgroundColor: '#282a36',
+        icon: path.join(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+      },
+    }
+    : { action: 'deny' }));
   guardWindow(win); // unsaved changes are asked about before it closes
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   return win;

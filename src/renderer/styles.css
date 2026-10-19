@@ -261,7 +261,7 @@ body {
 }
 
 /* Pushed to the bottom of the toolbar. */
-#toolbar [data-action="toggle-views"] {
+#toolbar [data-action="views-window"] { /* (the first of those at the bottom) */
   margin-top: auto;
 }
 
@@ -710,6 +710,23 @@ body {
 }
 
 /* Drag handle on the top edge of the bottom panel. */
+/* Between the three views and the timeline, in the animation mode: the same strip. */
+#anim-splitter {
+  position: relative;
+  flex: 0 0 7px;
+  background: var(--bg-raised);
+  cursor: ns-resize;
+}
+
+#anim-splitter[hidden] {
+  display: none;
+}
+
+#anim-splitter:hover,
+#anim-splitter.dragging {
+  background: var(--hover);
+}
+
 #views-splitter {
   position: relative;
   flex: 0 0 7px;
@@ -814,6 +831,10 @@ body {
 #pose-panel .key-mark[data-key="position"].keyed { border-color: var(--key-position); background: var(--key-position); }
 #pose-panel .key-mark[data-key="rotation"].keyed { border-color: var(--key-rotation); background: var(--key-rotation); }
 #pose-panel .key-mark[data-key="scale"].keyed { border-color: var(--key-scale); background: var(--key-scale); }
+
+#pose-panel label[hidden] {
+  display: none;
+}
 
 #pose-panel label {
   display: flex;
@@ -936,13 +957,17 @@ body {
   text-align: center;
 }
 
-#timeline .tl-bar .tl-autokey i {
-  color: var(--axis-x);
-  font-size: 10px;
+/* Autokey's mark: a dot drawn as such (a glyph's sits a little off the middle). */
+#timeline .tl-bar .tl-autokey .rec-dot {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--axis-x);
 }
 
-#timeline .tl-bar .tl-autokey.active i {
-  color: var(--accent-text);
+#timeline .tl-bar .tl-autokey.active .rec-dot {
+  background: var(--accent-text);
 }
 
 .tl-empty {
@@ -958,10 +983,20 @@ body {
   /* minmax(0, ...): the canvases have their sizes in pixels, from the last
      drawing - they must not hold the column open when there is less room. */
   grid-template-columns: var(--tl-names, 220px) minmax(0, 1fr);
-  grid-template-rows: 26px 1fr;
+  grid-template-rows: 26px 1fr 22px; /* frames, the lanes, seconds */
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* The ruler of seconds, under the lanes. */
+.tl-seconds {
+  display: block;
+  border-top: 1px solid var(--border);
+}
+
+.tl-corner-bottom {
+  border-top: 1px solid var(--border);
 }
 
 /* The edge between the names and the lanes, dragged to widen the names. */
@@ -980,8 +1015,49 @@ body {
 }
 
 .tl-corner {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 8px;
   background: var(--bg-raised);
   border-right: 1px solid var(--border);
+}
+
+/* The pose changed and not keyed (see Timeline.showUnkeyed()). */
+.tl-unkeyed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: #ffb86c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tl-restore {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border: 1px solid #ffb86c;
+  border-radius: 3px;
+  background: transparent;
+  color: #ffb86c;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tl-restore:hover {
+  background: #ffb86c;
+  color: var(--bg);
+}
+
+.tl-unkeyed[hidden],
+.tl-restore[hidden] {
+  display: none;
 }
 
 .tl-ruler {
@@ -992,17 +1068,25 @@ body {
   grid-column: 1 / 3;
   display: grid;
   grid-template-columns: var(--tl-names, 220px) minmax(0, 1fr);
-  grid-template-rows: minmax(100%, auto); /* at least as tall as the panel: the names' column goes all the way down */
   align-items: start;
   min-height: 0;
   overflow-x: hidden;
+  /* The names' column dark all the way down - past the last row, and over
+     all of what scrolls (`local`: the background scrolls with the rows). */
+  background:
+    linear-gradient(to right,
+      var(--bg-raised) calc(var(--tl-names, 220px) - 1px),
+      var(--border) calc(var(--tl-names, 220px) - 1px) var(--tl-names, 220px),
+      transparent var(--tl-names, 220px)) local;
+  /* A scrollbar of the theme's: thin, the colour of the panels' borders. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
   overflow-y: auto;
 }
 
 .tl-names {
-  align-self: stretch; /* dark to the bottom, whatever few rows there are */
+  /* (its dark column is the scrolled part's background, see .tl-scroll) */
   border-right: 1px solid var(--border);
-  background: var(--bg-raised);
 }
 
 .tl-name {
@@ -1067,27 +1151,58 @@ body {
 /* A track's "+": a key of it on the frame, in the colour of its keys. */
 .tl-add {
   flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 6px 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  font-size: 0; /* (the "+" is the cut-out below) */
+  cursor: pointer;
+  transform: scale(0.8); /* (drawn at 16 px, shown at four fifths of that) */
+  /* A square of the track's colour with a "+" cut through it: the whole,
+     less two bars across (the upright one in two, so that none overlap). */
+  -webkit-mask:
+    linear-gradient(#000 0 0) 7px 3px / 2px 4px no-repeat,
+    linear-gradient(#000 0 0) 7px 9px / 2px 4px no-repeat,
+    linear-gradient(#000 0 0) 3px 7px / 10px 2px no-repeat,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.tl-add:hover {
+  filter: brightness(1.25);
+}
+
+/* The turn's kind (angles ∠, quaternions ℍ): a symbol to switch it by. */
+.tl-mode {
+  flex: none;
   width: 20px;
   height: 20px;
-  margin: 0 4px 0 auto;
+  margin-left: auto;
   padding: 0;
   border: 0;
   border-radius: 4px;
   background: none;
+  color: var(--key-rotation);
   font-family: inherit;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
   line-height: 20px;
   cursor: pointer;
 }
 
-.tl-add:hover {
+.tl-mode:hover {
   background: var(--hover);
 }
 
-.tl-add.position { color: var(--key-position); }
-.tl-add.rotation { color: var(--key-rotation); }
-.tl-add.scale { color: var(--key-scale); }
+.tl-mode + .tl-add {
+  margin-left: 0;
+}
+
+.tl-add.position { background: var(--key-position); }
+.tl-add.rotation { background: var(--key-rotation); }
+.tl-add.scale { background: var(--key-scale); }
 
 /* A key's own settings, opened by a double click on it, beside it. */
 .key-popup {
@@ -1165,6 +1280,10 @@ body {
 .key-popup .kp-step:hover:enabled {
   background: var(--hover);
   color: var(--text);
+}
+
+.key-popup label[hidden] {
+  display: none;
 }
 
 .key-popup label {
@@ -1428,11 +1547,13 @@ body {
   background: var(--bg);
 }
 
-.uv-divider {
+.uv-divider,
+.uv-bar i.uv-divider { /* (an <i>, but not an icon: its width is its own) */
+  flex: none;
   width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--border);
+  height: 18px;
+  margin: 0 6px;
+  background: var(--hover);
 }
 
 .uv-status {
@@ -2028,6 +2149,65 @@ input.refused {
 }
 
 /* The eye at the end of a row: hides or shows the object. */
+/* A group's lock: dim while open, lit while shut. */
+.outliner-lock {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0.4;
+}
+
+.outliner-lock i {
+  font-size: 11px;
+}
+
+.outliner-lock:hover {
+  background: var(--border);
+  opacity: 1;
+}
+
+.outliner-lock.shut,
+.outliner-row .outliner-lock.shut i {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* 'Nearest group': a group picked, in the colour of a picked group's bounds. */
+.outliner-lock.nearest,
+.outliner-row .outliner-lock.nearest i {
+  color: #ffb86c;
+  opacity: 1;
+}
+
+.outliner-lock + .outliner-add {
+  margin-left: 2px;
+}
+
+/* A group's +: an object made in it. */
+.outliner-add {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+
+.outliner-add i {
+  font-size: 11px;
+}
+
+.outliner-add:hover {
+  background: var(--border);
+  opacity: 1;
+}
+
+.outliner-add + .outliner-eye {
+  margin-left: 2px;
+}
+
 .outliner-eye {
   display: flex;
   flex: none;

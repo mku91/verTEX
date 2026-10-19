@@ -20,8 +20,9 @@ import {
 // and the line of the frame looked at stand on it, its number to its right.
 //
 // A press on the frames' ruler or on a lane takes the line there, and a drag
-// takes it along - from frame to frame, or between them with Ctrl held; the wheel makes the frames wider or narrower, about the
-// pointer; the middle button moves them. What is changed in a clip is one
+// takes it along - from frame to frame, or between them with Ctrl held; the
+// wheel moves the frames back and forth, and with Ctrl makes them wider or
+// narrower about the pointer; the middle button moves them. What is changed in a clip is one
 // undo step (see Editor.setAnimations()). The frame looked at and the clip
 // worked on are the mode's, not the document's.
 //
@@ -43,7 +44,10 @@ import {
 const ROW = 24; // px a row (as .tl-name)
 const BEFORE = 1; // frames of room before frame 0, hatched
 const RULER = 26; // px of the frames' ruler
+const SECONDS = 21; // px of the seconds' ruler, under the lanes (and its border)
 const MIN_FRAME_WIDTH = 2;
+const GLIDE = 60; // ms: how quickly the frames close in on where the wheel sends them (see glideTo())
+const WHEEL_PX = 0.6; // px the frames go by for a pixel of the wheel's travel (a notch: ~60 px)
 const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
 const NAMES_WIDTH = 220; // px, at first
@@ -53,7 +57,7 @@ const NEW_CLIP = { fps: 12, length: 24, loop: true };
 const INTERPOLATION_NAMES = { linear: 'Линейная', step: 'Шаг', smooth: 'Плавная' };
 const KEY_COLORS = { position: 'keyPosition', rotation: 'keyRotation', scale: 'keyScale' }; // theme's, see theme.js
 const PREVIEW_COLOR = '#8be9fd'; // the frame looked at, while a key's curve is previewed
-const STILL_COLOR = '#ff5555'; // the ring of a key that repeats the one before it
+const STILL_COLOR = '#ff5555'; // a key that repeats the one before it
 
 export class Timeline extends EventTarget {
   constructor(section, editor) {
@@ -65,7 +69,7 @@ export class Timeline extends EventTarget {
     this.frame = 0; // the frame looked at (a fraction while playing)
     this.playing = false;
     this.autokey = false;
-    this.frameWidth = 14; // px a frame
+    this.frameWidth = 14 * 1.2 ** 4; // px a frame: at first four turns of the wheel in from 14 (about 29)
     this.scroll = 0; // the frame at the left edge of the lanes, after the one before 0 (a fraction; never below 0)
     this.folded = new Set(); // entries whose tracks are not shown
     this.rows = []; // what each row of the lanes is: { index, property? }
@@ -79,6 +83,7 @@ export class Timeline extends EventTarget {
     this.frameLabel = $('.tl-frame');
     this.names = $('.tl-names');
     this.ruler = $('.tl-ruler');
+    this.secondsRuler = $('.tl-seconds');
     this.lanes = $('.tl-lanes');
     this.scroller = $('.tl-scroll');
     this.empty = $('.tl-empty');
@@ -89,9 +94,25 @@ export class Timeline extends EventTarget {
     this.bindKeys();
     this.bindPopup();
     this.bindResize();
-    new ResizeObserver(() => this.draw()).observe(this.lanes.parentElement);
+    // Drawn anew whenever there is more or less room: across (the lanes' box)
+    // and down (the scrolled part - the lanes reach its bottom, whatever few rows there are).
+    const resized = new ResizeObserver(() => this.draw());
+    resized.observe(this.lanes.parentElement);
+    resized.observe(this.scroller);
     editor.addEventListener('change', () => this.update());
     onThemeChange(() => this.draw());
+  }
+
+  // The corner over the names: a warning while the pose has changes not
+  // keyed, or - once another frame has let them go - a button to bring them
+  // back (see AnimationMode.restorePose()). `state`: 'pending', the frame
+  // they were on (a number), or null.
+  showUnkeyed(state) {
+    const warning = this.section.querySelector('.tl-unkeyed');
+    const restore = this.section.querySelector('.tl-restore');
+    warning.hidden = state !== 'pending';
+    restore.hidden = typeof state !== 'number';
+    if (!restore.hidden) restore.title = `Вернуть позу, изменённую на кадре ${state} и сброшенную без ключа`;
   }
 
   toggle(open = !this.open) {
@@ -209,12 +230,17 @@ export class Timeline extends EventTarget {
       play: () => this.play(),
       next: () => this.setFrame(Math.floor(this.frame) + 1),
       last: () => this.setFrame(this.current()?.length ?? 0),
+      key: () => this.dispatchEvent(new Event('insertkey')), // (the mode's, see animate.js)
       autokey: () => {
         this.autokey = !this.autokey;
         this.showBar();
         this.dispatchEvent(new Event('autokey'));
       },
     };
+    section.querySelector('.tl-restore').addEventListener('click', () => {
+      this.play(false);
+      this.dispatchEvent(new Event('restore'));
+    });
     for (const button of section.querySelectorAll('[data-tl]')) {
       button.addEventListener('click', () => commands[button.dataset.tl]());
     }
@@ -279,7 +305,7 @@ export class Timeline extends EventTarget {
     select.replaceChildren(...this.clips.map((other) => new Option(other.name, other.name, false, other.name === this.clip)));
     select.disabled = this.clips.length === 0;
     for (const button of this.section.querySelectorAll('[data-tl]')) {
-      if (button.dataset.tl !== 'add') button.disabled = !clip;
+      if (button.dataset.tl !== 'add' && button.dataset.tl !== 'key' && button.dataset.tl !== 'autokey') button.disabled = !clip;
     }
     for (const input of [fields.name, fields.fps, fields.length, fields.loop]) input.disabled = !clip;
     if (document.activeElement !== fields.name) fields.name.value = clip?.name ?? '';
@@ -325,7 +351,8 @@ export class Timeline extends EventTarget {
     const picked = this.editor.mode === 'object' ? this.editor.picked : new Set();
     const clip = this.current();
     const animated = new Set(clip?.tracks.map((track) => track.object) ?? []);
-    const signature = JSON.stringify([islands.map((island) => [island.id, island.name, island.kind, island.parentIndex, island.hidden]), [...hand], [...picked], [...this.folded], [...animated]]);
+    const signature = JSON.stringify([islands.map((island) => [island.id, island.name, island.kind, island.parentIndex, island.hidden]), [...hand], [...picked], [...this.folded], [...animated],
+      this.editor.mesh.objects.map((object) => object.rotationMode ?? null)]);
     if (signature !== this.shownNames) {
       this.shownNames = signature;
       const rows = [];
@@ -357,6 +384,18 @@ export class Timeline extends EventTarget {
           plus.textContent = '+';
           plus.title = `Ключ: ${PROPERTY_NAMES[property].toLowerCase()} на этом кадре`;
           plus.dataset.add = `${index}:${property}`;
+          // The turn's row: how the entry is turned - a symbol to switch it by.
+          if (property === 'rotation' && islands[index].kind !== undefined) {
+            const quaternion = this.editor.mesh.objects[index]?.rotationMode === 'quaternion';
+            const mode = document.createElement('button');
+            mode.className = 'tl-mode';
+            mode.textContent = quaternion ? 'ℍ' : '∠';
+            mode.dataset.mode = index;
+            mode.title = quaternion
+              ? 'Поворот кватернионами (W, X, Y, Z): кратчайший путь, без «шарнирного замка», но не больше пол-оборота между ключами. Нажмите — перейти на углы'
+              : 'Поворот углами (X, Y, Z): можно больше 360° между ключами, но при повороте по нескольким осям путь бывает кривым. Нажмите — перейти на кватернионы';
+            sub.append(mode);
+          }
           sub.append(plus);
           lines.push(sub);
           rows.push({ index, property });
@@ -374,6 +413,40 @@ export class Timeline extends EventTarget {
 
   // --- the lanes ------------------------------------------------------------------
 
+  // The frames glide to where the wheel sends them: every frame they cover
+  // the same share of what is left - x = lerp(x, to, t) - with t worked out
+  // from the time since the last frame (1 - e^(-dt/GLIDE)), so that it is the
+  // same on any screen; a turn of the wheel on the way moves where they go.
+  glideTo(scroll) {
+    const to = Math.max(0, scroll);
+    if (this.glide) {
+      this.glide.to = to;
+      return;
+    }
+    const glide = { to, last: performance.now() };
+    this.glide = glide;
+    const tick = (time) => {
+      if (this.glide !== glide) return;
+      const t = 1 - Math.exp(-(time - glide.last) / GLIDE);
+      glide.last = time;
+      this.scroll += (glide.to - this.scroll) * t;
+      if (Math.abs(glide.to - this.scroll) < 0.002) {
+        this.scroll = glide.to;
+        this.glide = null;
+      } else {
+        glide.request = requestAnimationFrame(tick);
+      }
+      this.draw();
+    };
+    glide.request = requestAnimationFrame(tick);
+  }
+
+  stopGlide() {
+    if (!this.glide) return;
+    cancelAnimationFrame(this.glide.request);
+    this.glide = null;
+  }
+
   // The frame at a point of the lanes (client x; rounded, the nearest line), and back.
   // (Before frame 0 there is room for one frame more - hatched: nothing goes there.)
   frameAt(clientX) {
@@ -386,12 +459,13 @@ export class Timeline extends EventTarget {
 
   bindLanes() {
     // A press on the ruler or a lane: the frame looked at goes there, and with the drag.
-    for (const canvas of [this.ruler, this.lanes]) {
+    for (const canvas of [this.ruler, this.lanes, this.secondsRuler]) {
       canvas.addEventListener('pointerdown', (event) => {
         if (event.button === 1) {
           // The middle button: the frames move with the pointer.
           event.preventDefault();
           canvas.setPointerCapture(event.pointerId);
+          this.stopGlide();
           const start = { x: event.clientX, scroll: this.scroll };
           const move = (moved) => {
             this.scroll = Math.max(0, start.scroll - (moved.clientX - start.x) / this.frameWidth); // (nothing before frame 0)
@@ -427,8 +501,17 @@ export class Timeline extends EventTarget {
         canvas.addEventListener('pointermove', go);
         canvas.addEventListener('pointerup', up);
       });
+      // The wheel: the frames go by, back and forth; with Ctrl, wider or
+      // narrower about the pointer. (With Shift it is the rows', up and down.)
       canvas.addEventListener('wheel', (event) => {
+        if (event.shiftKey) return;
         event.preventDefault();
+        if (!event.ctrlKey) {
+          const travel = (event.deltaY || event.deltaX) * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1);
+          this.glideTo((this.glide?.to ?? this.scroll) + (travel * WHEEL_PX) / this.frameWidth);
+          return;
+        }
+        this.stopGlide();
         const at = this.frameAt(event.clientX);
         this.frameWidth = Math.max(MIN_FRAME_WIDTH, Math.min(MAX_FRAME_WIDTH, this.frameWidth * (event.deltaY < 0 ? 1.2 : 1 / 1.2)));
         this.scroll = Math.max(0, at + BEFORE - (event.clientX - this.lanes.getBoundingClientRect().left) / this.frameWidth);
@@ -439,6 +522,13 @@ export class Timeline extends EventTarget {
     // A name: its fold, or the entry picked.
     this.names.addEventListener('mousedown', (event) => event.preventDefault());
     this.names.addEventListener('click', (event) => {
+      // The turn's symbol: angles or quaternions (see Editor.setRotationMode()).
+      const mode = event.target.closest('[data-mode]');
+      if (mode) {
+        const index = Number(mode.dataset.mode);
+        this.editor.setRotationMode(index, this.editor.mesh.objects[index]?.rotationMode === 'quaternion' ? 'euler' : 'quaternion');
+        return;
+      }
       // A track's +: the mode keys it (see animate.js).
       const plus = event.target.closest('[data-add]');
       if (plus) {
@@ -640,6 +730,7 @@ export class Timeline extends EventTarget {
     popup.innerHTML = `
       <div class="kp-head"><i class="kp-grip" title="Потяните, чтобы переставить окно"></i><span></span><button class="kp-step" data-step="-1" title="Предыдущий ключ этой дорожки"><i class="fa-solid fa-chevron-left"></i></button><button class="kp-step" data-step="1" title="Следующий ключ этой дорожки"><i class="fa-solid fa-chevron-right"></i></button><button class="kp-close" title="Закрыть (Esc)"><i class="fa-solid fa-xmark"></i></button></div>
       <label><span>Кадр</span><input data-kp="frame" inputmode="numeric" spellcheck="false"></label>
+      <label hidden><span class="axis">W</span><input data-kp="3" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis x">X</span><input data-kp="0" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis y">Y</span><input data-kp="1" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis z">Z</span><input data-kp="2" inputmode="decimal" spellcheck="false"></label>
@@ -838,10 +929,13 @@ export class Timeline extends EventTarget {
     const island = this.editor.topology.islands.find((entry) => entry.id === key.object);
     popup.querySelector('.kp-head span').textContent = `${PROPERTY_NAMES[key.property]} · ${island?.name ?? ''}`;
     popup.querySelector('.kp-grip').style.color = theme[KEY_COLORS[key.property]];
+    // A quaternion's turn: W too, first.
+    popup.querySelector('[data-kp="3"]').closest('label').hidden = found.value.length !== 4;
     for (const input of popup.querySelectorAll('input')) {
       if (document.activeElement === input) continue;
       const field = input.dataset.kp;
-      input.value = field === 'frame' ? key.frame : +found.value[+field].toFixed(4);
+      const value = field === 'frame' ? key.frame : found.value[+field];
+      input.value = value === undefined ? '' : field === 'frame' ? value : +value.toFixed(4);
     }
     for (const button of popup.querySelectorAll('[data-kind]')) button.classList.toggle('active', button.dataset.kind === found.interpolation);
     // The curve, for a smooth key: its popup slides in; its ease's family and direction lit.
@@ -1210,6 +1304,35 @@ export class Timeline extends EventTarget {
       if (major) ruler.fillText(String(frame), x + 4, 5);
     }
 
+    // The ruler of seconds, under the lanes: a mark every so many seconds -
+    // no closer than ~60 px - with the time to its right; the clip's time lit.
+    const seconds = prepare(this.secondsRuler, SECONDS);
+    seconds.fillStyle = colors.raised;
+    seconds.fillRect(0, 0, width, SECONDS);
+    if (clip) {
+      const fps = clip.fps;
+      const each = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60].find((s) => s * fps * this.frameWidth >= 60) ?? 120;
+      seconds.font = '11px "Segoe UI", sans-serif';
+      seconds.textBaseline = 'top';
+      const firstTime = Math.max(0, Math.floor(this.scroll / fps / each) * each);
+      const lastTime = (this.scroll + width / this.frameWidth) / fps;
+      for (let t = firstTime; t <= lastTime + 1e-9; t += each) {
+        const x = Math.round(this.xOf(t * fps));
+        const inside = t * fps <= length + 1e-9;
+        seconds.fillStyle = inside ? colors.dim : colors.border;
+        seconds.fillRect(x, 0, 1, 6);
+        const label = `${+t.toFixed(2)} с`;
+        seconds.fillText(label, x + 4, 6);
+      }
+      // A short mark at every whole frame when there is room for it.
+      if (this.frameWidth >= 6) {
+        seconds.fillStyle = colors.border;
+        for (let frame = Math.max(0, Math.floor(this.scroll)); frame <= Math.min(length, lastShown); frame += 1) {
+          seconds.fillRect(Math.round(this.xOf(frame)), 0, 1, 3);
+        }
+      }
+    }
+
     // The lanes: a row for each name, the clip's frames lit, a line every frame (when there is room).
     const height = Math.max(this.rows.length * ROW, this.scroller.clientHeight);
     const lanes = prepare(this.lanes, height);
@@ -1239,6 +1362,7 @@ export class Timeline extends EventTarget {
     };
     hatch(lanes, height);
     hatch(ruler, RULER);
+    hatch(seconds, SECONDS);
     this.rows.forEach((row, k) => {
       if (row.property) return;
       lanes.fillStyle = colors.border;
@@ -1258,15 +1382,16 @@ export class Timeline extends EventTarget {
       const size = this.keySize();
       // A key's shape is what it keys: a position a diamond, a turn a
       // circle, a scale a square (an entry's row: diamonds).
-      const diamond = (x, y, property = 'position') => {
+      const diamond = (x, y, property = 'position', grow = 1) => {
+        const r = size * grow;
         lanes.beginPath();
-        if (property === 'rotation') lanes.arc(x, y, size * 0.85, 0, Math.PI * 2);
-        else if (property === 'scale') lanes.rect(x - size * 0.75, y - size * 0.75, size * 1.5, size * 1.5);
+        if (property === 'rotation') lanes.arc(x, y, r * 0.85, 0, Math.PI * 2);
+        else if (property === 'scale') lanes.rect(x - r * 0.75, y - r * 0.75, r * 1.5, r * 1.5);
         else {
-          lanes.moveTo(x, y - size);
-          lanes.lineTo(x + size, y);
-          lanes.lineTo(x, y + size);
-          lanes.lineTo(x - size, y);
+          lanes.moveTo(x, y - r);
+          lanes.lineTo(x + r, y);
+          lanes.lineTo(x, y + r);
+          lanes.lineTo(x - r, y);
           lanes.closePath();
         }
       };
@@ -1314,7 +1439,7 @@ export class Timeline extends EventTarget {
             if (next) between(this.xOf(entry.frame), this.xOf(next.frame), y, entry.keys[0].interpolation, color);
           });
         }
-        // (A key that repeats the one before it: a red ring, see stillKeys().)
+        // (A key that repeats the one before it, see stillKeys().)
         const island = this.editor.topology.islands[row.index];
         const track = row.property ? clip.tracks.find((other) => other.object === island?.id && other.property === row.property) : null;
         const still = track ? stillKeys(track) : new Set();
@@ -1322,21 +1447,15 @@ export class Timeline extends EventTarget {
           const x = this.xOf(frame);
           const picked = keys.some((key) => this.selected.has(key.id));
           lanes.globalAlpha = frame > length ? 0.45 : 1;
-          diamond(x, y, row.property ?? 'position');
+          // (a key that repeats the one before it: itself red, and a little larger)
+          const repeats = Boolean(row.property) && still.has(frame);
+          diamond(x, y, row.property ?? 'position', repeats ? 1.3 : 1);
           if (row.property) {
-            lanes.fillStyle = picked ? colors.text : theme[KEY_COLORS[row.property]];
+            lanes.fillStyle = repeats ? STILL_COLOR : picked ? colors.text : theme[KEY_COLORS[row.property]]; // (picked: the accent's ring says so)
             lanes.fill();
             if (picked) {
               lanes.strokeStyle = colors.accent;
               lanes.lineWidth = 2;
-              lanes.stroke();
-              lanes.lineWidth = 1.5;
-            }
-            if (still.has(frame)) {
-              lanes.strokeStyle = STILL_COLOR;
-              lanes.lineWidth = 2;
-              lanes.beginPath();
-              lanes.arc(x, y, size + 3.5, 0, Math.PI * 2);
               lanes.stroke();
               lanes.lineWidth = 1.5;
             }
@@ -1360,9 +1479,9 @@ export class Timeline extends EventTarget {
     // The frame looked at: on its line, over it. (Another colour while a
     // key's curve is being previewed: the frame is the preview's, not set by hand.)
     const x = Math.round(this.xOf(this.frame));
-    for (const context of [ruler, lanes]) {
+    for (const [context, tall] of [[ruler, RULER], [lanes, height], [seconds, SECONDS]]) {
       context.fillStyle = this.preview ? PREVIEW_COLOR : colors.accent;
-      context.fillRect(Math.max(0, x - 0.5), 0, 2, context === ruler ? RULER : height);
+      context.fillRect(Math.max(0, x - 0.5), 0, 2, tall);
     }
   }
 }

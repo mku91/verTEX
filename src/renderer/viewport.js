@@ -303,6 +303,8 @@ export class Viewport {
 
   render() {
     this.renderQueued = false;
+    // (what follows the scene as it is drawn - a group's bounds - first)
+    for (const listener of this.beforeRender ?? []) listener();
     // The camera's matrices are brought up to date by the main pass, which
     // comes after the depth pass - so the depth pass does it first, or it
     // would see the camera where it was a frame ago while the camera turns.
@@ -315,6 +317,8 @@ export class Viewport {
     }
     if (this.lit) this.placeSun();
     this.renderer.render(this.scene, this.camera);
+    // (whatever else shows the scene - the window of views - goes along)
+    for (const listener of this.afterRender ?? []) listener();
   }
 
   // The view as it is drawn now, on a canvas of the given size: scaled to

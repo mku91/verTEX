@@ -23,6 +23,7 @@ import { CollisionMode } from './collisions.js';
 import { Simulation } from './simulation.js';
 import { Timeline } from './timeline.js';
 import { AnimationMode } from './animate.js';
+import { ViewsWindow } from './views-window.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -34,7 +35,21 @@ const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 const timeline = new Timeline(document.getElementById('timeline'), editor);
 const animationMode = new AnimationMode(document.getElementById('pose-panel'), viewport, editor, timeline);
+// The three views pose too, in the animation mode, and show the pose.
+orthoViews.animation = animationMode;
+// The views in a window of their own (see views-window.js).
+const viewsWindow = new ViewsWindow(editor, viewport);
+viewsWindow.animation = animationMode;
+viewsWindow.addEventListener('change', () => {
+  if (viewsWindow.ortho) viewsWindow.ortho.animation = animationMode;
+  document.querySelector('[data-action="views-window"]').classList.toggle('active', viewsWindow.open);
+});
+animationMode.onShow = () => {
+  orthoViews.draw();
+  viewsWindow.draw();
+};
 timeline.addEventListener('addkey', (event) => animationMode.writeKeys([event.detail.index], [event.detail.property]));
+timeline.addEventListener('insertkey', () => animationMode.keyPicked()); // (as K)
 new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
@@ -55,7 +70,9 @@ const ACTIONS = {
   },
   // (In the animation mode the timeline is what is there when they are closed.)
   'toggle-views': () => setBottomPanel(orthoViews.open ? restingPanel() : 'views'),
-  'toggle-uv': () => setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
+  'views-window': () => viewsWindow.toggle(),
+  // (The UV editor is not the animation mode's: the model is not edited there.)
+  'toggle-uv': () => editor.workspace !== 'animation' && setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
   'toggle-animation': () => editor.setWorkspace(editor.workspace === 'animation' ? 'model' : 'animation'),
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
@@ -94,12 +111,12 @@ const hotkeys = new Hotkeys(
     { id: 'file.save', group: 'Файл', label: 'Сохранить', keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
     { id: 'file.save-as', group: 'Файл', label: 'Сохранить как…', keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
 
-    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyV', run: () => editor.setTool('select') },
+    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyQ', run: () => editor.setTool('select') },
     { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
     { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
-    { id: 'tool.paint', group: 'Рисование', label: 'Кисть', keys: 'KeyQ', run: () => editor.setTool('paint') },
+    { id: 'tool.paint', group: 'Рисование', label: 'Кисть', keys: 'KeyV', run: () => editor.setTool('paint') },
     { id: 'tool.pipette', group: 'Рисование', label: 'Пипетка', keys: 'KeyI', run: () => editor.setTool('pipette') },
     { id: 'tool.fill', group: 'Рисование', label: 'Заливка', keys: 'KeyE', run: () => editor.setTool('fill') },
     { id: 'tool.rect', group: 'Рисование', label: 'Прямоугольник', keys: 'KeyM', run: () => editor.setTool('rect') },
@@ -1186,6 +1203,12 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
 
 window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode };
 
+// The bottom panel's height, as a share of the workspace (see setViewsSize()).
+const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';
+const VIEWS_SIZE_DEFAULT = 0.4;
+const ANIM_SPLIT_KEY = 'vertex.animViewsShare'; // of the bottom panel's room, the three views'
+const VIEWS_MIN_HEIGHT = 120; // px
+const MAIN_VIEW_MIN_HEIGHT = 150; // px left to the main view
 // The three-view panel; whether it is open is remembered between launches.
 // The bottom of the workspace holds one panel at a time: the three views
 // ('views'), the UV editor ('uv'), or none (null). Which is remembered
@@ -1193,15 +1216,19 @@ window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toT
 const VIEWS_OPEN_KEY = 'vertex.orthoViewsOpen';
 const BOTTOM_PANEL_KEY = 'vertex.bottomPanel';
 function setBottomPanel(panel) {
+  // In the animation mode the three views come over the timeline, which stays.
+  const both = panel === 'views' && editor.workspace === 'animation';
   orthoViews.toggle(panel === 'views');
   uvEditor.toggle(panel === 'uv');
-  timeline.toggle(panel === 'animation');
+  timeline.toggle(panel === 'animation' || both);
+  $('anim-splitter').hidden = !both;
+  setViewsSize(parseFloat(localStorage.getItem(VIEWS_SIZE_KEY)) || VIEWS_SIZE_DEFAULT);
   editor.setUVLook(panel === 'uv');
   $('views-splitter').hidden = !panel;
   document.querySelector('[data-action="toggle-views"]').classList.toggle('active', panel === 'views');
   document.querySelector('[data-action="toggle-uv"]').classList.toggle('active', panel === 'uv');
   // The timeline comes and goes with its mode: it is not what the next start opens.
-  if (panel === 'animation') return;
+  if (panel === 'animation' || both) return;
   localStorage.setItem(VIEWS_OPEN_KEY, panel === 'views' ? '1' : '0');
   localStorage.setItem(BOTTOM_PANEL_KEY, panel ?? '');
 }
@@ -1217,7 +1244,7 @@ const restingPanel = () => (editor.workspace === 'animation' ? 'animation' : nul
     if (editor.workspace === workspace) return;
     if (editor.workspace === 'animation') {
       before = orthoViews.open ? 'views' : uvEditor.open ? 'uv' : null;
-      setBottomPanel('animation');
+      setBottomPanel(before === 'views' ? 'views' : 'animation'); // (the views stay, over the timeline)
     } else if (workspace === 'animation') {
       setBottomPanel(before);
     }
@@ -1231,19 +1258,44 @@ const restingPanel = () => (editor.workspace === 'animation' ? 'animation' : nul
 
 // The panel's height is changed by dragging its top edge. It is kept as a
 // share of the workspace, so it scales with the window.
-const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';
-const VIEWS_SIZE_DEFAULT = 0.4;
-const VIEWS_MIN_HEIGHT = 120; // px
-const MAIN_VIEW_MIN_HEIGHT = 150; // px left to the main view
 function setViewsSize(share) {
   const height = $('workspace').clientHeight;
   const min = VIEWS_MIN_HEIGHT / height;
   const max = Math.max(min, 1 - MAIN_VIEW_MIN_HEIGHT / height);
   share = Math.min(Math.max(share, min), max);
-  $('ortho-views').style.flexBasis = `${share * 100}%`;
+  // (The three views over the timeline: the room shared between them, see the splitter between.)
+  const both = !$('anim-splitter').hidden;
+  const part = Math.min(0.85, Math.max(0.15, parseFloat(localStorage.getItem(ANIM_SPLIT_KEY)) || 0.5));
+  $('ortho-views').style.flexBasis = `${share * (both ? part : 1) * 100}%`;
   $('uv-editor').style.flexBasis = `${share * 100}%`;
-  $('timeline').style.flexBasis = `${share * 100}%`;
+  $('timeline').style.flexBasis = `${share * (both ? 1 - part : 1) * 100}%`;
   localStorage.setItem(VIEWS_SIZE_KEY, share);
+}
+{
+  const splitter = $('anim-splitter');
+  const follow = (event) => {
+    const top = $('ortho-views').getBoundingClientRect().top;
+    const bottom = $('timeline').getBoundingClientRect().bottom;
+    localStorage.setItem(ANIM_SPLIT_KEY, Math.min(0.85, Math.max(0.15, (event.clientY - top) / (bottom - top))));
+    setViewsSize(parseFloat(localStorage.getItem(VIEWS_SIZE_KEY)) || VIEWS_SIZE_DEFAULT);
+  };
+  splitter.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    splitter.setPointerCapture(event.pointerId);
+    splitter.classList.add('dragging');
+    splitter.addEventListener('pointermove', follow);
+  });
+  const stop = () => {
+    splitter.classList.remove('dragging');
+    splitter.removeEventListener('pointermove', follow);
+  };
+  splitter.addEventListener('pointerup', stop);
+  splitter.addEventListener('pointercancel', stop);
+  splitter.addEventListener('dblclick', () => {
+    localStorage.setItem(ANIM_SPLIT_KEY, 0.5);
+    setViewsSize(parseFloat(localStorage.getItem(VIEWS_SIZE_KEY)) || VIEWS_SIZE_DEFAULT);
+  });
 }
 {
   const splitter = $('views-splitter');
@@ -1476,6 +1528,7 @@ function refresh() {
   for (const button of cutButtons) button.classList.toggle('active', button.dataset.cut === editor.cutDirection);
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   $('animation-button').classList.toggle('active', editor.workspace === 'animation');
+  document.querySelector('[data-action="toggle-uv"]').hidden = editor.workspace === 'animation';
   for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }

@@ -49,13 +49,18 @@ export function worldFrames(editor) {
   ]));
 }
 
+// A turn as pose.js takes it: angles in degrees, or a quaternion [x, y, z, w].
+export function turnOf(rotation) {
+  return rotation?.length === 4 ? new THREE.Quaternion(...rotation).normalize() : quaternionOf(rotation);
+}
+
 // Every entry's matrix in the world with `pose` on it: Map id -> Matrix4.
 // `pose`: Map id -> { position?, rotation?, scale? } - [x, y, z] each, in
 // the entry's parent, as localTransforms() gives them (rotation in degrees);
 // what it leaves out is the rest pose's. A group's matrix carries its
 // children with it.
-export function posedMatrices(editor, pose = new Map()) {
-  const locals = localTransforms(editor);
+// (`locals`: localTransforms() as it is now, when it has been worked out already.)
+export function posedMatrices(editor, pose = new Map(), locals = localTransforms(editor)) {
   const out = new Map();
   const matrixOf = (id) => {
     if (out.has(id)) return out.get(id);
@@ -63,7 +68,7 @@ export function posedMatrices(editor, pose = new Map()) {
     const own = pose.get(id) ?? {};
     const local = new THREE.Matrix4().compose(
       new THREE.Vector3(...(own.position ?? rest.position)),
-      quaternionOf(own.rotation ?? rest.rotation),
+      turnOf(own.rotation ?? rest.rotation),
       new THREE.Vector3(...(own.scale ?? [1, 1, 1])),
     );
     const matrix = rest.parent === null ? local : matrixOf(rest.parent).clone().multiply(local);

@@ -13,8 +13,10 @@
 //                keys: [{ frame, value: [x, y, z], interpolation }] }] }
 // A value is the entry's place in its parent, as pose.js has it: the
 // position in the parent's frame; the turn as angles in degrees (XYZ), which
-// may go past 180 - a wheel turned through 720 turns twice; the scale as
-// times its size. A key's interpolation is how it goes on to the next:
+// may go past 180 - a wheel turned through 720 turns twice - or, for an
+// entry turned by quaternions (its `rotationMode`, see
+// Editor.setRotationMode()), a quaternion [x, y, z, w]; the scale as times
+// its size. A key's interpolation is how it goes on to the next:
 // 'linear', 'step' (it holds, then jumps) or 'smooth' (eases in and out).
 //
 // What a clip does not move stays in the rest pose: the model as it is.
@@ -27,6 +29,39 @@ const NAME = /^[A-Za-z0-9 _.\-]+$/;
 const isTriple = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
 // (A key may stand between frames - dragged there with Ctrl - to a hundredth.)
 const isFrame = (value) => Number.isFinite(value) && value >= 0;
+// A turn may be a quaternion: four numbers, not all nought.
+const soundValue = (property, value) => isTriple(value) ||
+  (property === 'rotation' && Array.isArray(value) && value.length === 4 && value.every(Number.isFinite) && value.some(Boolean));
+
+// --- quaternions, as [x, y, z, w] ----------------------------------------------------
+
+export const normalized = (q) => {
+  const length = Math.hypot(...q) || 1;
+  return q.map((value) => value / length);
+};
+
+// The way from one quaternion to another along the sphere - the short way:
+// a turn and its opposite quaternion are one turn.
+export function slerp(a, b, t) {
+  a = normalized(a);
+  b = normalized(b);
+  let cos = a.reduce((sum, value, i) => sum + value * b[i], 0);
+  if (cos < 0) {
+    b = b.map((value) => -value);
+    cos = -cos;
+  }
+  if (cos > 0.9995) return normalized(a.map((value, i) => value + (b[i] - value) * t));
+  const angle = Math.acos(cos);
+  const sa = Math.sin((1 - t) * angle) / Math.sin(angle);
+  const sb = Math.sin(t * angle) / Math.sin(angle);
+  return a.map((value, i) => value * sa + b[i] * sb);
+}
+
+// Angles as near as can be to `near`: each axis put 360 this way or that, so
+// that a turn taken further does not jump back across 180.
+export function unwrap(angles, near) {
+  return angles.map((angle, i) => angle + 360 * Math.round(((near?.[i] ?? 0) - angle) / 360));
+}
 export const frameOf = (value) => Math.max(0, Math.round(value * 100) / 100);
 
 // Whether a clip, as read from a file, is one; `ids` the entries there are.
@@ -39,7 +74,7 @@ export function soundAnimation(clip, ids) {
   return clip.tracks.every((track) =>
     track && ids.has(track.object) && PROPERTIES.includes(track.property) &&
     Array.isArray(track.keys) && track.keys.length > 0 &&
-    track.keys.every((key) => key && isFrame(key.frame) && isTriple(key.value) && INTERPOLATIONS.includes(key.interpolation) && soundEase(key.ease)));
+    track.keys.every((key) => key && isFrame(key.frame) && soundValue(track.property, key.value) && INTERPOLATIONS.includes(key.interpolation) && soundEase(key.ease)));
 }
 
 // --- easing: how a smooth key goes on to the next ------------------------------------
@@ -190,7 +225,9 @@ export function sampleTrack(track, frame) {
   const b = keys[k + 1];
   const t = (frame - a.frame) / (b.frame - a.frame);
   if (a.interpolation === 'step') return [...a.value];
-  return lerp(a.value, b.value, a.interpolation === 'smooth' ? easing(a.ease)(t) : t);
+  const eased = a.interpolation === 'smooth' ? easing(a.ease)(t) : t;
+  // (A quaternion's turn goes along the sphere, the short way.)
+  return a.value.length === 4 ? slerp(a.value, b.value, eased) : lerp(a.value, b.value, eased);
 }
 
 // The pose a clip puts the entries in at a frame: Map id -> { position?,

@@ -2,6 +2,29 @@ import * as THREE from 'three';
 import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
 
+// The surface as these views (and the window of views, see views-window.js)
+// draw it: lit, painted with the atlas where it is on it, the rest in their
+// objects' colours - materials of their own for the editor's surface
+// materials (`source`), made again only when those or the atlas change
+// (`cache`: what this gave the last time).
+export function paintedMaterials(editor, source, cache = null) {
+  const { view, atlas } = editor;
+  if (cache && cache.key[0] === source && cache.key[1] === atlas.texture) return cache;
+  for (const material of cache?.all ?? []) material.dispose();
+  const made = (material) => {
+    const painted = (material === view.surface || material === view.surfaceFront) && Boolean(atlas.texture);
+    return new THREE.MeshLambertMaterial({
+      map: painted ? atlas.texture : null,
+      vertexColors: !painted, // (the rest in their objects' colours)
+      side: material.side,
+      alphaTest: painted ? 0.5 : 0,
+      visible: material.visible !== false,
+    });
+  };
+  const list = Array.isArray(source) ? source.map(made) : made(source);
+  return { key: [source, atlas.texture], list, all: Array.isArray(list) ? list : [list] };
+}
+
 const FIT_MARGIN = 0.25; // share of a view kept free on each side when framing
 const MIN_EXTENT = 0.5; // world units; keeps a tiny object from filling the view
 const PICK_RADIUS = 9; // px
@@ -43,25 +66,42 @@ const PIVOT_RADIUS = 5; // px, the ring of the pivot mark shown by the pivot too
 const PIVOT_INNER_RADIUS = 3.5; // and of those inside a group
 
 export class OrthoViews {
-  constructor(container, editor) {
+  // `container` may be in a window of its own (see views-window.js): its
+  // sizes are then watched by that window's ResizeObserver (`Observer`).
+  constructor(container, editor, { Observer = ResizeObserver } = {}) {
     this.container = container;
     this.editor = editor;
+    this.Observer = Observer;
+    this.disposed = false;
     this.shown = null; // { vertices, edges } of the editor's target object
     this.shownKey = ''; // identifies those objects; a change re-frames the views
     this.hovered = null; // vertex index under the pointer
     this.hoveredKey = null; // outside vertex mode: the key of the mode's element under it
 
+    // The animation mode (see animate.js), set once it is made: in it the
+    // views show the whole model posed and painted, and pose it.
+    this.animation = null;
+    this.poseDrag = null;
     this.views = VIEWS.map((definition) => this.createView(definition));
-    editor.addEventListener('change', () => this.update());
+    this.listeners = [
+      [editor, 'change', () => this.update()],
+      [editor, 'cutframe', () => this.draw()], // the cut line is animated
+      // The corner gizmos follow the main view's rotation.
+      [editor.viewport.orbit, 'change', () => this.draw()],
+    ];
+    for (const [target, type, listener] of this.listeners) target.addEventListener(type, listener);
     onThemeChange(() => this.draw());
-    editor.addEventListener('cutframe', () => this.draw()); // the cut line is animated
-    // The corner gizmos follow the main view's rotation.
-    editor.viewport.orbit.addEventListener('change', () => this.draw());
     this.update();
   }
 
+  // No longer shown (its window closed): it lets go of the editor.
+  dispose() {
+    this.disposed = true;
+    for (const [target, type, listener] of this.listeners) target.removeEventListener(type, listener);
+  }
+
   get open() {
-    return !this.container.hidden;
+    return !this.disposed && !this.container.hidden;
   }
 
   // Shows or hides the panel; returns the new state.
@@ -132,7 +172,7 @@ export class OrthoViews {
       this.fit(view);
       this.drawView(view);
     });
-    new ResizeObserver(() => this.resize(view)).observe(frame);
+    new this.Observer(() => this.resize(view)).observe(frame);
     this.bindPointer(view);
     return view;
   }
@@ -200,6 +240,10 @@ export class OrthoViews {
       }
       if (event.button !== 0) return;
       view.emptyPress = null;
+      if (this.posing) {
+        this.pressPose(view, event);
+        return;
+      }
       // The cut tool: the line follows the pointer here too, and a click cuts.
       // (The face to cut across is chosen in the main view.)
       if (editor.operation === 'cut') {
@@ -254,6 +298,21 @@ export class OrthoViews {
         this.drawView(view);
         return;
       }
+      if (this.poseDrag) {
+        if (event.buttons & 1) this.movePose(event);
+        else {
+          this.poseDrag = null; // the release was missed
+          this.animation.endPose();
+        }
+        return;
+      }
+      if (this.posing) {
+        if (event.buttons === 0) {
+          const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+          canvas.style.cursor = this.pickPosed(view, x, y) === null ? '' : 'grab';
+        }
+        return;
+      }
       if (view.box) {
         // The release was missed: apply the box as it is.
         if (!(event.buttons & 1)) {
@@ -298,6 +357,9 @@ export class OrthoViews {
       if (view.pan && event.button !== 0) {
         view.pan = null;
         canvas.style.cursor = '';
+      } else if (event.button === 0 && this.poseDrag) {
+        this.poseDrag = null;
+        this.animation.endPose();
       } else if (event.button === 0 && editor.pivotDrag) {
         editor.endPivotDrag();
         canvas.style.cursor = 'grab';
@@ -387,8 +449,26 @@ export class OrthoViews {
 
   // --- what is shown and how it is framed --------------------------------
 
+  // In the animation mode: the model posed and painted, posed by the tools.
+  get posing() {
+    return this.editor.workspace === 'animation' && Boolean(this.animation);
+  }
+
   update() {
     const { topology, target } = this.editor;
+    if (this.posing) {
+      // The whole model shown (what is not hidden), framed once.
+      const { hiddenVertices } = topology;
+      const vertices = this.editor.mesh.vertices.map((_, i) => i).filter((i) => !hiddenVertices.has(i));
+      this.shown = vertices.length ? { vertices, faces: [], edges: [], around: [] } : null;
+      if (this.shownKey !== 'posed' && !this.poseDrag) {
+        this.shownKey = 'posed';
+        for (const view of this.views) this.fit(view);
+      }
+      this.draw();
+      return;
+    }
+    if (this.shownKey === 'posed') this.shownKey = '';
 
     const islands = [...new Set([...target].map((vertex) => topology.islandOfVertex[vertex]))];
     if (islands.length === 0) {
@@ -588,8 +668,175 @@ export class OrthoViews {
     if (width === 0) return;
     context.clearRect(0, 0, width, height);
     this.drawGrid(view);
-    this.drawContent(view);
+    if (this.posing) {
+      this.drawModel(view);
+      this.drawPicked(view);
+    } else {
+      this.drawContent(view);
+    }
     this.drawGizmo(view);
+  }
+
+  // --- the animation mode: the model posed and painted ---------------------------------
+  //
+  // The model is drawn by a renderer of the views' own, looking along the
+  // view as it is framed: the editor's surface (its geometry - posed, see
+  // pose.js - shared), painted with the atlas, lit from the viewer. What is
+  // picked whole is outlined over it.
+
+  modelMaterials(source) {
+    this.materials = paintedMaterials(this.editor, source, this.materials);
+    return this.materials.list;
+  }
+
+  drawModel(view) {
+    if (!this.renderer) {
+      this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+      this.modelScene = new THREE.Scene();
+      this.modelScene.add(new THREE.AmbientLight(0xffffff, 1.2));
+      this.modelLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      this.modelScene.add(this.modelLight, this.modelLight.target);
+      this.model = new THREE.Mesh();
+      this.modelScene.add(this.model);
+      this.modelCamera = new THREE.OrthographicCamera();
+    }
+    const solid = this.editor.view.solid;
+    this.model.geometry = solid.geometry;
+    this.model.material = this.modelMaterials(solid.material);
+    // The camera: the view's screen axes, from its centre, as project() has them.
+    const right = new THREE.Vector3();
+    right[view.right] = view.rightSign;
+    const up = new THREE.Vector3();
+    up[view.up] = view.upSign;
+    const back = right.clone().cross(up);
+    const camera = this.modelCamera;
+    const [w, h] = [view.width / 2 / view.scale, view.height / 2 / view.scale];
+    Object.assign(camera, { left: -w, right: w, top: h, bottom: -h, near: -10000, far: 10000 });
+    camera.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, back));
+    camera.position.copy(view.center);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    this.modelLight.position.copy(view.center).addScaledVector(back, 10).addScaledVector(up, 4).addScaledVector(right, 2);
+    this.modelLight.target.position.copy(view.center);
+    this.modelLight.target.updateMatrixWorld();
+    const ratio = window.devicePixelRatio;
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(view.width, view.height, false);
+    this.renderer.render(this.modelScene, camera);
+    view.context.drawImage(this.renderer.domElement, 0, 0, view.width, view.height);
+  }
+
+  // The edges of what is picked whole, where they are shown.
+  drawPicked(view) {
+    const { editor } = this;
+    const entry = editor.pivotEntry();
+    if (entry === null) return;
+    const inside = editor.contents([entry]).vertices;
+    const shown = editor.view.shown;
+    const { context } = view;
+    context.strokeStyle = theme.selected;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    for (const [a, b] of editor.topology.edges) {
+      if (!inside.has(a)) continue;
+      const p = this.project(view, shown[a]);
+      const q = this.project(view, shown[b]);
+      context.moveTo(p.x, p.y);
+      context.lineTo(q.x, q.y);
+    }
+    context.stroke();
+  }
+
+  // The object under a point of a view (its index in the objects list), as
+  // the model is shown: the face nearest the viewer that the point is on.
+  pickPosed(view, x, y) {
+    const { mesh, topology } = this.editor;
+    const shown = this.editor.view.shown;
+    let best = null;
+    let nearest = Infinity;
+    const inside = (p, a, b, c) => {
+      const s = (u, v, w) => (u.x - w.x) * (v.y - w.y) - (v.x - w.x) * (u.y - w.y);
+      const d1 = s(p, a, b);
+      const d2 = s(p, b, c);
+      const d3 = s(p, c, a);
+      return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+    };
+    mesh.faces.forEach((face, i) => {
+      if (topology.hiddenVertices.has(face[0])) return;
+      for (const triangle of mesh.triangulate(i)) {
+        const points = triangle.map((vertex) => this.project(view, shown[vertex]));
+        if (!inside({ x, y }, ...points)) continue;
+        const depth = triangle.reduce((sum, vertex) => sum + shown[vertex].dot(view.direction), 0) / 3;
+        if (depth < nearest) {
+          nearest = depth;
+          best = topology.islandOfVertex[face[0]];
+        }
+      }
+    });
+    return best;
+  }
+
+  // A press in a view, in the animation mode: on an object, it is picked (if
+  // what is picked whole is not it, or a group it is in) and posed by the
+  // tool in hand as the pointer moves - moved in the view's plane, turned
+  // about the view's axis round its pivot, scaled from it. On nothing, a
+  // click lets go of what was picked.
+  pressPose(view, event) {
+    const { editor } = this;
+    const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+    const hit = this.pickPosed(view, x, y);
+    if (hit === null) {
+      view.emptyPress = { x: event.clientX, y: event.clientY };
+      return;
+    }
+    let entry = editor.pivotEntry();
+    const within = (index) => {
+      for (let at = index; at !== null && at !== undefined; at = editor.topology.islands[at].parentIndex) if (at === entry) return true;
+      return false;
+    };
+    if (entry === null || !within(hit)) {
+      editor.select(hit, false);
+      entry = editor.pivotEntry();
+    }
+    if (entry === null) return;
+    const property = editor.tool === 'rotate' ? 'rotation' : editor.tool === 'scale' ? 'scale' : 'position';
+    // (Shift, moving: by inverse kinematics, see ik.js)
+    this.animation.beginPose(entry, property, { ik: event.shiftKey });
+    const world = this.animation.dragging.world;
+    view.canvas.setPointerCapture(event.pointerId);
+    this.poseDrag = { view, property, x, y, world, pivot: new THREE.Vector3().setFromMatrixPosition(world) };
+  }
+
+  movePose(event) {
+    const drag = this.poseDrag;
+    const { view } = drag;
+    const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+    const snap = this.editor.snapGrid.enabled;
+    let matrix;
+    if (drag.property === 'position') {
+      const delta = this.unproject(view, x, y).sub(this.unproject(view, drag.x, drag.y));
+      if (snap) {
+        const step = this.editor.snapGrid.step / (event.ctrlKey ? this.editor.snapGrid.fineDivisor : 1);
+        for (const axis of [view.right, view.up]) delta[axis] = Math.round(delta[axis] / step) * step;
+      }
+      matrix = new THREE.Matrix4().makeTranslation(delta).multiply(drag.world);
+    } else {
+      const p = this.project(view, drag.pivot);
+      if (drag.property === 'rotation') {
+        // About the axis that points at the viewer: on the screen, anticlockwise.
+        let angle = Math.atan2(-(y - p.y), x - p.x) - Math.atan2(-(drag.y - p.y), drag.x - p.x);
+        if (snap) angle = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
+        const axis = view.direction.clone().negate();
+        const turn = new THREE.Matrix4().makeRotationAxis(axis, angle);
+        const to = new THREE.Matrix4().makeTranslation(drag.pivot);
+        const from = new THREE.Matrix4().makeTranslation(drag.pivot.clone().negate());
+        matrix = to.multiply(turn).multiply(from).multiply(drag.world);
+      } else {
+        const factor = Math.max(0.01, Math.hypot(x - p.x, y - p.y) / Math.max(1, Math.hypot(drag.x - p.x, drag.y - p.y)));
+        matrix = drag.world.clone().multiply(new THREE.Matrix4().makeScale(factor, factor, factor));
+      }
+    }
+    this.animation.poseTo(matrix);
   }
 
   drawContent(view) {

@@ -26,6 +26,8 @@
 //     objects that are seen from the front only (`oneSided`): theirs is a
 //     material of its own, one-sided.
 //   - Hidden entries and the edges drawn on their own are left out.
+//   - The animations go as glTF animations on the entries' nodes, made to
+//     play in Godot as they do here: see gltf-animation.js.
 //   - An object with collision shapes (see collision-fit.js) is a physics
 //     body - Godot reads it as one (the OMI_physics_body and
 //     OMI_physics_shape extensions, Godot 4.3 and on): its node is the
@@ -40,6 +42,7 @@ import * as THREE from 'three';
 import { quaternionOf } from './frames.js';
 import { cornerNormals } from './normals.js';
 import { hullOf } from './collision-fit.js';
+import { animationsOf } from './gltf-animation.js';
 
 // The normals at every face's corners, as the editor lights them (see
 // normals.js): flat, or smooth for the objects that are.
@@ -265,6 +268,13 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     gltf.extensionsUsed = ['OMI_physics_shape', 'OMI_physics_body'];
     gltf.extensions = { OMI_physics_shape: { shapes } };
   }
+
+  // The animations (see gltf-animation.js), on the entries' nodes. Their
+  // numbers' views have no target: they are not drawn, only read.
+  const samples = (piece, type, count, more = {}) =>
+    gltf.accessors.push({ bufferView: view(piece), componentType: FLOAT, count, type, ...more }) - 1;
+  const animations = animationsOf(model, (id) => numbers.get(id), samples);
+  if (animations.length) gltf.animations = animations;
 
   const data = bytes.whole();
   gltf.buffers.push({ byteLength: data.length, ...(binary ? {} : { uri: `data:application/octet-stream;base64,${base64(data)}` }) });

@@ -76,7 +76,7 @@ export function modelOf(editor) {
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; groups hold objects and groups.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror, color, atlas, oneSided, smooth, colliders, body }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, pivot, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => {
       // Inside a group that is not turned the angles are the entry's own, as they were set.
       const { position, rotation: turn } = locals.get(id);
       return {
@@ -97,6 +97,10 @@ export function modelOf(editor) {
         // Collision shapes, in its own frame (see collision-fit.js), and the body they make.
         ...(colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
         ...(body && body !== 'static' ? { body } : {}),
+        // How its animations turn it: by angles (left out) or by quaternions.
+        ...(rotationMode === 'quaternion' ? { rotationMode } : {}),
+        // A group picked only whole: a press on anything in it picks it.
+        ...(locked && kind === 'group' ? { locked: locked === 'nearest' ? 'nearest' : true } : {}),
       };
     }),
     vertexObject: [...mesh.vertexObject],
@@ -266,6 +270,8 @@ export function readProject(files) {
       (object.smooth === undefined || (Number.isFinite(object.smooth) && object.smooth > 0 && object.smooth <= 180)) &&
       (object.colliders === undefined || (Array.isArray(object.colliders) && object.colliders.every(soundCollider))) &&
       (object.body === undefined || BODIES.includes(object.body)) &&
+      (object.rotationMode === undefined || object.rotationMode === 'quaternion') &&
+      (object.locked === undefined || typeof object.locked === 'boolean' || object.locked === 'nearest') &&
       (object.atlas === undefined || object.atlas === null || typeof object.atlas === 'string') &&
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))

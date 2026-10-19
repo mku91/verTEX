@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ModelPose, localTransforms, posedMatrices } from './pose.js';
-import { PROPERTIES, poseAt, setKey, removeKeys, keyId } from './animation.js';
+import { solveIK } from './ik.js';
+import { IKSign } from './ik-sign.js';
+import { PoseGhost } from './ghost.js';
+import { PROPERTIES, poseAt, setKey, removeKeys, keyId, unwrap } from './animation.js';
 import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { freeName } from './names.js';
@@ -28,11 +31,8 @@ const PROPERTY_OF_MODE = { translate: 'position', rotate: 'rotation', scale: 'sc
 const DEGREE = Math.PI / 180;
 const round = (value) => +value.toFixed(5);
 
-// Angles as near as can be to `near`: each axis put 360 this way or that, so
-// that a turn taken further does not jump back across 180.
-function unwrap(angles, near) {
-  return angles.map((angle, i) => angle + 360 * Math.round(((near?.[i] ?? 0) - angle) / 360));
-}
+// An entry turned by quaternions (see Editor.setRotationMode()) is posed by them.
+const byQuaternion = (editor, id) => editor.mesh.objects.find((object) => object.id === id)?.rotationMode === 'quaternion';
 
 export class AnimationMode {
   constructor(panel, viewport, editor, timeline) {
@@ -44,6 +44,7 @@ export class AnimationMode {
     this.overrides = new Map(); // id -> { position?, rotation?, scale? }: posed by hand, for the time being
     this.values = new Map(); // id -> { position, rotation, scale }: the pose shown
     this.matrices = new Map(); // id -> Matrix4: where the entries are shown
+    this.ghost = new PoseGhost(editor); // where what is posed and not keyed goes back to
 
     this.proxy = new THREE.Object3D();
     viewport.scene.add(this.proxy);
@@ -56,16 +57,35 @@ export class AnimationMode {
       editor.modeDragging = event.value;
     });
     this.gizmo.addEventListener('mouseDown', () => this.beginDrag());
+    // Shift held as the gizmo is taken: a move by inverse kinematics (see ik.js).
+    this.shiftDown = false;
+    viewport.renderer.domElement.addEventListener('pointerdown', (event) => { this.shiftDown = event.shiftKey; }, { capture: true });
+    // ...and its sign, on the entry's pivot point while Shift is held (see ik-sign.js).
+    this.shiftHeld = false;
+    this.ikSign = new IKSign(viewport, () => this.ikSignAt());
+    const shift = (held) => {
+      if (this.shiftHeld === held) return;
+      this.shiftHeld = held;
+      this.ikSign.update();
+    };
+    window.addEventListener('keydown', (event) => { if (event.key === 'Shift') shift(true); });
+    window.addEventListener('keyup', (event) => { if (event.key === 'Shift') shift(false); });
+    window.addEventListener('pointermove', (event) => shift(event.shiftKey));
+    window.addEventListener('blur', () => shift(false));
     this.gizmo.addEventListener('objectChange', () => this.drag());
     this.gizmo.addEventListener('mouseUp', () => this.endDrag());
     editor.workspacePress.animation = () => (this.gizmo.object && this.gizmo.axis !== null ? 'gizmo' : false);
 
     editor.addEventListener('change', () => this.refresh());
-    // Another frame: what was posed by hand and not keyed is let go.
+    // Another frame: what was posed by hand and not keyed is let go - kept
+    // aside, for "Вернуть позу" on the timeline to bring back (restorePose()).
+    this.lost = null; // { clip, frame, overrides }, or null
     timeline.addEventListener('frame', () => {
-      this.overrides.clear();
+      if (this.posedByHand()) this.lost = { clip: this.timeline.clip, frame: this.frameShown, overrides: this.overrides };
+      this.overrides = new Map();
       this.show();
     });
+    timeline.addEventListener('restore', () => this.restorePose());
     this.buildPanel();
   }
 
@@ -83,6 +103,8 @@ export class AnimationMode {
     if (!this.on) {
       if (this.pose.on) this.pose.end();
       this.overrides.clear();
+      this.lost = null;
+      this.ghost.hide();
       this.gizmo.detach();
       this.panel.hidden = true;
       return;
@@ -94,17 +116,20 @@ export class AnimationMode {
   }
 
   // The pose of every entry now: the clip's at the frame, over the rest pose,
-  // with what is posed by hand over that.
-  valuesNow() {
+  // with what is posed by hand (`overrides`) over that.
+  valuesNow(overrides = this.overrides) {
     const rest = localTransforms(this.editor);
     const clip = this.timeline.current();
     const posed = clip ? poseAt(clip, this.timeline.frame) : new Map();
     const values = new Map();
     for (const [id, place] of rest) {
-      const own = { ...posed.get(id), ...this.overrides.get(id) };
+      const own = { ...posed.get(id), ...overrides.get(id) };
+      const restTurn = byQuaternion(this.editor, id)
+        ? new THREE.Quaternion().setFromEuler(new THREE.Euler(...(place.rotation ?? [0, 0, 0]).map((angle) => angle * DEGREE), 'XYZ')).toArray()
+        : place.rotation ?? [0, 0, 0];
       values.set(id, {
         position: own.position ?? place.position,
-        rotation: own.rotation ?? place.rotation ?? [0, 0, 0],
+        rotation: own.rotation ?? restTurn,
         scale: own.scale ?? [1, 1, 1],
       });
     }
@@ -113,12 +138,60 @@ export class AnimationMode {
 
   show() {
     if (!this.on || !this.pose.on) return;
+    this.frameShown = this.timeline.frame;
+    if (this.posedByHand()) this.lost = null; // (posed anew: what was let go is gone)
+    this.timeline.showUnkeyed(this.posedByHand() ? 'pending' : this.lost ? this.lost.frame : null);
     this.values = this.valuesNow();
     this.matrices = posedMatrices(this.editor, this.values);
     this.pose.apply(this.matrices);
+    this.showGhost();
     this.editor.refreshHighlight(); // the outline of what is picked, where it is shown
     if (!this.gizmo.dragging) this.placeGizmo();
     this.showPanel();
+    this.onShow?.(); // the three views show the pose too
+    this.ikSign.update();
+  }
+
+  // What is posed by hand and not keyed: its ghost where the keys have it,
+  // where it goes back to as the frame changes (see ghost.js). Not while it
+  // is being posed with Autokey on - it is keyed as that ends.
+  showGhost() {
+    if (!this.posedByHand() || (this.dragging && this.timeline.autokey)) {
+      this.ghost.hide();
+      return;
+    }
+    this.ghost.update(this.pose, this.matrices, posedMatrices(this.editor, this.valuesNow(new Map())));
+  }
+
+  // Whether anything is posed by hand and not keyed.
+  posedByHand() {
+    return [...this.overrides.values()].some((own) => Object.keys(own).length > 0);
+  }
+
+  // "Вернуть позу": what another frame let go, back - on its clip and frame.
+  restorePose() {
+    const lost = this.lost;
+    if (!lost || !this.on) return;
+    if (this.editor.animations.some((clip) => clip.name === lost.clip)) this.timeline.clip = lost.clip;
+    this.timeline.update();
+    this.timeline.setFrame(lost.frame);
+    this.overrides = new Map(lost.overrides);
+    this.lost = null;
+    this.show();
+  }
+
+  // Where the sign of IK is now (see ik-sign.js), or null: on the entry's
+  // pivot point as it is shown, while Shift would make a move IK - the move
+  // tool in hand, groups above the entry to turn - or, while an IK move goes
+  // on, on its target.
+  ikSignAt() {
+    if (!this.on || !this.pose.on || this.editor.preview || this.editor.simulating) return null;
+    const pivot = (id) => (this.matrices.has(id) ? new THREE.Vector3().setFromMatrixPosition(this.matrices.get(id)) : null);
+    // (moving: on the target, where the entry is pulled to - it may fall short)
+    if (this.dragging) return this.dragging.ik ? this.dragging.target ?? pivot(this.dragging.id) : null;
+    const entry = this.shiftHeld && GIZMO_MODES[this.editor.tool] === 'translate' ? this.entry() : null;
+    if (!entry || (this.editor.topology.islands[entry.index]?.parentIndex ?? null) === null) return null;
+    return pivot(entry.id);
   }
 
   // --- the gizmo ------------------------------------------------------------------
@@ -150,38 +223,102 @@ export class AnimationMode {
 
   beginDrag() {
     const entry = this.entry();
-    this.dragging = entry && {
-      ...entry,
-      property: PROPERTY_OF_MODE[this.gizmo.mode],
-      start: structuredClone(this.values.get(entry.id)),
-      parent: this.parentMatrix(entry.id).clone().invert(),
+    const property = PROPERTY_OF_MODE[this.gizmo.mode];
+    if (entry) this.beginPose(entry.index, property, { ik: this.shiftDown && property === 'position' });
+  }
+
+  // The stand-in moved: the entry posed where it is.
+  drag() {
+    if (!this.dragging) return;
+    this.proxy.updateMatrix();
+    this.poseTo(this.proxy.matrix);
+  }
+
+  // Posing an entry by hand - by the gizmo, or in the three views (see
+  // ortho-views.js): one of its properties, from where it is shown now.
+  // With `ik`, a move is by inverse kinematics: the entry stays as it is in
+  // its parent, and the groups above it turn to bring it where it is moved
+  // (see ik.js).
+  beginPose(index, property, { ik = false } = {}) {
+    const { id } = this.editor.mesh.objects[index];
+    this.dragging = {
+      index,
+      id,
+      property,
+      start: structuredClone(this.values.get(id)),
+      parent: this.parentMatrix(id).clone().invert(),
+      world: this.matrices.get(id).clone(), // where it was in the world
+      ik: ik && property === 'position' ? this.ikChain(index) : null,
     };
   }
 
-  // The stand-in moved: the entry posed where it is, in its parent.
-  drag() {
+  // The groups above an entry, the nearest first: the joints its IK turns.
+  ikChain(index) {
+    const { islands } = this.editor.topology;
+    const { objects } = this.editor.mesh;
+    const joints = [];
+    for (let at = islands[index]?.parentIndex ?? null; at !== null && at !== undefined; at = islands[at].parentIndex) {
+      joints.push({ index: at, id: objects[at].id });
+    }
+    return joints.length ? { joints, values: structuredClone(this.values), locals: localTransforms(this.editor) } : null;
+  }
+
+  // The entry put where `matrix` (in the world) says: its property (the
+  // others as they were) in its parent, posed for the time being.
+  poseTo(matrix) {
     const drag = this.dragging;
     if (!drag) return;
-    this.proxy.updateMatrix();
-    const local = drag.parent.clone().multiply(this.proxy.matrix);
+    if (drag.ik) {
+      // Where the entry is moved to: the joints turned to bring it there.
+      const target = new THREE.Vector3().setFromMatrixPosition(matrix);
+      drag.target = target; // (where the sign of IK is, see ikSignAt())
+      const turns = solveIK(this.editor, drag.id, drag.ik.joints, target, drag.ik.values, drag.ik.locals);
+      for (const [id, rotation] of turns) this.overrides.set(id, { ...this.overrides.get(id), rotation: rotation.map(round) });
+      this.show();
+      return;
+    }
+    const local = drag.parent.clone().multiply(matrix);
     const position = new THREE.Vector3();
     const quaternion = new THREE.Quaternion();
     const scale = new THREE.Vector3();
     local.decompose(position, quaternion, scale);
-    const value = drag.property === 'position' ? position.toArray()
-      : drag.property === 'rotation' ? unwrap(rotationOf(quaternion) ?? [0, 0, 0], drag.start.rotation)
-      : scale.toArray();
+    let value = drag.property === 'position' ? position.toArray() : scale.toArray();
+    if (drag.property === 'rotation') {
+      if (drag.start.rotation.length === 4) {
+        // A quaternion, on the side of the one it started from.
+        const s = drag.start.rotation;
+        if (quaternion.x * s[0] + quaternion.y * s[1] + quaternion.z * s[2] + quaternion.w * s[3] < 0) quaternion.set(-quaternion.x, -quaternion.y, -quaternion.z, -quaternion.w);
+        value = quaternion.toArray();
+      } else {
+        value = unwrap(rotationOf(quaternion) ?? [0, 0, 0], drag.start.rotation);
+      }
+    }
     this.overrides.set(drag.id, { ...this.overrides.get(drag.id), [drag.property]: value.map(round) });
     this.show();
   }
 
   endDrag() {
-    const drag = this.dragging;
-    this.dragging = null;
     // (TransformControls tells of the end of its drag only after this: the
     // editor is not busy with it any more as of now)
     this.editor.modeDragging = false;
+    this.endPose();
+    // ...nor does show() put the gizmo back on the entry while it still
+    // drags: put here - an IK move may have left the entry short of it.
+    this.placeGizmo();
+  }
+
+  // The end of posing by hand: with Autokey, a key of what was changed.
+  endPose() {
+    const drag = this.dragging;
+    this.dragging = null;
     if (!drag) return;
+    if (drag.ik) {
+      // The joints that turned: keyed, with Autokey.
+      const turned = drag.ik.joints.filter(({ id }) => JSON.stringify(this.values.get(id)?.rotation) !== JSON.stringify(drag.ik.values.get(id)?.rotation));
+      if (this.timeline.autokey && turned.length) this.writeKeys(turned.map(({ index }) => index), ['rotation']);
+      else this.show();
+      return;
+    }
     const now = this.values.get(drag.id)?.[drag.property];
     if (this.timeline.autokey && JSON.stringify(now) !== JSON.stringify(drag.start[drag.property])) {
       this.writeKeys([drag.index], [drag.property]);
@@ -297,10 +434,15 @@ export class AnimationMode {
     if (!entry) return;
     const values = this.values.get(entry.id);
     if (!values) return;
+    // A quaternion's turn has a fourth number, W, shown first (as Blender does).
+    const quaternion = values.rotation.length === 4;
+    this.panel.querySelector('[data-pose="rotation.3"]').closest('label').hidden = !quaternion;
+    this.panel.querySelector('.pose-rotation-title').textContent = quaternion ? 'Поворот (кватернион)' : 'Поворот';
     for (const input of this.inputs) {
       if (document.activeElement === input) continue;
       const [property, axis] = input.dataset.pose.split('.');
-      input.value = +values[property][+axis].toFixed(4);
+      const value = values[property][+axis];
+      input.value = value === undefined ? '' : +value.toFixed(4);
     }
     const clip = this.timeline.current();
     const frame = Math.round(this.timeline.frame);

@@ -119,7 +119,7 @@
     </header>
 
     <aside id="toolbar">
-      <button data-tool="select" title="Выделение (V)">
+      <button data-tool="select" title="Выделение (Q)">
         <i class="fa-solid fa-arrow-pointer"></i>
       </button>
       <button data-tool="move" title="Перемещение (W)">
@@ -137,7 +137,7 @@
 
       <hr>
 
-      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Shift+щелчок — прямая линия от последней точки (с Space — вдоль граней модели), Alt+щелчок берёт цвет (Q)">
+      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Shift+щелчок — прямая линия от последней точки (с Space — вдоль граней модели), Alt+щелчок берёт цвет (V)">
         <i class="fa-solid fa-paintbrush"></i>
       </button>
       <button id="paint-color" title="Цвет и палитра"><span></span></button>
@@ -178,6 +178,9 @@
       </button>
 
       <!-- At the bottom of the toolbar, next to the panel it opens. -->
+      <button data-action="views-window" title="Виды в отдельном окне: перспектива и три вида, два на два">
+        <i class="fa-solid fa-up-right-from-square"></i>
+      </button>
       <button data-action="toggle-views" title="Три вида (B)">
         <i class="fa-solid fa-table-columns"></i>
       </button>
@@ -250,6 +253,7 @@
     </main>
     <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
     <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
+    <div id="anim-splitter" hidden title="Потяните, чтобы поделить место между тремя видами и таймлайном; двойной клик — поровну"></div>
     <section id="timeline" hidden>
       <div class="uv-bar tl-bar">
         <b>АНИМАЦИЯ</b>
@@ -259,26 +263,34 @@
         <button data-tl="delete" title="Удалить клип (можно отменить)"><i class="fa-solid fa-trash-can"></i></button>
         <i class="uv-divider"></i>
         <label class="tl-field" title="Имя клипа — латиницей: так он будет называться в Godot">Имя<input type="text" name="clip-name" spellcheck="false"></label>
-        <label class="tl-field tl-number" title="Кадров в секунду">FPS<input type="text" name="clip-fps" inputmode="numeric" spellcheck="false"></label>
-        <label class="tl-field tl-number" title="Длина клипа в кадрах">Длина<input type="text" name="clip-length" inputmode="numeric" spellcheck="false"></label>
-        <button class="tl-loop" title="Цикл: клип проигрывается по кругу. В Godot он получит зацикливание"><i class="fa-solid fa-repeat"></i></button>
         <i class="uv-divider"></i>
         <button data-tl="first" title="В начало"><i class="fa-solid fa-backward-step"></i></button>
         <button data-tl="prev" title="Кадр назад"><i class="fa-solid fa-caret-left"></i></button>
         <button data-tl="play" title="Воспроизвести (Enter)"><i class="fa-solid fa-play"></i></button>
         <button data-tl="next" title="Кадр вперёд"><i class="fa-solid fa-caret-right"></i></button>
         <button data-tl="last" title="В конец"><i class="fa-solid fa-forward-step"></i></button>
+        <button class="tl-loop" title="Цикл: клип проигрывается по кругу. В Godot он получит зацикливание"><i class="fa-solid fa-repeat"></i></button>
         <span class="tl-frame"></span>
-        <button data-tl="autokey" class="worded tl-autokey" title="Автоключ: всякое движение объекта сразу ставит ключ на текущем кадре. Выключен — движение временное, ключ ставит K"><i class="fa-solid fa-circle"></i><span>Автоключ</span></button>
+        <i class="uv-divider"></i>
+        <label class="tl-field tl-number" title="Кадров в секунду">FPS<input type="text" name="clip-fps" inputmode="numeric" spellcheck="false"></label>
+        <label class="tl-field tl-number" title="Длина клипа в кадрах">Длина<input type="text" name="clip-length" inputmode="numeric" spellcheck="false"></label>
+        <i class="uv-divider"></i>
+        <button data-tl="key" title="Вставить ключ: то, что изменено вручную у выделенного, на этом кадре (K)"><i class="fa-solid fa-key"></i></button>
+        <button data-tl="autokey" class="tl-autokey" title="Автоключ: всякое движение объекта сразу ставит ключ на текущем кадре. Выключен — движение временное, ключ ставит K"><span class="rec-dot"></span></button>
       </div>
       <p class="tl-empty" hidden>Клипов пока нет — создайте первый кнопкой «+» вверху</p>
       <div class="tl-body">
-        <div class="tl-corner"></div>
-        <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — масштаб · средняя кнопка — сдвиг"></canvas>
+        <div class="tl-corner">
+          <span class="tl-unkeyed" hidden title="Поза изменена, но ключ не поставлен: при смене кадра она сбросится туда, где показан призрак. K — поставить ключ"><i class="fa-solid fa-triangle-exclamation"></i>Не в ключах</span>
+          <button class="tl-restore" hidden><i class="fa-solid fa-rotate-left"></i>Вернуть позу</button>
+        </div>
+        <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — прокрутка · Ctrl+колесо — масштаб · средняя кнопка — сдвиг"></canvas>
         <div class="tl-scroll">
           <div class="tl-names"></div>
           <div class="tl-lanes-box"><canvas class="tl-lanes"></canvas></div>
         </div>
+        <div class="tl-corner tl-corner-bottom"></div>
+        <canvas class="tl-seconds" title="Время в секундах (кадр / FPS клипа)"></canvas>
         <div class="tl-resize" title="Потяните, чтобы изменить ширину колонки имён; двойной щелчок — вернуть исходную"></div>
       </div>
     </section>
@@ -439,7 +451,8 @@
           <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.2"></label>
         </div>
         <div class="pose-group">
-          <div class="pose-title"><button class="key-mark" data-key="rotation"></button><span>Поворот</span></div>
+          <div class="pose-title"><button class="key-mark" data-key="rotation"></button><span class="pose-rotation-title">Поворот</span></div>
+          <label hidden><span class="axis">W</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.3" title="W кватерниона (вместе с X, Y, Z: направление и угол поворота; длина приводится к единице)"></label>
           <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.0" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
           <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.1" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
           <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.2" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>

@@ -8,7 +8,7 @@ import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
 import { unwrap, START_SIZE, PADDING } from './unwrap.js';
-import { theme, onThemeChange } from './theme.js';
+import { theme, onThemeChange, themeGizmo } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
 import { unwrap as nearAngles } from './animation.js';
@@ -292,6 +292,7 @@ export class Editor extends EventTarget {
 
     this.gizmo = new TransformControls(camera, renderer.domElement);
     this.gizmo.setSize(0.8);
+    themeGizmo(this.gizmo);
     scene.add(this.gizmo.getHelper());
     // The move gizmo draws its own endless line along the dragged axis, right
     // over the snap dots. TransformControls has no option for it, so the
@@ -3718,7 +3719,7 @@ export class Editor extends EventTarget {
       case 'face': return this.pickFace(clientX, clientY);
       case 'object': {
         const face = this.pickFace(clientX, clientY);
-        return face === null ? null : this.lockedOwner(this.topology.islandOfFace[face]);
+        return face === null ? null : this.pickOwner(this.topology.islandOfFace[face]);
       }
       default: return this.pickVertex(clientX, clientY);
     }
@@ -4052,6 +4053,19 @@ export class Editor extends EventTarget {
     }
     if (whole !== null) return whole;
     return nearest ? islands[index].parentIndex : index;
+  }
+
+  // What a press in the main view on an entry picks, in object mode: as its
+  // lock has it (see lockedOwner()) - and, posing only groups (the timeline's
+  // "Только группы", see Timeline.setGroupsOnly()), the group it is in, or
+  // nothing for an object in none.
+  pickOwner(index) {
+    const owner = this.lockedOwner(index);
+    if (this.workspace !== 'animation' || !this.animationGroupsOnly) return owner;
+    const { islands } = this.topology;
+    let at = owner;
+    while (at !== null && at !== undefined && islands[at]?.kind !== 'group') at = islands[at]?.parentIndex ?? null;
+    return at ?? null;
   }
 
   // A press outside object mode on what is in a locked group - an element

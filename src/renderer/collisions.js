@@ -5,6 +5,7 @@ import { FITS, shapeMatrix, cloneCollider } from './collision-fit.js';
 import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { latinName, freeName } from './names.js';
+import { themeGizmo } from './theme.js';
 
 // The collision mode: the objects' collision shapes (see collision-fit.js)
 // shown over the model, picked, added - by hand or fitted by themselves -
@@ -152,6 +153,7 @@ export class CollisionMode {
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
     this.gizmo.setSize(0.8);
+    themeGizmo(this.gizmo);
     this.gizmo.setSpace('local');
     viewport.scene.add(this.gizmo.getHelper());
     this.gizmo.addEventListener('change', () => viewport.requestRender());

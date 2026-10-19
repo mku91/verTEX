@@ -230,6 +230,16 @@ export function sampleTrack(track, frame) {
   return a.value.length === 4 ? slerp(a.value, b.value, eased) : lerp(a.value, b.value, eased);
 }
 
+// The frames of a clip a sprite takes (see sprite-render.js), at `fps` of
+// its own: as many as the clip's time makes at that rate, evenly over it -
+// (fractional) frames of the clip, from 0. A looping clip leaves out its
+// end, which is its start again; one that does not loop ends on it.
+export function spriteFrames(clip, fps) {
+  const count = Math.max(1, Math.round((clip.length / clip.fps) * fps));
+  const frames = Array.from({ length: clip.loop ? count : count + 1 }, (_, i) => (i * clip.length) / count);
+  return clip.length > 0 ? frames : [0];
+}
+
 // The pose a clip puts the entries in at a frame: Map id -> { position?,
 // rotation?, scale? } (see pose.js); what it has no track of stays as it is.
 export function poseAt(clip, frame) {

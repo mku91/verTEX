@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { keepToFaces } from './mesh.js';
+import { ModelPose, clipValues, posedMatrices } from './pose.js';
+import { spriteFrames } from './animation.js';
 
 // The model drawn into a sprite sheet: one frame for every direction it is
 // looked at from, side by side in a PNG - what a 2D game shows instead of
@@ -55,6 +57,14 @@ import { keepToFaces } from './mesh.js';
 //     stay where they are.
 // What is drawn is what the editor shows: the visible objects' faces - no
 // grid, edges, points or selection.
+//
+// The model may be drawn in its animation clips' poses too (clipSheets()):
+// every clip at `spriteFps` frames a second of its own (see spriteFrames()
+// in animation.js), and every frame from every direction - a strip of the
+// clip's frames for each direction, laid out as the sheet's grid says. All
+// the frames of all the clips are drawn about one and the same point - the
+// middle of all the poses' bounds - so that the model does not shift from
+// one frame to the next, nor from one clip to another.
 
 const ALPHA_CUT = 128; // a pixel is there from this alpha on
 
@@ -211,13 +221,16 @@ export class SpriteRenderer {
     });
   }
 
-  // The frames: an ImageData for every direction, in order; [] with nothing to draw.
-  frames(settings) {
+  // The frames: an ImageData for every direction, in order; [] with nothing
+  // to draw. `fixed`: the point drawn about and how far the model reaches
+  // from it ({ center, radius }), if not the model's own bounds' as it is.
+  frames(settings, fixed = null) {
     const { renderer } = this.editor.viewport;
     const { atlas } = this.editor;
     this.atlasSize.set(atlas.width, atlas.height);
     return this.withBareSurface((geometry) => {
-      const reach = this.bounds(geometry);
+      const own = this.bounds(geometry);
+      const reach = own && (fixed ?? own);
       if (!reach) return [];
       this.mesh.geometry = geometry;
       this.mesh.material = this.materialsFor(settings);
@@ -272,6 +285,13 @@ export class SpriteRenderer {
   sheet(settings) {
     const images = this.frames(settings);
     if (images.length === 0) return null;
+    return this.compose(images, settings, (k) => directionAngle(settings, k));
+  }
+
+  // Images (of the settings' frame size) laid out on a sheet in the grid of
+  // the settings, as sheet() gives it; `angleOf(k)`: the turn frame k is
+  // seen at.
+  compose(images, settings, angleOf) {
     const { columns, rows } = sheetGrid(images.length, settings);
     const canvas = document.createElement('canvas');
     const pot = (size) => (settings.pot ? 2 ** Math.ceil(Math.log2(size)) : size);
@@ -282,10 +302,178 @@ export class SpriteRenderer {
       const x = (k % columns) * (settings.width + settings.padding);
       const y = Math.floor(k / columns) * (settings.height + settings.padding);
       context.putImageData(image, x, y);
-      return { x, y, w: settings.width, h: settings.height, angle: (settings.start + (k * 360) / settings.directions) % 360 };
+      return { x, y, w: settings.width, h: settings.height, angle: angleOf(k) };
     });
     return { canvas, frames, columns, rows };
   }
+
+  // --- the clips ----------------------------------------------------------------
+
+  // Runs `draw(pose)` with a ModelPose of its own, for the clips' poses to
+  // be put on the view by; the view is given back as it was after - with
+  // the pose the animation mode shows, if any.
+  withPose(draw) {
+    const { view } = this.editor;
+    const before = view.posed;
+    const pose = new ModelPose(this.editor);
+    pose.begin();
+    try {
+      return draw(pose);
+    } finally {
+      pose.end();
+      if (before) {
+        view.posed = before;
+        view.updatePositions();
+      }
+    }
+  }
+
+  // Every pose of the clips a sprite takes: [{ clip, frames, matrices[] }].
+  clipPoses(clips, spriteFps) {
+    return clips.map((clip) => {
+      const frames = spriteFrames(clip, spriteFps);
+      return { clip, frames, matrices: frames.map((frame) => posedMatrices(this.editor, clipValues(this.editor, clip, frame))) };
+    });
+  }
+
+  // Where the vertices drawn (those of the faces shown) are in every pose
+  // of `poses` (see clipPoses()): the points of all of them together.
+  posedPoints(pose, poses) {
+    const shown = new Set(this.editor.view.triangleIndices ?? []);
+    const points = [];
+    for (const { matrices } of poses) {
+      for (const placed of matrices) {
+        for (const [id, { vertices, local }] of pose.objects) {
+          const matrix = placed.get(id);
+          vertices.forEach((vertex, k) => {
+            if (shown.has(vertex)) points.push(matrix ? local[k].clone().applyMatrix4(matrix) : this.editor.mesh.vertices[vertex].clone());
+          });
+        }
+      }
+    }
+    return points;
+  }
+
+  // The point all the clips' frames are drawn about - the middle of the
+  // bounds of all their poses - and how far the model reaches from it; null
+  // with nothing to draw.
+  reachOf(points) {
+    if (points.length === 0) return null;
+    const center = new THREE.Box3().setFromPoints(points).getCenter(new THREE.Vector3());
+    let far = 0;
+    for (const point of points) far = Math.max(far, point.distanceToSquared(center));
+    return { center, radius: Math.max(Math.sqrt(far), 1e-3) };
+  }
+
+  // The smallest frame size every pose of the clips fits in, from every
+  // direction of the settings, a pixel to spare all round; null with nothing
+  // to draw. (fit(), for the clips.)
+  fitClips(settings, clips) {
+    return this.withPose((pose) => {
+      const points = this.posedPoints(pose, this.clipPoses(clips, settings.spriteFps));
+      const reach = this.reachOf(points);
+      if (!reach) return null;
+      const unit = this.pixelsPerUnit(settings);
+      const point = new THREE.Vector3();
+      let x = 0;
+      let y = 0;
+      for (let k = 0; k < settings.directions; k++) {
+        this.aim(settings, k, reach.center, reach.radius);
+        for (const each of points) {
+          point.copy(each).applyMatrix4(this.camera.matrixWorldInverse);
+          x = Math.max(x, Math.abs(point.x));
+          y = Math.max(y, Math.abs(point.y));
+        }
+      }
+      return { width: 2 * Math.ceil(x * unit) + 2, height: 2 * Math.ceil(y * unit) + 2 };
+    });
+  }
+
+  // The clips' sheets, for those of `all` that are `drawn` (the point they
+  // are drawn about is that of all of them): [{ name, loop, fps, frames (how
+  // many), directions: [{ angle, ...a sheet (see sheet()) }] }]; null with
+  // nothing to draw.
+  clipSheets(settings, all, drawn = all) {
+    return this.withPose((pose) => {
+      const poses = this.clipPoses(all, settings.spriteFps);
+      const reach = this.reachOf(this.posedPoints(pose, poses));
+      if (!reach) return null;
+      return poses.filter(({ clip }) => drawn.includes(clip)).map(({ clip, frames, matrices }) => {
+        const shots = Array.from({ length: settings.directions }, () => []);
+        for (const placed of matrices) {
+          pose.apply(placed);
+          this.frames(settings, reach).forEach((image, k) => shots[k].push(image));
+        }
+        const directions = shots.map((images, k) => {
+          const angle = directionAngle(settings, k);
+          return { angle, ...this.compose(images, settings, () => angle) };
+        });
+        return { name: clip.name, loop: clip.loop, fps: settings.spriteFps, frames: frames.length, directions };
+      });
+    });
+  }
+}
+
+// The turn direction k is seen at (see the top), in degrees, 0 to 360.
+export function directionAngle(settings, k) {
+  return (((settings.start + (k * 360) / settings.directions) % 360) + 360) % 360;
+}
+
+// The name of a clip's direction's animation in Godot - <clip>_<angle> -
+// and the PNG it is drawn in: <stem>_<clip>_<angle>.png.
+export const clipAnimationName = (clip, direction) => `${clip.name}_${Math.round(direction.angle) % 360}`;
+export const clipImageName = (stem, clip, direction) => `${stem}_${clipAnimationName(clip, direction)}.png`;
+
+// The clips' sheets as Godot's SpriteFrames, for an AnimatedSprite2D (or
+// 3D): a .tres beside the PNGs, which names them by their paths relative to
+// it. An animation for every clip's direction, its frames regions of its
+// PNG, at the sprite's rate, looping as the clip does.
+export function clipsTres(stem, sheets) {
+  const external = [];
+  const regions = [];
+  const animations = [];
+  for (const clip of sheets) {
+    for (const direction of clip.directions) {
+      const texture = `${external.length + 1}_png`;
+      external.push(`[ext_resource type="Texture2D" path="${clipImageName(stem, clip, direction)}" id="${texture}"]`);
+      const frames = direction.frames.map((frame) => {
+        const region = `AtlasTexture_${regions.length + 1}`;
+        regions.push(`[sub_resource type="AtlasTexture" id="${region}"]\natlas = ExtResource("${texture}")\nregion = Rect2(${frame.x}, ${frame.y}, ${frame.w}, ${frame.h})`);
+        return `{\n"duration": 1.0,\n"texture": SubResource("${region}")\n}`;
+      });
+      animations.push(`{\n"frames": [${frames.join(', ')}],\n"loop": ${clip.loop},\n"name": &"${clipAnimationName(clip, direction)}",\n"speed": ${clip.fps.toFixed(1)}\n}`);
+    }
+  }
+  return [
+    `[gd_resource type="SpriteFrames" load_steps=${external.length + regions.length + 1} format=3]`,
+    ...external,
+    ...regions,
+    `[resource]\nanimations = [${animations.join(', ')}]`,
+  ].join('\n\n') + '\n';
+}
+
+// The clips' sheets as JSON: for every clip's direction its PNG, its
+// frames' places, its rate and whether it loops.
+export function clipsJSON(stem, sheets, settings) {
+  return JSON.stringify({
+    meta: {
+      app: 'verTEX',
+      directions: settings.directions,
+      elevation: settings.elevation,
+      fps: settings.spriteFps,
+      size: { w: settings.width, h: settings.height },
+    },
+    animations: sheets.flatMap((clip) => clip.directions.map((direction) => ({
+      name: clipAnimationName(clip, direction),
+      clip: clip.name,
+      angle: +direction.angle.toFixed(4),
+      image: clipImageName(stem, clip, direction),
+      size: { w: direction.canvas.width, h: direction.canvas.height },
+      loop: clip.loop,
+      fps: clip.fps,
+      frames: direction.frames.map(({ x, y, w, h }) => ({ x, y, w, h })),
+    }))),
+  }, null, 1);
 }
 
 // How many columns and rows `frames` frames take in the grid of the settings.

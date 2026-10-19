@@ -1,4 +1,4 @@
-import { SpriteRenderer, SPRITE_DEFAULTS, sheetJSON } from './sprite-render.js';
+import { SpriteRenderer, SPRITE_DEFAULTS, sheetJSON, clipsTres, clipsJSON, clipImageName } from './sprite-render.js';
 import { scrubbable } from './scrub.js';
 
 // The sprite render: a screen of its own over the editor, where the model is
@@ -15,6 +15,14 @@ import { scrubbable } from './scrub.js';
 //
 // While it is open the keyboard is its own: Esc closes it, and the editor's
 // shortcuts are off - the model is not to be changed from under it.
+//
+// With animation clips in the model, "Анимация" may have them drawn instead
+// of the model at rest (see clipSheets() in sprite-render.js): a PNG for
+// every clip's direction, a strip of its frames, at the sprite's own rate.
+// The one clip picked is what is shown - its directions' strips one under
+// another, the player going round the frames of the direction picked in
+// them - and "Export" writes them all: the PNGs, Godot's SpriteFrames (a
+// .tres naming them) and a JSON of their frames.
 //
 //   wheel             zoom the sheet (whole steps: pixels stay square)
 //   RMB / MMB drag    move it
@@ -35,7 +43,15 @@ const FIELDS = {
   lightElevation: { min: 0, max: 90, whole: true },
   lightStrength: { min: 0.1, max: 10, whole: false },
   steps: { min: 2, max: 8, whole: true },
+  spriteFps: { min: 1, max: 60, whole: true },
 };
+// A clip's preview (see strips()): every direction's strip - a PNG of its
+// own - in a frame of this colour, its size on a tab over its top right
+// corner; so many screen px from one strip to the next, whatever the zoom.
+const STRIP_COLOR = '#bd93f9';
+const STRIP_TAB = 18; // px, the tab's height
+const STRIP_BORDER = 2; // px
+const STRIP_SPACE = 36; // px from a strip's bottom to the next one's top (its tab and frame in it)
 const DIAL = 104; // px across, the light's dials
 const MODEL = 22; // px, the model in their middle - the same square in both
 const SUN_COLOR = '#f1fa8c';
@@ -62,7 +78,7 @@ export class RenderMode {
     this.sheet = null;
     this.zoom = 0; // 0: not yet fitted
     this.offset = { x: 0, y: 0 };
-    this.settings = { ...SPRITE_DEFAULTS, json: false, fps: FPS.initial };
+    this.settings = { ...SPRITE_DEFAULTS, json: false, fps: FPS.initial, source: 'rest', spriteFps: 12, clip: null };
     try {
       const kept = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {};
       // Kept from before there was a layout: columns, 0 for one row.
@@ -116,25 +132,45 @@ export class RenderMode {
         this.changed();
       });
     }
+    // The model at rest, or its clips; the clip shown.
+    for (const button of element.querySelectorAll('[data-source]')) {
+      button.addEventListener('click', () => {
+        this.settings.source = button.dataset.source;
+        this.zoom = 0;
+        this.player.frame = 0;
+        this.changed();
+      });
+    }
+    this.form.elements.clip.addEventListener('change', (event) => {
+      this.settings.clip = event.target.value;
+      this.zoom = 0;
+      this.player.frame = 0;
+      this.changed();
+    });
     element.querySelector('[data-render="fit"]').addEventListener('click', () => this.fit());
     // The player's bar.
     element.querySelector('[data-player="play"]').addEventListener('click', () => this.play(!this.player.playing));
     element.querySelector('[data-player="previous"]').addEventListener('click', () => this.step(-1));
     element.querySelector('[data-player="next"]').addEventListener('click', () => this.step(1));
     const fps = this.form.ownerDocument.querySelector('#render-mode [name="fps"]');
+    // (With the clips it is the sprite's own rate, as "FPS спрайта" is.)
+    const setFps = (value) => {
+      if (this.clipsOn) {
+        this.take('spriteFps', value);
+        return;
+      }
+      this.settings.fps = value;
+      fps.value = value;
+      this.keep();
+    };
     fps.addEventListener('change', () => {
       const value = Math.round(parseFloat(fps.value.replace(',', '.')));
-      if (Number.isFinite(value)) this.settings.fps = Math.min(FPS.max, Math.max(FPS.min, value));
-      fps.value = this.settings.fps;
-      this.keep();
+      if (Number.isFinite(value)) setFps(Math.min(FPS.max, Math.max(FPS.min, value)));
+      fps.value = this.playerFps;
     });
     scrubbable(fps, {
-      read: () => this.settings.fps,
-      write: (value) => {
-        this.settings.fps = value;
-        fps.value = value;
-        this.keep();
-      },
+      read: () => this.playerFps,
+      write: setFps,
       whole: true,
       min: FPS.min,
       max: FPS.max,
@@ -166,6 +202,22 @@ export class RenderMode {
 
   get open() {
     return !this.element.hidden;
+  }
+
+  // The clips drawn instead of the model at rest: asked for, and there are some.
+  get clipsOn() {
+    return this.settings.source === 'clips' && this.editor.animations.length > 0;
+  }
+
+  // The clip shown (see the top).
+  shownClip() {
+    const clips = this.editor.animations;
+    return clips.find((clip) => clip.name === this.settings.clip) ?? clips[0] ?? null;
+  }
+
+  // The player's frames a second: the sprite's, with the clips.
+  get playerFps() {
+    return this.clipsOn ? this.settings.spriteFps : this.settings.fps;
   }
 
   show() {
@@ -234,19 +286,89 @@ export class RenderMode {
     const steps = this.element.querySelector('.render-steps');
     steps.classList.toggle('open', this.settings.blend === 'steps');
     steps.firstElementChild.inert = this.settings.blend !== 'steps';
-    if (document.activeElement !== this.fps) this.fps.value = this.settings.fps;
+    if (document.activeElement !== this.fps) this.fps.value = this.playerFps;
+    // The animation: only with clips; the clip and the sprite's rate only with them on.
+    const clips = this.editor.animations;
+    this.element.querySelector('.render-animation').hidden = clips.length === 0;
+    for (const button of this.element.querySelectorAll('[data-source]')) button.classList.toggle('active', button.dataset.source === (this.clipsOn ? 'clips' : 'rest'));
+    const clipBlock = this.element.querySelector('.render-clips');
+    clipBlock.classList.toggle('open', this.clipsOn);
+    clipBlock.firstElementChild.inert = !this.clipsOn;
+    const select = this.form.elements.clip;
+    select.replaceChildren(...clips.map((clip) => new Option(clip.name, clip.name)));
+    select.value = this.shownClip()?.name ?? '';
+    this.form.elements.json.closest('label').hidden = this.clipsOn; // (with the clips the JSON is always written)
     for (const button of this.element.querySelectorAll('[data-light]')) button.classList.toggle('active', button.dataset.light === this.settings.light);
     if (!this.open) return;
-    this.sheet = this.renderer.sheet(this.settings);
     const size = this.element.querySelector('.render-size');
-    size.textContent = this.sheet
-      ? `${this.sheet.frames.length} кадр${plural(this.sheet.frames.length)} по ${this.settings.width} × ${this.settings.height} · ` +
-        `${this.sheet.columns} × ${this.sheet.rows} · лист ${this.sheet.canvas.width} × ${this.sheet.canvas.height} px`
-      : '';
+    if (this.clipsOn) {
+      const clip = this.shownClip();
+      const [shown] = this.renderer.clipSheets(this.settings, clips, [clip]) ?? [];
+      this.sheet = shown ? this.strips(shown) : null;
+      const strip = shown?.directions[0].canvas;
+      size.textContent = shown
+        ? `${clip.name}: ${shown.directions.length} × ${shown.frames} кадр${plural(shown.frames)} по ${this.settings.width} × ${this.settings.height} · ` +
+          `${shown.directions.length} PNG по ${strip.width} × ${strip.height} px`
+        : '';
+      this.element.querySelector('.render-clip-info').textContent = shown
+        ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop ? ' · цикл' : ''}`
+        : '';
+    } else {
+      this.sheet = this.renderer.sheet(this.settings);
+      size.textContent = this.sheet
+        ? `${this.sheet.frames.length} кадр${plural(this.sheet.frames.length)} по ${this.settings.width} × ${this.settings.height} · ` +
+          `${this.sheet.columns} × ${this.sheet.rows} · лист ${this.sheet.canvas.width} × ${this.sheet.canvas.height} px`
+        : '';
+    }
     this.element.querySelector('.render-empty').hidden = Boolean(this.sheet);
     if (this.sheet) this.player.frame %= this.sheet.frames.length;
     this.draw();
     this.drawPlayer();
+  }
+
+  // A clip's sheets (see clipSheets()) as one picture to show: its
+  // directions' strips one under another (`strips`: where each is in it),
+  // and their frames - each with its direction's number (`direction`) - in
+  // order. On the screen the strips are apart (see place()).
+  strips(clip) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(...clip.directions.map((direction) => direction.canvas.width));
+    canvas.height = clip.directions.reduce((sum, direction) => sum + direction.canvas.height, 0);
+    const context = canvas.getContext('2d');
+    const frames = [];
+    const strips = [];
+    let y = 0;
+    clip.directions.forEach((direction, d) => {
+      context.drawImage(direction.canvas, 0, y);
+      for (const frame of direction.frames) frames.push({ ...frame, y: frame.y + y, direction: d });
+      strips.push({ y, w: direction.canvas.width, h: direction.canvas.height });
+      y += direction.canvas.height;
+    });
+    return { canvas, frames, clip, strips };
+  }
+
+  // Where a point of the sheet (in its pixels) of direction `d`'s strip is
+  // on the preview: the zoom, and STRIP_SPACE between a clip's strips.
+  place(x, y, d = 0) {
+    return { x: this.offset.x + x * this.zoom, y: this.offset.y + y * this.zoom + d * STRIP_SPACE };
+  }
+
+  // The frames the player goes round: with the clips, those of the
+  // direction of the frame shown; else all.
+  round() {
+    const { sheet } = this;
+    if (!sheet) return [];
+    const all = sheet.frames.map((_, k) => k);
+    if (!sheet.clip) return all;
+    const direction = sheet.frames[this.player.frame]?.direction ?? 0;
+    return all.filter((k) => sheet.frames[k].direction === direction);
+  }
+
+  // The frame `by` frames on from the one shown, round the player's frames.
+  frameOn(by) {
+    const round = this.round();
+    const at = Math.max(0, round.indexOf(this.player.frame));
+    return round[(at + by + round.length) % round.length];
   }
 
   // --- the custom light's dials ---------------------------------------------------
@@ -365,7 +487,7 @@ export class RenderMode {
   step(by) {
     if (!this.sheet) return;
     this.play(false);
-    this.showFrame((this.player.frame + by + this.sheet.frames.length) % this.sheet.frames.length);
+    this.showFrame(this.frameOn(by));
   }
 
   // Shows frame k in the player, and outlines it on the sheet.
@@ -383,9 +505,9 @@ export class RenderMode {
     const loop = (now) => {
       if (!this.open) return;
       const { player, sheet } = this;
-      if (player.playing && sheet && now - player.since >= 1000 / this.settings.fps) {
+      if (player.playing && sheet && now - player.since >= 1000 / this.playerFps) {
         player.since = now;
-        this.showFrame((player.frame + 1) % sheet.frames.length);
+        this.showFrame(this.frameOn(1));
       }
       this.ticking = requestAnimationFrame(loop);
     };
@@ -422,7 +544,12 @@ export class RenderMode {
     this.chequers(context, x, y, w, h, Math.max(8, zoom * 2));
     context.imageSmoothingEnabled = false;
     context.drawImage(sheet.canvas, frame.x, frame.y, frame.w, frame.h, x, y, w, h);
-    label.textContent = `кадр ${this.player.frame + 1} из ${sheet.frames.length} · ${Math.round(frame.angle)}°`;
+    if (sheet.clip) {
+      const round = this.round();
+      label.textContent = `${sheet.clip.name} · ${Math.round(frame.angle)}° · кадр ${round.indexOf(this.player.frame) + 1} из ${round.length}`;
+    } else {
+      label.textContent = `кадр ${this.player.frame + 1} из ${sheet.frames.length} · ${Math.round(frame.angle)}°`;
+    }
   }
 
   // Chequers in a rectangle: what is clear in a picture laid over them shows as such.
@@ -444,8 +571,9 @@ export class RenderMode {
   }
 
   // The frame made to fit the model, in every direction.
+  // (With the clips: in every pose of all of them.)
   fit() {
-    const size = this.renderer.fit(this.settings);
+    const size = this.clipsOn ? this.renderer.fitClips(this.settings, this.editor.animations) : this.renderer.fit(this.settings);
     if (!size) return;
     this.settings.width = Math.min(FIELDS.width.max, size.width);
     this.settings.height = Math.min(FIELDS.height.max, size.height);
@@ -470,31 +598,60 @@ export class RenderMode {
     context.clearRect(0, 0, width, height);
     if (!sheet) return;
     const { canvas: image } = sheet;
+    // (a clip's strips: apart on the screen, each a tab over it)
+    const strips = sheet.strips ?? [{ y: 0, w: image.width, h: image.height }];
+    const spaces = (strips.length - 1) * STRIP_SPACE;
+    const top = sheet.strips ? STRIP_TAB + STRIP_BORDER : 0;
     if (this.zoom === 0) {
       // As large as fits, in whole steps, in the middle.
-      this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.floor(Math.min((width - 40) / image.width, (height - 40) / image.height)) || 1));
-      this.offset = { x: Math.round((width - image.width * this.zoom) / 2), y: Math.round((height - image.height * this.zoom) / 2) };
+      this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.floor(Math.min((width - 40) / image.width, (height - 40 - spaces - top) / image.height)) || 1));
+      this.offset = { x: Math.round((width - image.width * this.zoom) / 2), y: Math.round((height - image.height * this.zoom - spaces - top) / 2) + top };
     }
     const { zoom, offset } = this;
     const w = image.width * zoom;
     const h = image.height * zoom;
-    // The chequers, under the sheet only.
-    this.chequers(context, offset.x, offset.y, w, h, Math.max(4, zoom * 2));
+    // The chequers, under the sheet only; the sheet over them, strip by strip.
     context.imageSmoothingEnabled = false;
-    context.drawImage(image, offset.x, offset.y, w, h);
+    strips.forEach((strip, d) => {
+      const at = this.place(0, strip.y, d);
+      this.chequers(context, at.x, at.y, strip.w * zoom, strip.h * zoom, Math.max(4, zoom * 2));
+      context.drawImage(image, 0, strip.y, strip.w, strip.h, at.x, at.y, strip.w * zoom, strip.h * zoom);
+    });
     context.lineWidth = 1;
     sheet.frames.forEach((frame, k) => {
       if (k === this.player.frame) return;
+      const at = this.place(frame.x, frame.y, frame.direction);
       context.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-      context.strokeRect(offset.x + frame.x * zoom - 0.5, offset.y + frame.y * zoom - 0.5, frame.w * zoom + 1, frame.h * zoom + 1);
+      context.strokeRect(at.x - 0.5, at.y - 0.5, frame.w * zoom + 1, frame.h * zoom + 1);
     });
+    // A clip's strips: each in its frame, its size on the tab.
+    if (sheet.strips) {
+      context.font = '12px "Segoe UI", system-ui, sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      strips.forEach((strip, d) => {
+        const at = this.place(0, strip.y, d);
+        const outer = { x: at.x - STRIP_BORDER, y: at.y - STRIP_BORDER, w: strip.w * zoom + 2 * STRIP_BORDER, h: strip.h * zoom + 2 * STRIP_BORDER };
+        context.strokeStyle = STRIP_COLOR;
+        context.lineWidth = STRIP_BORDER;
+        context.strokeRect(outer.x + STRIP_BORDER / 2, outer.y + STRIP_BORDER / 2, outer.w - STRIP_BORDER, outer.h - STRIP_BORDER);
+        const label = `${strip.w} × ${strip.h}`;
+        const tab = Math.ceil(context.measureText(label).width) + 14;
+        context.fillStyle = STRIP_COLOR;
+        context.fillRect(outer.x + outer.w - tab, outer.y - STRIP_TAB, tab, STRIP_TAB);
+        context.fillStyle = getComputedStyle(this.element).getPropertyValue('--bg');
+        context.fillText(label, outer.x + outer.w - tab / 2, outer.y - STRIP_TAB / 2 + 0.5);
+      });
+    }
     // The frame being played: in the accent colour, over its neighbours' lines.
     const played = sheet.frames[this.player.frame];
     if (played) {
+      const at = this.place(played.x, played.y, played.direction);
       context.lineWidth = 2;
       context.strokeStyle = getComputedStyle(this.element).getPropertyValue('--accent');
-      context.strokeRect(offset.x + played.x * zoom - 1, offset.y + played.y * zoom - 1, played.w * zoom + 2, played.h * zoom + 2);
+      context.strokeRect(at.x - 1, at.y - 1, played.w * zoom + 2, played.h * zoom + 2);
     }
+    if (sheet.strips) return; // (their sizes are on their tabs)
     // The sheet's size, over its top right corner - as the UV editor shows
     // the atlas' - kept in view however the sheet is moved about or zoomed.
     context.font = '12px "Segoe UI", system-ui, sans-serif';
@@ -510,9 +667,12 @@ export class RenderMode {
   frameAt(clientX, clientY) {
     if (!this.sheet) return -1;
     const rect = this.canvas.getBoundingClientRect();
-    const x = (clientX - rect.left - this.offset.x) / this.zoom;
-    const y = (clientY - rect.top - this.offset.y) / this.zoom;
-    return this.sheet.frames.findIndex((frame) => x >= frame.x && y >= frame.y && x < frame.x + frame.w && y < frame.y + frame.h);
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    return this.sheet.frames.findIndex((frame) => {
+      const at = this.place(frame.x, frame.y, frame.direction);
+      return x >= at.x && y >= at.y && x < at.x + frame.w * this.zoom && y < at.y + frame.h * this.zoom;
+    });
   }
 
   // The wheel zooms at the pointer, RMB or MMB moves the sheet.
@@ -560,6 +720,7 @@ export class RenderMode {
   async save() {
     const { sheet, files } = this;
     if (!sheet || !files.pick) return;
+    if (this.clipsOn) return this.saveClips();
     const target = await files.pick(`${files.name()}_sprites`, [{ name: 'Изображение PNG', extension: 'png' }]);
     if (!target) return;
     const bytes = await new Promise((resolve) => {
@@ -574,6 +735,34 @@ export class RenderMode {
     const result = await files.write(target.path, bytes, beside);
     if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
   }
+
+  // The clips: asks where Godot's SpriteFrames (.tres) goes, and writes it
+  // there - and beside it every clip's direction's PNG, named after it
+  // (<name>_<clip>_<angle>.png), and the JSON of their frames (<name>.json).
+  async saveClips() {
+    const { files } = this;
+    const target = await files.pick(`${files.name()}_sprites`, [{ name: 'Godot SpriteFrames', extension: 'tres' }]);
+    if (!target) return;
+    const sheets = this.renderer.clipSheets(this.settings, this.editor.animations);
+    if (!sheets) return;
+    const encoder = new TextEncoder();
+    const beside = {};
+    for (const clip of sheets) {
+      for (const direction of clip.directions) {
+        beside[clipImageName(target.name, clip, direction)] = await pngOf(direction.canvas);
+      }
+    }
+    beside[`${target.name}.json`] = encoder.encode(clipsJSON(target.name, sheets, this.settings));
+    const result = await files.write(target.path, encoder.encode(clipsTres(target.name, sheets)), beside);
+    if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
+  }
+}
+
+// A canvas as the bytes of a PNG.
+function pngOf(canvas) {
+  return new Promise((resolve) => {
+    canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
+  });
 }
 
 // Radians in degrees.

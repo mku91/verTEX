@@ -277,12 +277,14 @@
         <i class="uv-divider"></i>
         <button data-tl="key" title="Вставить ключ: то, что изменено вручную у выделенного, на этом кадре (K)"><i class="fa-solid fa-key"></i></button>
         <button data-tl="autokey" class="tl-autokey" title="Автоключ: всякое движение объекта сразу ставит ключ на текущем кадре. Выключен — движение временное, ключ ставит K"><span class="rec-dot"></span></button>
+        <i class="uv-divider"></i>
+        <button class="tl-restore" disabled><i class="fa-solid fa-rotate-left"></i></button>
       </div>
       <p class="tl-empty" hidden>Клипов пока нет — создайте первый кнопкой «+» вверху</p>
       <div class="tl-body">
         <div class="tl-corner">
-          <span class="tl-unkeyed" hidden title="Поза изменена, но ключ не поставлен: при смене кадра она сбросится туда, где показан призрак. K — поставить ключ"><i class="fa-solid fa-triangle-exclamation"></i>Не в ключах</span>
-          <button class="tl-restore" hidden><i class="fa-solid fa-rotate-left"></i>Вернуть позу</button>
+          <button class="tl-groups-only" data-tl="groupsonly" title="Только группы: в таймлайне видны только группы, ключи ставятся только им, а щелчок по объекту в виде выделяет его группу. Ключи самих объектов остаются в клипе и проигрываются, но не видны"><i class="fa-solid fa-folder"></i></button>
+          <button class="tl-add tl-add-all" data-tl="keyall" title="Ключ на всё: позиция, поворот и масштаб всех объектов и групп на текущем кадре, как они показаны">+</button>
         </div>
         <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — прокрутка · Ctrl+колесо — масштаб · средняя кнопка — сдвиг"></canvas>
         <div class="tl-scroll">
@@ -686,6 +688,18 @@
         <p class="render-empty" hidden>Нечего рендерить: в сцене нет видимых граней</p>
       </div>
       <form class="render-settings" autocomplete="off">
+        <div class="render-animation">
+          <h3>Анимация</h3>
+          <div class="render-source">
+            <button type="button" data-source="rest" title="Модель в покое, как в редакторе: один лист с направлениями">Поза покоя</button>
+            <button type="button" data-source="clips" title="Клипы анимации: на каждый клип и направление — свой PNG с полоской кадров, плюс SpriteFrames для Godot (.tres) и JSON">Клипы</button>
+          </div>
+          <div class="render-clips"><div>
+            <label title="Какой клип показан в просмотре. В экспорт идут все клипы"><span>Клип</span><select name="clip"></select></label>
+            <label title="Кадров в секунду у спрайта: клип снимается через равные промежутки времени. Меньше — меньше кадров в PNG"><span>FPS спрайта</span><input type="text" name="spriteFps" inputmode="numeric"></label>
+            <p class="render-clip-info"></p>
+          </div></div>
+        </div>
         <h3>Камера</h3>
         <label title="Сколько сторон, с которых снята модель: кадров в листе"><span>Направлений</span><input type="text" name="directions" inputmode="numeric"></label>
         <label title="Поворот модели в первом кадре, в градусах; дальше — равными шагами против часовой стрелки, если смотреть сверху"><span>Начальный угол</span><input type="text" name="start" inputmode="numeric"></label>
@@ -740,7 +754,7 @@
         <label class="choice" title="Ширина и высота листа — 64, 128, 256…, как требуют многие движки: справа и снизу добавляется прозрачное поле, кадры остаются на своих местах"><input type="checkbox" name="pot"><span>Размер — степень двойки</span></label>
         <label class="choice" title="Рядом с PNG — JSON с местом и углом каждого кадра (формат TexturePacker / Aseprite)"><input type="checkbox" name="json"><span>JSON с кадрами</span></label>
         <div class="form-buttons">
-          <button type="button" data-render="save" title="Сохранить лист в PNG (и JSON с кадрами, если отмечено)">Экспорт</button>
+          <button type="button" data-render="save" title="Сохранить лист в PNG (и JSON с кадрами, если отмечено). С клипами — PNG на каждый клип и направление, SpriteFrames для Godot (.tres) и JSON">Экспорт</button>
         </div>
       </form>
     </div>

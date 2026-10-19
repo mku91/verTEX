@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { ModelPose, localTransforms, posedMatrices } from './pose.js';
+import { ModelPose, localTransforms, posedMatrices, clipValues } from './pose.js';
 import { solveIK } from './ik.js';
 import { IKSign } from './ik-sign.js';
+import { themeGizmo } from './theme.js';
 import { PoseGhost } from './ghost.js';
-import { PROPERTIES, poseAt, setKey, removeKeys, keyId, unwrap } from './animation.js';
+import { PROPERTIES, setKey, removeKeys, keyId, unwrap } from './animation.js';
 import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { freeName } from './names.js';
@@ -31,9 +32,6 @@ const PROPERTY_OF_MODE = { translate: 'position', rotate: 'rotation', scale: 'sc
 const DEGREE = Math.PI / 180;
 const round = (value) => +value.toFixed(5);
 
-// An entry turned by quaternions (see Editor.setRotationMode()) is posed by them.
-const byQuaternion = (editor, id) => editor.mesh.objects.find((object) => object.id === id)?.rotationMode === 'quaternion';
-
 export class AnimationMode {
   constructor(panel, viewport, editor, timeline) {
     this.panel = panel;
@@ -50,6 +48,7 @@ export class AnimationMode {
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
     this.gizmo.setSize(0.8);
+    themeGizmo(this.gizmo);
     viewport.scene.add(this.gizmo.getHelper());
     this.gizmo.addEventListener('change', () => viewport.requestRender());
     this.gizmo.addEventListener('dragging-changed', (event) => {
@@ -86,6 +85,7 @@ export class AnimationMode {
       this.show();
     });
     timeline.addEventListener('restore', () => this.restorePose());
+    timeline.addEventListener('groupsonly', () => this.show()); // (the gizmo: on a group only, or anything)
     this.buildPanel();
   }
 
@@ -118,22 +118,7 @@ export class AnimationMode {
   // The pose of every entry now: the clip's at the frame, over the rest pose,
   // with what is posed by hand (`overrides`) over that.
   valuesNow(overrides = this.overrides) {
-    const rest = localTransforms(this.editor);
-    const clip = this.timeline.current();
-    const posed = clip ? poseAt(clip, this.timeline.frame) : new Map();
-    const values = new Map();
-    for (const [id, place] of rest) {
-      const own = { ...posed.get(id), ...overrides.get(id) };
-      const restTurn = byQuaternion(this.editor, id)
-        ? new THREE.Quaternion().setFromEuler(new THREE.Euler(...(place.rotation ?? [0, 0, 0]).map((angle) => angle * DEGREE), 'XYZ')).toArray()
-        : place.rotation ?? [0, 0, 0];
-      values.set(id, {
-        position: own.position ?? place.position,
-        rotation: own.rotation ?? restTurn,
-        scale: own.scale ?? [1, 1, 1],
-      });
-    }
-    return values;
+    return clipValues(this.editor, this.timeline.current(), this.timeline.frame, overrides);
   }
 
   show() {
@@ -199,7 +184,7 @@ export class AnimationMode {
   placeGizmo() {
     const entry = this.entry();
     const mode = GIZMO_MODES[this.editor.tool];
-    if (!entry || !mode || this.editor.preview) {
+    if (!entry || !mode || this.editor.preview || !this.mayPose(entry.index)) {
       this.gizmo.detach();
       return;
     }
@@ -212,6 +197,12 @@ export class AnimationMode {
     this.gizmo.setRotationSnap(snap ? 15 * DEGREE : null);
     if (this.gizmo.object !== this.proxy) this.gizmo.attach(this.proxy);
     this.viewport.requestRender();
+  }
+
+  // Whether an entry is posed and keyed: with "Только группы" on the
+  // timeline (see Timeline.setGroupsOnly()), groups only.
+  mayPose(index) {
+    return !this.timeline.groupsOnly || this.editor.mesh.objects[index]?.kind === 'group';
   }
 
   // The parent's matrix in the world, as shown (none: the world itself).
@@ -334,6 +325,7 @@ export class AnimationMode {
   // entries' pivots are fixed. One undo step.
   writeKeys(indices, properties) {
     const { editor, timeline } = this;
+    indices = indices.filter((index) => this.mayPose(index));
     if (!indices.length || editor.busy()) return;
     const values = this.valuesNow();
     const frame = Math.round(timeline.frame);
@@ -358,6 +350,13 @@ export class AnimationMode {
     }
     editor.history.push(before);
     editor.setAnimations(clips.map((other) => (other === clip ? changed : other)), false);
+  }
+
+  // The corner's "+" on the timeline: every property of every entry keyed on
+  // the frame, as it is shown - the whole pose, changed or not.
+  keyAll() {
+    if (!this.on) return;
+    this.writeKeys(this.editor.mesh.objects.map((_, index) => index), PROPERTIES);
   }
 
   // K: what was changed by hand - and only that - of every entry picked

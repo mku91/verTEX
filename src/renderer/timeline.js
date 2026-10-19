@@ -50,6 +50,7 @@ const GLIDE = 60; // ms: how quickly the frames close in on where the wheel send
 const WHEEL_PX = 0.6; // px the frames go by for a pixel of the wheel's travel (a notch: ~60 px)
 const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
+const GROUPS_ONLY_KEY = 'vertex.timelineGroupsOnly';
 const NAMES_WIDTH = 220; // px, at first
 const NAMES_MIN = 120;
 const PROPERTY_NAMES = { position: 'Позиция', rotation: 'Поворот', scale: 'Масштаб' };
@@ -76,6 +77,12 @@ export class Timeline extends EventTarget {
     this.selected = new Set(); // the keys picked, by their ids (see animation.js)
     this.box = null; // the box keys are being picked by: { x0, y0, x1, y1 } in the lanes
     this.copied = null; // keys copied, see copyKeys()
+    // Only the groups: their rows alone, and only they keyed and posed (see
+    // setGroupsOnly()). Kept between runs.
+    let groupsOnly = false;
+    try { groupsOnly = localStorage.getItem(GROUPS_ONLY_KEY) === '1'; } catch { /* off */ }
+    this.groupsOnly = groupsOnly;
+    editor.animationGroupsOnly = groupsOnly;
 
     const $ = (selector) => section.querySelector(selector);
     this.select = $('.clip-select');
@@ -103,16 +110,34 @@ export class Timeline extends EventTarget {
     onThemeChange(() => this.draw());
   }
 
-  // The corner over the names: a warning while the pose has changes not
-  // keyed, or - once another frame has let them go - a button to bring them
-  // back (see AnimationMode.restorePose()). `state`: 'pending', the frame
-  // they were on (a number), or null.
+  // Only the groups, or everything: the timeline's rows, what is keyed (see
+  // AnimationMode.writeKeys()) and what a press in the main view picks (see
+  // Editor.pickOwner()). The objects' own keys stay in the clip, played.
+  setGroupsOnly(on) {
+    this.groupsOnly = on;
+    this.editor.animationGroupsOnly = on;
+    this.section.querySelector('.tl-groups-only').classList.toggle('active', on);
+    try { localStorage.setItem(GROUPS_ONLY_KEY, on ? '1' : '0'); } catch { /* not kept: fine */ }
+    this.showNames();
+    this.dispatchEvent(new Event('groupsonly'));
+  }
+
+  // The bar's last button, "Вернуть позу" (see AnimationMode.restorePose()):
+  // off while there is nothing to bring back - a warning sign on it while the
+  // pose has changes not keyed - and on once another frame has let them go.
+  // `state`: 'pending', the frame they were on (a number), or null.
   showUnkeyed(state) {
-    const warning = this.section.querySelector('.tl-unkeyed');
     const restore = this.section.querySelector('.tl-restore');
-    warning.hidden = state !== 'pending';
-    restore.hidden = typeof state !== 'number';
-    if (!restore.hidden) restore.title = `Вернуть позу, изменённую на кадре ${state} и сброшенную без ключа`;
+    const lost = typeof state === 'number';
+    restore.disabled = !lost;
+    restore.classList.toggle('pending', state === 'pending');
+    restore.classList.toggle('lost', lost);
+    restore.querySelector('i').className = `fa-solid ${state === 'pending' ? 'fa-triangle-exclamation' : 'fa-rotate-left'}`;
+    restore.title = lost
+      ? `Вернуть позу, изменённую на кадре ${state} и сброшенную без ключа`
+      : state === 'pending'
+        ? 'Не в ключах: поза изменена, но ключ не поставлен — при смене кадра она сбросится туда, где показан призрак (K — поставить ключ). После сброса здесь можно будет её вернуть'
+        : 'Вернуть позу: если поза, изменённая без ключа, сбросится при смене кадра, её можно будет вернуть здесь';
   }
 
   toggle(open = !this.open) {
@@ -223,6 +248,8 @@ export class Timeline extends EventTarget {
     for (const button of section.querySelectorAll('button')) button.addEventListener('mousedown', (event) => event.preventDefault());
     const commands = {
       add: () => this.addClip(),
+      keyall: () => this.dispatchEvent(new Event('keyall')), // (see AnimationMode.keyAll())
+      groupsonly: () => this.setGroupsOnly(!this.groupsOnly),
       duplicate: () => this.current() && this.addClip(this.current()),
       delete: () => this.deleteClip(),
       first: () => this.setFrame(0),
@@ -244,6 +271,7 @@ export class Timeline extends EventTarget {
     for (const button of section.querySelectorAll('[data-tl]')) {
       button.addEventListener('click', () => commands[button.dataset.tl]());
     }
+    section.querySelector('.tl-groups-only').classList.toggle('active', this.groupsOnly);
     this.select.addEventListener('change', () => {
       this.play(false);
       this.selected.clear();
@@ -352,13 +380,18 @@ export class Timeline extends EventTarget {
     const clip = this.current();
     const animated = new Set(clip?.tracks.map((track) => track.object) ?? []);
     const signature = JSON.stringify([islands.map((island) => [island.id, island.name, island.kind, island.parentIndex, island.hidden]), [...hand], [...picked], [...this.folded], [...animated],
-      this.editor.mesh.objects.map((object) => object.rotationMode ?? null)]);
+      this.editor.mesh.objects.map((object) => object.rotationMode ?? null), this.groupsOnly]);
     if (signature !== this.shownNames) {
       this.shownNames = signature;
       const rows = [];
       const lines = [];
       const add = (index, depth) => {
         const island = islands[index];
+        // (only the groups: an object's row left out, what it holds in its place)
+        if (this.groupsOnly && island.kind !== 'group') {
+          for (const child of island.children) add(child, depth);
+          return;
+        }
         const folded = this.folded.has(island.id);
         const line = document.createElement('div');
         line.className = 'tl-name';
@@ -958,7 +991,7 @@ export class Timeline extends EventTarget {
     const stillNote = popup.querySelector('.kp-still');
     const still = Boolean(before) && sameValue(found.value, before.value);
     stillNote.hidden = !still;
-    if (still) stillNote.textContent = `Дубликат предыдущего ключа (кадр ${before.frame})`;
+    if (still) stillNote.textContent = `Дубликат предыдущего ключа (кадр ${before.frame}): с кадра ${before.frame} по ${found.frame} значение не меняется — это пауза`;
     for (const button of popup.querySelectorAll('[data-step]')) button.disabled = !this.stepKey(Number(button.dataset.step));
     // The preview: there is something to see only with a key after this one.
     const preview = curve.querySelector('.kp-preview');
@@ -1447,17 +1480,22 @@ export class Timeline extends EventTarget {
           const x = this.xOf(frame);
           const picked = keys.some((key) => this.selected.has(key.id));
           lanes.globalAlpha = frame > length ? 0.45 : 1;
-          // (a key that repeats the one before it: itself red, and a little larger)
           const repeats = Boolean(row.property) && still.has(frame);
-          diamond(x, y, row.property ?? 'position', repeats ? 1.3 : 1);
+          diamond(x, y, row.property ?? 'position');
           if (row.property) {
-            lanes.fillStyle = repeats ? STILL_COLOR : picked ? colors.text : theme[KEY_COLORS[row.property]]; // (picked: the accent's ring says so)
+            lanes.fillStyle = picked ? colors.text : theme[KEY_COLORS[row.property]]; // (picked: the accent's ring says so)
             lanes.fill();
             if (picked) {
               lanes.strokeStyle = colors.accent;
               lanes.lineWidth = 2;
               lanes.stroke();
               lanes.lineWidth = 1.5;
+            }
+            // (a key that repeats the one before it: a red heart of its own shape)
+            if (repeats) {
+              diamond(x, y, row.property, 0.5);
+              lanes.fillStyle = STILL_COLOR;
+              lanes.fill();
             }
           } else {
             lanes.strokeStyle = picked ? colors.accent : colors.dim;

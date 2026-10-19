@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal } from './frames.js';
+import { poseAt } from './animation.js';
 
 // The scene posed: its entries (objects and groups) put somewhere other
 // than where the model has them, for a while - by the simulation (see
@@ -38,6 +39,29 @@ export function localTransforms(editor) {
     });
   }
   return out;
+}
+
+// The pose of every entry at a frame of a clip (none: the rest pose), with
+// `overrides` (Map id -> { position?, rotation?, scale? }) over it: Map id ->
+// { position, rotation, scale } - the rotation a quaternion for an entry
+// turned by them (see Editor.setRotationMode()), else angles.
+export function clipValues(editor, clip, frame, overrides = new Map()) {
+  const posed = clip ? poseAt(clip, frame) : new Map();
+  const values = new Map();
+  for (const [id, place] of localTransforms(editor)) {
+    const own = { ...posed.get(id), ...overrides.get(id) };
+    const angles = place.rotation ?? [0, 0, 0];
+    const quaternion = editor.mesh.objects.find((object) => object.id === id)?.rotationMode === 'quaternion';
+    const restTurn = quaternion
+      ? new THREE.Quaternion().setFromEuler(new THREE.Euler(...angles.map((angle) => THREE.MathUtils.degToRad(angle)), 'XYZ')).toArray()
+      : angles;
+    values.set(id, {
+      position: own.position ?? place.position,
+      rotation: own.rotation ?? restTurn,
+      scale: own.scale ?? [1, 1, 1],
+    });
+  }
+  return values;
 }
 
 // Every entry's frame in the world, as the model has it: Map id ->

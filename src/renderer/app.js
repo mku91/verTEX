@@ -50,6 +50,7 @@ animationMode.onShow = () => {
 };
 timeline.addEventListener('addkey', (event) => animationMode.writeKeys([event.detail.index], [event.detail.property]));
 timeline.addEventListener('insertkey', () => animationMode.keyPicked()); // (as K)
+timeline.addEventListener('keyall', () => animationMode.keyAll());
 new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
@@ -1201,7 +1202,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode };
+window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode };
 
 // The bottom panel's height, as a share of the workspace (see setViewsSize()).
 const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';

@@ -134,3 +134,12 @@ export function savedTheme() {
 export function axisColor(axis) {
   return theme[`axis${axis.toUpperCase()}`];
 }
+
+// A gizmo (TransformControls) in the theme's colours: its axes as the
+// world's, the one under the pointer as the hovered vertex in focus - and
+// again whenever the theme changes.
+export function themeGizmo(gizmo) {
+  const paint = () => gizmo.setColors(theme.axisX, theme.axisY, theme.axisZ, theme.hoveredFocus);
+  paint();
+  onThemeChange(paint);
+}

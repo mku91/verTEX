@@ -27,16 +27,25 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  // It opens maximized: the views want all the room there is. (Restored
-  // down, it takes the size above.)
-  win.once('ready-to-show', () => {
-    win.maximize();
-    win.show();
-  });
+  // The window starts on the welcome screen (see welcome.js): at the size
+  // above, in the middle of the screen, with no menu bar (its keys work all
+  // the same). The editor gets both - see 'window:editor' below.
+  win.setMenuBarVisibility(false);
+  win.once('ready-to-show', () => win.show());
   guardWindow(win); // unsaved changes are asked about before it closes
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   return win;
 }
+
+// A project opened or made: the editor, maximized - the views want all the
+// room there is - and with the menu bar. Back on the welcome screen, the
+// menu bar goes; the window stays as it is.
+ipcMain.on('window:editor', (event, editing) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  win.setMenuBarVisibility(Boolean(editing));
+  if (editing && !win.isMaximized() && !win.isFullScreen()) win.maximize();
+});
 
 const recent = registerRecent({ ipcMain, file: path.join(app.getPath('userData'), 'recent.json') });
 const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow, recent });
@@ -81,7 +90,7 @@ function buildMenu() {
       label: 'Вид',
       submenu: [
         { label: 'Три вида', accelerator: 'B', registerAccelerator: false, click: send('toggle-views') },
-        { label: 'Показать выделение', accelerator: 'F', registerAccelerator: false, click: send('frame') },
+        { label: 'Показать выделенное', accelerator: 'F', registerAccelerator: false, click: send('frame') },
         { type: 'separator' },
         { label: 'Перезагрузить', role: 'reload' },
         { label: 'Инструменты разработчика', role: 'toggleDevTools' },

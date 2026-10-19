@@ -128,7 +128,7 @@ const hotkeys = new Hotkeys(
     { id: 'axis.y', group: 'Фиксация оси', label: 'Ось Y', keys: 'Shift+Digit3', run: () => editor.setAxisLock('y') },
     { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Shift+Digit4', run: () => editor.setAxisLock('z') },
 
-    { id: 'view.frame', group: 'Вид', label: 'Показать выделение', keys: 'KeyF', run: () => ACTIONS.frame() },
+    { id: 'view.frame', group: 'Вид', label: 'Показать выделенное', keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
     { id: 'view.uv', group: 'Вид', label: 'Редактор UV', keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
     { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
@@ -1012,10 +1012,12 @@ const warnings = new Warnings(editor, {
 
 // The project: its file and its unsaved changes, named in the window's title.
 const project = new Project(editor, window.vertex?.project);
+// On the welcome screen no project is open yet: the program's name alone.
 const showProject = () => {
-  document.title = `${project.dirty ? '● ' : ''}${project.name} — verTEX`;
+  document.title = $('welcome').hidden ? `${project.dirty ? '● ' : ''}${project.name} — verTEX` : 'verTEX';
 };
 project.addEventListener('change', showProject);
+new MutationObserver(showProject).observe($('welcome'), { attributes: true, attributeFilter: ['hidden'] });
 showProject();
 
 project.ask = askNewProject;

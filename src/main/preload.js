@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('vertex', {
   onMenu: (callback) => ipcRenderer.on('menu', (_event, action) => callback(action)),
+  // The window as the editor wants it (maximized, with its menu bar), or as
+  // the welcome screen does (no menu bar).
+  editing: (on) => ipcRenderer.send('window:editor', on),
   // Project files, see project-io.js for what each call takes and gives.
   project: {
     save: (path, files) => ipcRenderer.invoke('project:save', { path, files }),

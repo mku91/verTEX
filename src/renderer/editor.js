@@ -3527,7 +3527,8 @@ export class Editor extends EventTarget {
   // selection, no gizmo. It is a look, and a look only: nothing is edited
   // through the main view while it is on (the camera still turns).
   setPreview(on) {
-    if (on === this.preview || this.busy()) return;
+    // (The simulation is only looked at too: the preview is let in while it runs.)
+    if (on === this.preview || (this.busy() && !this.simulating)) return;
     if (on) this.setOperation(null);
     this.preview = on;
     this.hovered = null;

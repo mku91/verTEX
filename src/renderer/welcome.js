@@ -31,12 +31,14 @@ export class Welcome {
 
   show() {
     this.element.hidden = false;
+    window.vertex?.editing(false); // the window's menu is the editor's
     this.backdrop.start();
     this.refresh();
   }
 
   hide() {
     this.element.hidden = true;
+    window.vertex?.editing(true); // and the whole screen
     this.backdrop.stop();
     this.fill([]);
   }

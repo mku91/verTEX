@@ -115,9 +115,12 @@ export function posedMatrices(editor, pose = new Map(), locals = localTransforms
 // (its own object's pose does not move it, as glTF has it).
 const ONE = new THREE.Vector3(1, 1, 1);
 
+// (`skin`: false - every vertex with its own object, the skin left out: the
+// simulation's, where a body moves as a whole.)
 export class ModelPose {
-  constructor(editor) {
+  constructor(editor, { skin = true } = {}) {
     this.editor = editor;
+    this.skinned = skin;
     this.objects = null; // id -> { vertices, local }, while on
     this.shown = null; // where the vertices are shown
     this.skin = null; // vertex -> { at (at rest, in the world), weights }, while on
@@ -144,7 +147,7 @@ export class ModelPose {
     });
     this.skin = new Map();
     this.rest = new Map();
-    for (const [vertex, weights] of mesh.weights) {
+    for (const [vertex, weights] of this.skinned ? mesh.weights : []) {
       if (vertex >= mesh.vertices.length) continue;
       this.skin.set(vertex, { at: mesh.vertices[vertex].clone(), weights });
       for (const [node] of weights) {

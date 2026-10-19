@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NODE_MARK, nodePlaces } from './node-marks.js';
+import { bones, kite } from './node-bones.js';
 import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
 
@@ -686,6 +687,21 @@ export class OrthoViews {
     context.save();
     context.strokeStyle = NODE_MARK.color;
     const places = nodePlaces(this.editor, this.posing ? this.animation : null);
+    // The bones first, under the squares: kites facing this view.
+    const right = new THREE.Vector3();
+    right[view.right] = view.rightSign;
+    const up = new THREE.Vector3();
+    up[view.up] = view.upSign;
+    const look = right.clone().cross(up).negate(); // (into the view)
+    context.lineWidth = 1;
+    for (const bone of bones(this.editor, places)) {
+      const corners = kite(bone, look).map((point) => this.project(view, point));
+      context.globalAlpha = bone.picked ? 1 : 0.55;
+      context.beginPath();
+      corners.forEach(({ x, y }, k) => (k ? context.lineTo(x, y) : context.moveTo(x, y)));
+      context.closePath();
+      context.stroke();
+    }
     for (const { at, picked, size } of places) {
       const p = this.project(view, at);
       context.globalAlpha = picked ? 1 : NODE_MARK.faint;

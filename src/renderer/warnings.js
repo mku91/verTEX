@@ -72,6 +72,8 @@ export class Warnings {
       for (const signature of set) if (!live.has(signature)) set.delete(signature);
     }
     this.current = found.filter((warning) => !this.kept.has(warning.signature));
+    // Things to know, not to answer (see Editor.notices()).
+    this.notes = editor.notices?.() ?? [];
     // What is wrong rather than doubtful, see Editor.problems().
     this.errors = editor.problems();
     const fresh = this.current.filter((warning) => !this.seen.has(warning.signature));
@@ -132,7 +134,7 @@ export class Warnings {
       button.classList.toggle('active', count > 0);
       button.querySelector('span').textContent = `${count} ${plural(count, forms)}`;
     };
-    set(this.button, this.current.length, ['предупреждение', 'предупреждения', 'предупреждений']);
+    set(this.button, this.current.length + (this.notes?.length ?? 0), ['предупреждение', 'предупреждения', 'предупреждений']);
     set(this.errorButton, this.errors.length, ['ошибка', 'ошибки', 'ошибок']);
     if (!this.list.hidden) this.showList();
   }
@@ -162,13 +164,17 @@ export class Warnings {
           row.append(make('span', error.text));
           return row;
         })
-      : this.current.map((warning) => {
+      : [...this.current.map((warning) => {
           const row = make('div', null, 'warning-row');
           const count = warning.indices.length;
           const text = make('span', `${count} ${plural(count, ['вершина', 'вершины', 'вершин'])} в одной точке ${point(warning.point)} · ${warning.name}`);
           row.append(text, action('Оставить', () => this.answer([warning], false)), action('Соединить', () => this.answer([warning], true)));
           return row;
-        });
+        }), ...(this.notes ?? []).map((note) => {
+          const row = make('div', null, 'warning-row');
+          row.append(make('span', note.text));
+          return row;
+        })];
     if (rows.length === 0) rows.push(make('div', errors ? 'Ошибок нет' : 'Предупреждений нет', 'warning-none'));
     list.replaceChildren(head, ...rows);
   }

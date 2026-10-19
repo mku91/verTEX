@@ -185,7 +185,8 @@ export class CollisionMode {
 
   // --- what is shown --------------------------------------------------------
 
-  // The objects whose shapes can be seen and edited: shown, not nodes.
+  // The entries whose shapes can be seen and edited: shown - objects, and
+  // nodes as bones (a ragdoll's shapes, moving with them).
   objectIndex(id) {
     return this.editor.mesh.objects.findIndex((object) => object.id === id);
   }
@@ -199,7 +200,7 @@ export class CollisionMode {
   // What the panel works on: a picked shape's object - a shape is picked on
   // its own, with its object not selected - or else the objects in hand.
   scope() {
-    return this.pickedShape() ? [this.objectIndex(this.picked.id)] : this.editor.objectsInHand();
+    return this.pickedShape() ? [this.objectIndex(this.picked.id)] : this.editor.bodiesInHand();
   }
 
   // The object a shape is added to: the one the panel works on.
@@ -215,7 +216,7 @@ export class CollisionMode {
     this.panel.hidden = !on;
     this.group.visible = on && !editor.preview && !editor.simulating;
     // A shape is picked instead of objects: picking objects lets it go.
-    const hand = editor.objectsInHand();
+    const hand = editor.bodiesInHand();
     const handKey = hand.join();
     if (handKey !== this.handKey) {
       if (hand.length) this.picked = null;
@@ -235,7 +236,7 @@ export class CollisionMode {
     const object = this.editor.mesh.objects[index];
     if (!object?.colliders?.[k]) return;
     this.picked = { id: object.id, index: k };
-    if (this.editor.objectsInHand().length) this.editor.clearSelection();
+    if (this.editor.bodiesInHand().length) this.editor.clearSelection();
     else this.refresh();
   }
 
@@ -251,7 +252,7 @@ export class CollisionMode {
     const byId = new Map(mesh.objects.map((object) => [object.id, object]));
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
     mesh.objects.forEach((object, index) => {
-      if (object.kind === 'node' || !object.colliders?.length || hidden(object)) return;
+      if (!object.colliders?.length || hidden(object)) return;
       const frame = this.editor.objectFrame(index);
       const world = new THREE.Matrix4().compose(frame.origin, frame.quaternion, new THREE.Vector3(1, 1, 1));
       const color = BODY_COLORS[object.body ?? 'static'];
@@ -507,6 +508,7 @@ export class CollisionMode {
   add(type) {
     const index = this.target();
     if (index === null) return;
+    if (type === 'trimesh' && this.editor.mesh.objects[index].kind === 'node') return; // (a node has no faces of its own)
     const points = this.editor.objectPoints(index);
     const shape = points.length ? FITS[type](points) : null;
     if (!shape) return; // nothing to fit, or a hull of flat points

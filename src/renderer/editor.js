@@ -13,6 +13,7 @@ import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
 import { unwrap as nearAngles } from './animation.js';
 import { latinName } from './names.js';
+import { weightsOf } from './skin.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
 // What the editor works on, see Editor.setWorkspace(); and the tools there.
@@ -156,6 +157,7 @@ export class Editor extends EventTarget {
     this.drag = null;
     this.box = null; // Shift+drag selection box in the main view, in client pixels
     this.shading = 'solid'; // how the object is drawn, see MeshView.setShading()
+    this.posePreview = null; // a pose being tried, while it is (see pose-preview.js)
     this.paintColor = [0, 0, 0, 255]; // the brush's colour, as [r, g, b, a]
     this.stroke = null; // a stroke of the brush, a shape being drawn out, or the pipette's drag, see paintPress()
     this.shapeFilled = false; // the shape tools draw the whole shape, not its outline
@@ -666,7 +668,7 @@ export class Editor extends EventTarget {
     // (A node picked whole that holds nothing has no vertices, but it has a
     // place - its pivot point - and a turn: those are what the gizmo moves.)
     const nothing = this.tool === 'pivot' ? entry === null : this.selection.size === 0 && entry === null;
-    if (!mode || nothing || this.operation || this.preview || this.workspace !== 'model') {
+    if (!mode || nothing || this.operation || this.preview || this.workspace !== 'model' || this.posePreview) {
       this.gizmo.detach();
     } else {
       // What belongs to a turned object is scaled along that object's own
@@ -874,6 +876,43 @@ export class Editor extends EventTarget {
     delete object.pivot;
     this.placeGizmo();
     this.emitChange();
+  }
+
+  // Drops entries (indices in the objects list) straight down onto the floor
+  // - the grid's plane, y = 0 - or lifts them onto it from below: each, with
+  // all it holds, its lowest point on the floor (Blender's "drop to ground").
+  // An entry inside another one dropped goes with that one. One undo step.
+  // Returns whether anything moved.
+  dropToFloor(indices) {
+    if (this.busy()) return false;
+    const { islands } = this.topology;
+    const chosen = new Set(indices);
+    const outermost = indices.filter((index) => {
+      for (let at = islands[index]?.parentIndex; at !== null && at !== undefined; at = islands[at].parentIndex) if (chosen.has(at)) return false;
+      return true;
+    });
+    const before = this.snapshot();
+    let moved = false;
+    for (const index of outermost) {
+      const { vertices } = this.contents([index]);
+      if (vertices.size === 0) continue;
+      let low = Infinity;
+      for (const vertex of vertices) low = Math.min(low, this.mesh.vertices[vertex].y);
+      if (Math.abs(low) < 1e-9) continue;
+      for (const vertex of vertices) this.mesh.vertices[vertex].y -= low;
+      for (const entry of this.entriesUnder(index)) {
+        // (a new array: the undo step's copy of the object shares the old one)
+        const object = this.mesh.objects[entry];
+        if (object.pivot) object.pivot = [object.pivot[0], object.pivot[1] - low, object.pivot[2]];
+      }
+      moved = true;
+    }
+    if (!moved) return false;
+    this.commit(before);
+    this.view.updatePositions();
+    this.placeGizmo();
+    this.emitChange();
+    return true;
   }
 
   // The entries inside a node of the objects list, at any depth, that are not hidden.
@@ -1445,14 +1484,50 @@ export class Editor extends EventTarget {
   }
 
   // An object's vertices in its own frame, as [x, y, z]: what shapes are fitted to.
+  //
+  // A node's are what it moves as a bone does (a shape on it is a ragdoll's,
+  // see collisions.js): the vertices it bends most of all in the skin (see
+  // skin.js), and everything inside it - in its own frame.
   objectPoints(index) {
     const frame = this.objectFrame(index);
-    const { id } = this.mesh.objects[index];
+    const { id, kind } = this.mesh.objects[index];
     const points = [];
+    if (kind === 'node') {
+      const inside = this.contents([index]).vertices;
+      this.mesh.vertices.forEach((vertex, i) => {
+        const weights = weightsOf(this.mesh, i);
+        const most = weights.reduce((best, entry) => (entry[1] > (best?.[1] ?? 0) ? entry : best), null);
+        if (inside.has(i) || (this.mesh.weights.has(i) && most?.[0] === id)) points.push(toLocal(vertex, frame).toArray());
+      });
+      return points;
+    }
     this.mesh.vertices.forEach((vertex, i) => {
       if (this.mesh.vertexObject[i] === id) points.push(toLocal(vertex, frame).toArray());
     });
     return points;
+  }
+
+  // The entries the collision mode works on (see collisions.js): the objects
+  // in hand and - a node picked whole - that node, as a bone to put shapes on.
+  bodiesInHand() {
+    const hand = this.objectsInHand();
+    const entry = this.pivotEntry();
+    if (entry !== null && this.mesh.objects[entry]?.kind === 'node') return [entry];
+    return hand;
+  }
+
+  // Things to know about the model that are not wrong and nothing to merge
+  // (see warnings.js): [{ text, signature }]. An object with collision shapes
+  // of its own that bends in the skin: its shapes do not bend with it.
+  notices() {
+    const { mesh } = this;
+    const bent = new Set([...mesh.weights.keys()].map((vertex) => mesh.vertexObject[vertex]));
+    return mesh.objects
+      .filter((object) => object.kind !== 'node' && object.colliders?.length && bent.has(object.id))
+      .map((object) => ({
+        text: `Коллизии объекта «${object.name}» не гнутся вместе со скином — повесьте формы на узлы-кости`,
+        signature: `skin-colliders:${object.id}`,
+      }));
   }
 
   // An object's collision shapes from now on (an empty list: none). One undo
@@ -1460,7 +1535,7 @@ export class Editor extends EventTarget {
   // commitColliders() makes the drag one undo step.
   setColliders(index, colliders, record = true) {
     const object = this.mesh.objects[index];
-    if (!object || object.kind === 'node' || (record && this.busy())) return;
+    if (!object || (record && this.busy())) return;
     if (record) this.history.push(this.snapshot());
     if (colliders.length) object.colliders = colliders;
     else delete object.colliders;
@@ -1477,7 +1552,7 @@ export class Editor extends EventTarget {
 
   // What these objects are as bodies (see above). One undo step.
   setBody(indices, body) {
-    const objects = indices.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'node');
+    const objects = indices.map((index) => this.mesh.objects[index]).filter(Boolean);
     if (objects.every((object) => (object.body ?? 'static') === body) || this.busy()) return;
     this.history.push(this.snapshot());
     for (const object of objects) {
@@ -1641,6 +1716,8 @@ export class Editor extends EventTarget {
         // A mode over the model: its gizmo, or what it has under the pointer
         // (a collision shape), takes the press; else objects are picked as
         // usual (and nothing is moved, see dragTo()).
+        // A pose being tried (see pose-preview.js): its gizmo takes the press on a handle.
+        if (this.posePreview?.press() === 'gizmo') return;
         if (this.workspace !== 'model') {
           const taken = this.workspacePress[this.workspace]?.(event) ?? false;
           if (taken === 'gizmo') return;
@@ -3271,7 +3348,7 @@ export class Editor extends EventTarget {
 
   dragTo(clientX, clientY) {
     const drag = this.drag;
-    if (this.workspace !== 'model') return; // the model is not edited there: a press is a click
+    if (this.workspace !== 'model' || this.posePreview) return; // the model is not edited there (or while a pose is tried): a press is a click
     if (!drag.start) {
       if (Math.hypot(clientX - drag.x, clientY - drag.y) <= CLICK_TOLERANCE) return;
       this.beginDrag();
@@ -4632,8 +4709,8 @@ export class Editor extends EventTarget {
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
       ...(oneSided ? { oneSided: true } : {}),
       ...(smooth ? { smooth } : {}),
-      ...(kind !== 'node' && colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
-      ...(kind !== 'node' && body && body !== 'static' ? { body } : {}),
+      ...(colliders?.length ? { colliders: colliders.map(cloneCollider) } : {}),
+      ...(body && body !== 'static' ? { body } : {}),
       ...(rotationMode === 'quaternion' ? { rotationMode } : {}),
       ...(locked && kind === 'node' ? { locked: locked === 'nearest' ? 'nearest' : true } : {}),
     }));

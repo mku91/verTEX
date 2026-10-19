@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { shownSkinNodes } from './skin.js';
 
 // What the skin binds to a node, shown (see skin.js): with a node picked,
 // a green dot on every vertex weighted to it - brighter the more it is -
@@ -56,12 +57,7 @@ export class SkinMarks {
   // The nodes shown: in object mode, those picked whole; in vertex mode,
   // the one the skin panel works with, picked by its row (see selectBound()).
   pickedNodes() {
-    const { editor } = this;
-    if (editor.preview || editor.painting || editor.simulating) return new Set();
-    if (editor.mode === 'vertex') return new Set(editor.skinFocus ? [editor.skinFocus.node] : []);
-    if (editor.mode !== 'object') return new Set();
-    const { objects } = editor.mesh;
-    return new Set([...editor.picked].filter((index) => objects[index]?.kind === 'node').map((index) => objects[index].id));
+    return shownSkinNodes(this.editor);
   }
 
   // Drawn every time the view is: the dots where the vertices are shown now.

@@ -49,7 +49,7 @@ export class Simulation {
     this.starting = false;
     this.world = null;
     this.held = null; // what the pointer drags: { body, local, plane, target, kinematic }
-    this.pose = new ModelPose(editor); // the model where the bodies are
+    this.pose = new ModelPose(editor, { skin: false }); // the model where the bodies are - each as a whole, the skin left out
 
     // The dragged body's line to the pointer.
     this.line = new THREE.Line(
@@ -139,7 +139,7 @@ export class Simulation {
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
     this.bodies = [];
     mesh.objects.forEach((object, index) => {
-      if (object.kind === 'node' || !object.colliders?.length || hidden(object)) return;
+      if (!object.colliders?.length || hidden(object)) return;
       const frame = editor.objectFrame(index);
       const kind = object.body ?? 'static';
       const desc = kind === 'dynamic' ? R.RigidBodyDesc.dynamic().setCcdEnabled(true)
@@ -162,7 +162,23 @@ export class Simulation {
         if (kind === 'trigger') collider.setSensor(true);
         this.world.createCollider(collider, body);
       }
-      this.bodies.push({ body, id: object.id });
+      // A node's body carries what it holds (but what has a body of its own):
+      // each where it is from the node, as it was at the start.
+      const carried = [];
+      if (object.kind === 'node') {
+        const start = new THREE.Matrix4().compose(frame.origin, frame.quaternion, new THREE.Vector3(1, 1, 1)).invert();
+        const own = (entry) => Boolean(mesh.objects[entry].colliders?.length);
+        const carry = (entry) => {
+          for (const child of editor.topology.islands[entry].children) {
+            if (own(child)) continue;
+            const f = editor.objectFrame(child);
+            carried.push({ id: mesh.objects[child].id, offset: start.clone().multiply(new THREE.Matrix4().compose(f.origin, f.quaternion, new THREE.Vector3(1, 1, 1))) });
+            carry(child);
+          }
+        };
+        carry(index);
+      }
+      this.bodies.push({ body, id: object.id, carried });
     });
   }
 
@@ -215,10 +231,12 @@ export class Simulation {
   draw() {
     const matrices = new Map();
     const one = new THREE.Vector3(1, 1, 1);
-    for (const { body, id } of this.bodies) {
+    for (const { body, id, carried } of this.bodies) {
       const t = body.translation();
       const r = body.rotation();
-      matrices.set(id, new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y, t.z), new THREE.Quaternion(r.x, r.y, r.z, r.w), one));
+      const matrix = new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y, t.z), new THREE.Quaternion(r.x, r.y, r.z, r.w), one);
+      matrices.set(id, matrix);
+      for (const { id: inside, offset } of carried) matrices.set(inside, matrix.clone().multiply(offset));
     }
     this.pose.apply(matrices);
     if (this.held) {

@@ -26,9 +26,12 @@ import { AnimationMode } from './animate.js';
 import { ViewsWindow } from './views-window.js';
 import { tell, confirmIt, askSave } from './ask-dialog.js';
 import { toast } from './toast.js';
-import { bindToNode, unbind, smoothWeights, skinSummary, setWeight } from './skin.js';
+import { bindToNode, unbind, smoothWeights, skinSummary, setWeight, autoWeights } from './skin.js';
 import { SkinMarks } from './skin-marks.js';
+import { PosePreview } from './pose-preview.js';
+import { SkinHeat } from './skin-heat.js';
 import { NodeMarks } from './node-marks.js';
+import { NodeBones } from './node-bones.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -43,6 +46,7 @@ const animationMode = new AnimationMode(document.getElementById('pose-panel'), v
 // The three views pose too, in the animation mode, and show the pose.
 orthoViews.animation = animationMode;
 new NodeMarks(editor, animationMode); // (every node, a hollow square on its pivot point)
+new NodeBones(editor, animationMode); // (and a bone from it to each node inside it)
 // The views in a window of their own (see views-window.js).
 const viewsWindow = new ViewsWindow(editor, viewport);
 viewsWindow.animation = animationMode;
@@ -59,6 +63,13 @@ timeline.addEventListener('insertkey', () => animationMode.keyPicked()); // (as 
 timeline.addEventListener('keyall', () => animationMode.keyAll());
 new PipetteLoupe(editor);
 new SkinMarks(editor); // (what the skin binds to a node picked: its vertices, in green)
+// A pose to try the skin by, in the model workspace (see pose-preview.js).
+const posePreview = new PosePreview(editor);
+posePreview.addEventListener('change', () => {
+  $('skin-pose').classList.toggle('active', posePreview.on);
+  if (posePreview.on) toast('Пробная поза: модель не меняется', { icon: 'fa-person-walking' });
+});
+new SkinHeat(editor); // (and how much: the surface painted by the weight, in the model workspace)
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
 const outliner = new Outliner(document.getElementById('outliner-section'), editor);
@@ -196,6 +207,7 @@ const FIXED_KEYS = {
   PageDown: () => editor.shiftPolygonPlane(-1),
   Escape: () =>
     (simulation.running ? (simulation.stop(), true) : false) ||
+    (posePreview.on ? (posePreview.toggle(false), true) : false) ||
     editor.cancelFloating() ||
     (editor.marquee ? (editor.setMarquee(null), true) : false) ||
     orthoViews.cancelBox() ||
@@ -299,6 +311,13 @@ scrubbable($('skin-weight-value'), {
   step: 0.05,
 });
 $('skin-weight-set').addEventListener('mousedown', (event) => event.preventDefault());
+$('skin-auto').addEventListener('click', () => {
+  const count = autoWeights(editor);
+  if (count) toast(`Веса по костям: ${vertexCount(count)}`, { icon: 'fa-wand-magic-sparkles' });
+});
+$('skin-auto').addEventListener('mousedown', (event) => event.preventDefault());
+$('skin-pose').addEventListener('click', () => posePreview.toggle());
+$('skin-pose').addEventListener('mousedown', (event) => event.preventDefault());
 $('skin-smooth').addEventListener('click', () => {
   const count = editor.selection.size;
   if (smoothWeights(editor)) toast(`Веса сглажены: ${vertexCount(count)}`, { icon: 'fa-wave-square' });
@@ -1473,7 +1492,7 @@ function setPanelWidth(width) {
 function showSkin() {
   const nodes = editor.mesh.objects.filter((object) => object.kind === 'node');
   const panel = $('skin-panel');
-  panel.hidden = editor.selection.size === 0 || nodes.length === 0;
+  panel.hidden = (editor.selection.size === 0 && !editor.posePreview) || nodes.length === 0;
   if (panel.hidden) return;
   const summary = skinSummary(editor);
   const select = $('skin-node');

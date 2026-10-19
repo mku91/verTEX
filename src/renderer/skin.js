@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 // The skin: vertices that bend with nodes (the nodes being the bones, their
 // pivot points the joints) - linear blend skinning, as glTF and Godot have
 // it. Each vertex in it is weighted to up to four nodes, the weights adding
@@ -63,8 +65,12 @@ export function unbind(editor) {
 // now, those not in the skin with their object's node (see weightsOf()).
 // Every pass works from the weights as the pass before left them.
 export function smoothWeights(editor, passes = SMOOTH_PASSES) {
-  const { mesh } = editor;
-  return change(editor, (vertices) => {
+  return change(editor, (vertices) => smooth(editor.mesh, vertices, passes));
+}
+
+// smoothWeights()'s work, on its own (no undo step of its own).
+function smooth(mesh, vertices, passes) {
+  {
     const neighbours = new Map();
     for (const [a, b] of mesh.edges()) {
       if (!neighbours.has(a)) neighbours.set(a, []);
@@ -87,7 +93,56 @@ export function smoothWeights(editor, passes = SMOOTH_PASSES) {
       }
       for (const [vertex, weights] of next) mesh.setWeights(vertex, weights);
     }
+  }
+}
+
+// Weights by the bones (Blender's "with envelope weights", near enough):
+// a bone runs from every node's pivot point to each node's inside it; a
+// node with none inside, as far on again as the bone that comes to it (a
+// node has no length of its own: its tail is guessed so), or else it is a
+// point; each selected vertex is weighted to the
+// nodes whose bones are nearest it - by 1/d^4, the four nearest, adding up
+// to 1 - and the weights are then smoothed. As the crow flies: a vertex
+// near another part's bone (one leg by the other) may take its weight, to
+// be bound by hand after. Every node of the scene is a bone; none, nothing.
+// Returns how many vertices got weights, or null.
+const AUTO_POWER = 4;
+export function autoWeights(editor) {
+  const { mesh } = editor;
+  const { islands } = editor.topology;
+  const bones = []; // [{ id, from, to }]
+  mesh.objects.forEach((object, index) => {
+    if (object.kind !== 'node') return;
+    const from = editor.pivotPoint(index);
+    const inner = islands[index]?.children.filter((child) => mesh.objects[child]?.kind === 'node') ?? [];
+    if (inner.length === 0) {
+      const outer = islands[index]?.parentIndex;
+      const head = outer !== null && outer !== undefined && mesh.objects[outer]?.kind === 'node' ? editor.pivotPoint(outer) : null;
+      bones.push({ id: object.id, from, to: head ? from.clone().multiplyScalar(2).sub(head) : from });
+    }
+    for (const child of inner) bones.push({ id: object.id, from, to: editor.pivotPoint(child) });
   });
+  if (bones.length === 0) return null;
+  let count = 0;
+  const done = change(editor, (vertices) => {
+    const along = new THREE.Vector3();
+    const near = new THREE.Vector3();
+    for (const vertex of vertices) {
+      const point = mesh.vertices[vertex];
+      const nearest = new Map(); // node id -> the nearest of its bones, how far
+      for (const { id, from, to } of bones) {
+        along.subVectors(to, from);
+        const length = along.lengthSq();
+        const t = length > 1e-12 ? Math.min(1, Math.max(0, near.subVectors(point, from).dot(along) / length)) : 0;
+        const distance = point.distanceTo(near.copy(from).addScaledVector(along, t));
+        if (!nearest.has(id) || distance < nearest.get(id)) nearest.set(id, distance);
+      }
+      mesh.setWeights(vertex, [...nearest].map(([id, distance]) => [id, 1 / Math.max(distance, 1e-4) ** AUTO_POWER]));
+      count++;
+    }
+    smooth(mesh, vertices, 1);
+  });
+  return done ? count : null;
 }
 
 // What the selected vertices bend with: [{ id, name, share }] - each node's
@@ -164,4 +219,16 @@ export function setWeight(editor, id, weight) {
     }
   });
   return done ? { stuck } : null;
+}
+
+// The nodes whose part of the skin is shown now (the green dots, see
+// skin-marks.js, and the heat, skin-heat.js), by id: in object mode, those
+// picked whole; in vertex mode, the one the skin panel works with, picked by
+// its row (see selectBound()).
+export function shownSkinNodes(editor) {
+  if (editor.preview || editor.painting || editor.simulating) return new Set();
+  if (editor.mode === 'vertex') return new Set(editor.skinFocus ? [editor.skinFocus.node] : []);
+  if (editor.mode !== 'object') return new Set();
+  const { objects } = editor.mesh;
+  return new Set([...editor.picked].filter((index) => objects[index]?.kind === 'node').map((index) => objects[index].id));
 }

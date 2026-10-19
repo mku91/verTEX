@@ -4962,3 +4962,18 @@ option::checkmark {
   color: var(--text);
   font: inherit;
 }
+
+/* "Проверить изгиб": the whole width, lit while the pose is tried. */
+#skin-panel .skin-pose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+#skin-panel .skin-pose.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg));
+}

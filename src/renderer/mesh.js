@@ -1699,7 +1699,8 @@ export class MeshView {
   //   'solid'       - the lit surface;
   //   'wireframe'   - edges and vertices only;
   //   'orientation' - the surface with front sides in one colour and back sides in another;
-  //   'textured'    - the surface painted with the atlas (see atlas.js).
+  //   'textured'    - the surface painted with the atlas (see atlas.js);
+  //   'weights'     - as 'solid': the skin's weights are painted over it (see skin-heat.js).
   // The vertex colours are the caller's to refresh, see updateColors().
   setShading(mode) {
     this.shading = mode;

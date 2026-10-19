@@ -133,7 +133,7 @@ export class Outliner {
       else if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
 
       const object = this.editor.mesh.objects[index];
-      const shapes = this.editor.collisions && island.kind !== 'node' ? object.colliders ?? [] : [];
+      const shapes = this.editor.collisions ? object.colliders ?? [] : [];
       const arrow = document.createElement('span');
       arrow.className = 'outliner-arrow';
       const binds = island.kind === 'node' ? bound.get(island.id) ?? [] : [];
@@ -410,6 +410,7 @@ export class Outliner {
       );
       menu.replaceChildren(
         item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
+        item('Опустить на пол', () => editor.dropToFloor(whole), editor.contents(whole).vertices.size > 0),
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
         item('Дублировать', () => editor.duplicateObjects(whole)),

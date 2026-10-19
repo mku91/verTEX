@@ -232,7 +232,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       ...(object.rotation ? { rotation: quaternionOf(object.rotation).toArray() } : {}),
       ...(mesh === null ? {} : { mesh }),
     };
-    const colliders = object.kind === 'node' ? [] : object.colliders ?? [];
+    const colliders = object.colliders ?? []; // (a node's too: a bone's, as a ragdoll's)
     if (colliders.length) {
       // A body: the mesh a child of it, and a child for every shape.
       const trigger = object.body === 'trigger';

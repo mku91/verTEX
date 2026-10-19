@@ -47,6 +47,8 @@ const RULER = 26; // px of the frames' ruler
 const SECONDS = 21; // px of the seconds' ruler, under the lanes (and its border)
 const MIN_FRAME_WIDTH = 2;
 const GLIDE = 60; // ms: how quickly the frames close in on where the wheel sends them (see glideTo())
+const REVEAL_GLIDE = 90; // ms: how quickly the rows close in on an entry picked out of sight (see revealPicked())
+const REVEAL_MARGIN = 8; // px left over the entry's rows, or under them
 const WHEEL_PX = 0.6; // px the frames go by for a pixel of the wheel's travel (a notch: ~60 px)
 const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
@@ -458,7 +460,50 @@ export class Timeline extends EventTarget {
       this.names.replaceChildren(...lines);
       this.rows = rows;
     }
+    // Another entry picked: brought into sight, if it is out of it.
+    const pickedNow = JSON.stringify([...picked, ...hand]);
+    if (pickedNow !== this.pickedShown) {
+      this.pickedShown = pickedNow;
+      if (picked.size || hand.size) this.revealPicked();
+    }
     this.draw();
+  }
+
+  // The rows glide to the entry picked (the topmost, if more) - its name and
+  // its tracks - when it is out of sight, just far enough to have it in at
+  // the nearer edge: rows = lerp(rows, to, t), t = 1 - e^(-dt/REVEAL_GLIDE),
+  // the same on any screen (as glideTo()). The wheel or the scroll bar taken
+  // on the way stops it.
+  revealPicked() {
+    const line = this.names.querySelector('.tl-name.picked');
+    if (!line) return;
+    const scroller = this.scroller;
+    const top = line.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    const index = Number(line.dataset.index);
+    const height = Math.max(1, this.rows.filter((row) => row.index === index).length) * ROW;
+    const view = scroller.clientHeight;
+    let to = scroller.scrollTop;
+    if (top < scroller.scrollTop) to = top - REVEAL_MARGIN;
+    else if (top + height > scroller.scrollTop + view) to = Math.min(top - REVEAL_MARGIN, top + height - view + REVEAL_MARGIN);
+    to = Math.max(0, Math.min(scroller.scrollHeight - view, to));
+    if (Math.abs(to - scroller.scrollTop) < 1) return;
+    cancelAnimationFrame(this.reveal?.request);
+    const reveal = { to, at: scroller.scrollTop, last: performance.now() };
+    this.reveal = reveal;
+    const tick = (time) => {
+      if (this.reveal !== reveal) return;
+      const t = 1 - Math.exp(-(time - reveal.last) / REVEAL_GLIDE);
+      reveal.last = time;
+      reveal.at += (reveal.to - reveal.at) * t;
+      if (Math.abs(reveal.to - reveal.at) < 0.5) {
+        reveal.at = reveal.to;
+        this.reveal = null;
+      } else {
+        reveal.request = requestAnimationFrame(tick);
+      }
+      scroller.scrollTop = reveal.at;
+    };
+    reveal.request = requestAnimationFrame(tick);
   }
 
   // --- the lanes ------------------------------------------------------------------
@@ -569,6 +614,13 @@ export class Timeline extends EventTarget {
       }, { passive: false });
     }
     this.scroller.addEventListener('scroll', () => this.draw());
+    // (the rows taken by hand: no gliding to a picked entry meanwhile)
+    const stopReveal = () => {
+      cancelAnimationFrame(this.reveal?.request);
+      this.reveal = null;
+    };
+    this.scroller.addEventListener('wheel', stopReveal, { passive: true, capture: true });
+    this.scroller.addEventListener('pointerdown', stopReveal, { capture: true });
     // A name: its fold, or the entry picked.
     this.names.addEventListener('mousedown', (event) => event.preventDefault());
     this.names.addEventListener('click', (event) => {

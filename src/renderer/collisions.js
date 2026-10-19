@@ -157,7 +157,7 @@ export class CollisionMode {
     this.gizmo.addEventListener('change', () => viewport.requestRender());
     this.gizmo.addEventListener('dragging-changed', (event) => {
       viewport.orbit.enabled = !event.value;
-      editor.collisionDragging = event.value;
+      editor.modeDragging = event.value;
     });
     this.gizmo.addEventListener('mouseDown', () => {
       this.dragBefore = editor.snapshot();
@@ -173,7 +173,7 @@ export class CollisionMode {
       else this.refresh();
     });
 
-    editor.collisionPress = (event) => this.press(event);
+    editor.workspacePress.collisions = (event) => this.press(event);
     editor.addEventListener('change', () => this.refresh());
     button.addEventListener('click', () => editor.setCollisions(!editor.collisions));
     button.addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus

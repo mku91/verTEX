@@ -178,9 +178,11 @@ export class Editor extends EventTarget {
     this.workspace = 'model';
     // The animations (see animation.js): part of the document, as the model is.
     this.animations = [];
-    // What the collision mode has to say about a press in the main view - see collisionPress below.
-    this.collisionPress = null; // (event) -> 'gizmo' | true (taken) | false (the editor's)
-    this.collisionDragging = false; // a collision shape's gizmo is being dragged
+    // What a mode over the model (collisions.js, animate.js) has to say about
+    // a press in the main view, by the mode: (event) -> 'gizmo' (its gizmo's),
+    // true (taken) or false (the editor's: objects are picked).
+    this.workspacePress = {};
+    this.modeDragging = false; // such a mode's gizmo is being dragged
     this.simulating = false; // the simulation runs (see simulation.js): the model is its, not to be edited
     this.atlas = new Atlas();
     this.atlas.addEventListener('change', () => this.viewport.requestRender());
@@ -1571,10 +1573,11 @@ export class Editor extends EventTarget {
         down = null;
         if (event.button !== 0) return;
         if (this.preview || this.simulating) return; // only looked at: the press is the camera's (or the simulation's)
-        // The collision mode: its gizmo, or a shape under the pointer, takes the
-        // press; else it picks objects as usual (and moves nothing, see dragTo()).
-        if (this.collisions) {
-          const taken = this.collisionPress?.(event) ?? false;
+        // A mode over the model: its gizmo, or what it has under the pointer
+        // (a collision shape), takes the press; else objects are picked as
+        // usual (and nothing is moved, see dragTo()).
+        if (this.workspace !== 'model') {
+          const taken = this.workspacePress[this.workspace]?.(event) ?? false;
           if (taken === 'gizmo') return;
           if (taken) {
             event.stopImmediatePropagation();
@@ -4495,7 +4498,7 @@ export class Editor extends EventTarget {
       Boolean(this.floating) ||
       Boolean(this.pivotDrag?.before) ||
       this.gizmo.dragging ||
-      this.collisionDragging ||
+      this.modeDragging ||
       this.simulating ||
       this.extrude !== null ||
       Boolean(this.polygon?.points.length)

@@ -37,6 +37,10 @@ export const THEMES = {
     snapDot: '#f8f8f2',
     faceFront: '#8be9fd', // face orientation display: the side a face looks to
     faceBack: '#ff5555', // ...and its reverse
+    // An animation's keys, by what they key (see timeline.js).
+    keyPosition: '#ff79c6',
+    keyRotation: '#8be9fd',
+    keyScale: '#f1fa8c',
   },
   graphite: {
     label: 'Графит',
@@ -70,6 +74,10 @@ export const THEMES = {
     snapDot: '#ffffff',
     faceFront: '#5f96dc',
     faceBack: '#e0606a',
+    // (Dracula's, as in that theme)
+    keyPosition: '#ff79c6',
+    keyRotation: '#8be9fd',
+    keyScale: '#f1fa8c',
   },
 };
 
@@ -91,6 +99,9 @@ const CSS_VARIABLES = {
   '--axis-x': 'axisX',
   '--axis-y': 'axisY',
   '--axis-z': 'axisZ',
+  '--key-position': 'keyPosition',
+  '--key-rotation': 'keyRotation',
+  '--key-scale': 'keyScale',
 };
 
 // The current theme's colours. One object for the app's lifetime: setTheme()

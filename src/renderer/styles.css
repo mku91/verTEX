@@ -758,6 +758,86 @@ body {
 /* The animation mode's timeline (see timeline.js): the bar of the clip, then
    the names of the scene's entries left and their lanes of frames right,
    under the ruler of frames; names and lanes scroll up and down together. */
+/* The animation mode's panel of the pose (see animate.js): the entry's
+   position, turn and scale on the frame, each with its key's mark. */
+#pose-panel p {
+  flex: 1;
+  margin: 0;
+}
+
+#pose-panel .pose-group + .pose-group {
+  margin-top: 10px;
+}
+
+#pose-panel .pose-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+/* The key's mark: a diamond, hollow without a key on the frame, filled with
+   one; half-lit when the value is posed by hand and not keyed yet. */
+#pose-panel .key-mark {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1.5px solid var(--text-dim);
+  background: none;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+
+#pose-panel .key-mark:hover {
+  border-color: var(--accent);
+}
+
+#pose-panel .key-mark.keyed {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+#pose-panel .key-mark.posed {
+  border-color: var(--axis-x);
+}
+
+/* The marks take their keys' shapes and colours (see timeline.js). */
+#pose-panel .key-mark[data-key="rotation"] {
+  border-radius: 50%;
+  transform: none;
+}
+
+#pose-panel .key-mark[data-key="scale"] {
+  transform: none;
+}
+
+#pose-panel .key-mark[data-key="position"].keyed { border-color: var(--key-position); background: var(--key-position); }
+#pose-panel .key-mark[data-key="rotation"].keyed { border-color: var(--key-rotation); background: var(--key-rotation); }
+#pose-panel .key-mark[data-key="scale"].keyed { border-color: var(--key-scale); background: var(--key-scale); }
+
+#pose-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#pose-panel input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+#pose-panel input:focus {
+  border-color: var(--accent);
+  outline: 0;
+}
+
 #timeline {
   flex: 0 0 40%;
   display: flex;
@@ -906,7 +986,6 @@ body {
 
 .tl-ruler {
   display: block;
-  cursor: ew-resize;
 }
 
 .tl-scroll {
@@ -983,7 +1062,294 @@ body {
 
 .tl-lanes {
   display: block;
-  cursor: ew-resize;
+}
+
+/* A track's "+": a key of it on the frame, in the colour of its keys. */
+.tl-add {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.tl-add:hover {
+  background: var(--hover);
+}
+
+.tl-add.position { color: var(--key-position); }
+.tl-add.rotation { color: var(--key-rotation); }
+.tl-add.scale { color: var(--key-scale); }
+
+/* A key's own settings, opened by a double click on it, beside it. */
+.key-popup {
+  position: fixed;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 250px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--border) 80%, transparent);
+  font-size: 14px;
+}
+
+.key-popup[hidden] {
+  display: none;
+}
+
+.key-popup .kp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.key-popup .kp-head span:nth-child(2) {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The grip the popup is dragged by: nine dots, three by three, in the colour
+   of the key's track. */
+.key-popup .kp-grip {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 -2px 0 -3px;
+  background-image: radial-gradient(circle, currentColor 1.3px, transparent 1.7px);
+  background-position: 0 0;
+  background-size: 4.67px 4.67px;
+  cursor: grab;
+}
+
+.key-popup.dragged .kp-grip {
+  cursor: grabbing;
+}
+
+.key-popup .kp-close,
+.key-popup .kp-step {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.key-popup .kp-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.key-popup .kp-step i {
+  font-size: 11px;
+}
+
+.key-popup .kp-close:hover,
+.key-popup .kp-step:hover:enabled {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.key-popup label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-popup label > span:first-child {
+  flex: 0 0 52px;
+  color: var(--text-dim);
+}
+
+.key-popup label .axis {
+  flex: 0 0 14px;
+}
+
+.key-popup input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.key-popup input:focus {
+  border-color: var(--accent);
+  outline: 0;
+}
+
+.key-popup .kp-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.key-popup .kp-kinds button,
+.key-popup .kp-delete {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.key-popup .kp-kinds button:hover,
+.key-popup .kp-delete:hover {
+  background: var(--hover);
+}
+
+/* A smooth key's curve: a popup of its own beside the key's, sliding in
+   from its side while the key is smooth (see timeline.js). */
+.curve-popup {
+  width: 270px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-12px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.curve-popup.from-left {
+  transform: translateX(12px);
+}
+
+.curve-popup.shown {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.key-popup .kp-head span:only-child {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.key-popup .kp-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 30px;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.key-popup .kp-preview:hover:enabled {
+  background: var(--hover);
+}
+
+.key-popup .kp-preview:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.key-popup .kp-preview i {
+  font-size: 11px;
+}
+
+.key-popup .kp-preview.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.key-popup .kp-graph {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+.key-popup .kp-families {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+
+.key-popup .kp-dirs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+}
+
+.key-popup .kp-families button,
+.key-popup .kp-dirs button {
+  height: 24px;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.key-popup .kp-families button:hover:enabled,
+.key-popup .kp-dirs button:hover:enabled {
+  background: var(--hover);
+}
+
+.key-popup .kp-families button:disabled,
+.key-popup .kp-dirs button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.key-popup .kp-families button.active,
+.key-popup .kp-dirs button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 25%, var(--bg));
+  color: var(--text);
+}
+
+/* Why a key is ringed in red: the next one does not move on from it. */
+.key-popup .kp-still {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #ff5555;
+  border-radius: 4px;
+  background: color-mix(in srgb, #ff5555 12%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.key-popup .kp-still[hidden] {
+  display: none;
+}
+
+.key-popup .kp-kinds button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 25%, var(--bg));
 }
 
 #uv-editor {

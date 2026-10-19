@@ -22,6 +22,7 @@ import { ModeIndicator } from './mode-indicator.js';
 import { CollisionMode } from './collisions.js';
 import { Simulation } from './simulation.js';
 import { Timeline } from './timeline.js';
+import { AnimationMode } from './animate.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -32,6 +33,8 @@ new ModeIndicator(document.getElementById('mode-indicator'), viewport, editor);
 const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor);
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 const timeline = new Timeline(document.getElementById('timeline'), editor);
+const animationMode = new AnimationMode(document.getElementById('pose-panel'), viewport, editor, timeline);
+timeline.addEventListener('addkey', (event) => animationMode.writeKeys([event.detail.index], [event.detail.property]));
 new PipetteLoupe(editor);
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
 new PolygonPopup(document.getElementById('polygon-popup'), viewport, editor);
@@ -110,15 +113,17 @@ const hotkeys = new Hotkeys(
     { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
     { id: 'op.collisions', group: 'Режимы', label: 'Коллизии', keys: '', run: () => ACTIONS['toggle-collisions']() },
     { id: 'op.animation', group: 'Режимы', label: 'Анимация', keys: '', run: () => ACTIONS['toggle-animation']() },
+    { id: 'anim.key', group: 'Анимация', label: 'Поставить ключ', keys: 'KeyK', run: () => animationMode.keyPicked() },
 
     { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
     { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
     { id: 'edit.flip-faces', group: 'Правка', label: 'Инвертировать грань', keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
     { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : deleteSelection() },
     // Copying and pasting leave the keys to the system where they have nothing to do.
-    { id: 'edit.copy', group: 'Правка', label: 'Копировать', keys: 'Ctrl+KeyC', run: () => pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
+    // (In the animation mode copying and pasting are the timeline's keys'.)
+    { id: 'edit.copy', group: 'Правка', label: 'Копировать', keys: 'Ctrl+KeyC', run: () => editor.workspace === 'animation' ? timeline.copyKeys() : pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
     { id: 'edit.cut', group: 'Правка', label: 'Вырезать пиксели', keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
-    { id: 'edit.paste', group: 'Правка', label: 'Вставить', keys: 'Ctrl+KeyV', run: () => pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
+    { id: 'edit.paste', group: 'Правка', label: 'Вставить', keys: 'Ctrl+KeyV', run: () => editor.workspace === 'animation' ? timeline.pasteKeys() : pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
     { id: 'edit.undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+KeyZ', run: () => editor.undo() },
     { id: 'edit.redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+KeyY', run: () => editor.redo() },
 
@@ -152,7 +157,8 @@ const hotkeys = new Hotkeys(
 // paste are the atlas' pixels', not the model's.
 const pixelsInHand = () => editor.tool === 'marquee';
 // In the collision mode Delete takes the picked shape away; the model is not changed there.
-const deleteSelection = () => (editor.collisions ? collisionMode.deleteKey() : editor.deleteSelection());
+// In the animation mode it takes the picked keys away.
+const deleteSelection = () => (editor.collisions ? collisionMode.deleteKey() : editor.workspace === 'animation' ? timeline.deleteKeys() : editor.deleteSelection());
 
 const FIXED_KEYS = {
   // The polygon tool's own keys; they do nothing outside it. (And the
@@ -1178,7 +1184,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline };
+window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode };
 
 // The three-view panel; whether it is open is remembered between launches.
 // The bottom of the workspace holds one panel at a time: the three views

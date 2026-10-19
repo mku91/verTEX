@@ -427,6 +427,30 @@
           </div>
         </div>
       </div>
+      <div id="pose-panel" hidden>
+        <div class="properties-header">
+          <p>Поза</p>
+          <button class="pose-key" title="Ключ того, что изменено вручную, на этом кадре (K)"><i class="fa-solid fa-key"></i></button>
+        </div>
+        <div class="pose-group">
+          <div class="pose-title"><button class="key-mark" data-key="position"></button><span>Позиция</span></div>
+          <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.0"></label>
+          <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.1"></label>
+          <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.2"></label>
+        </div>
+        <div class="pose-group">
+          <div class="pose-title"><button class="key-mark" data-key="rotation"></button><span>Поворот</span></div>
+          <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.0" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
+          <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.1" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
+          <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.2" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
+        </div>
+        <div class="pose-group">
+          <div class="pose-title"><button class="key-mark" data-key="scale"></button><span>Масштаб</span></div>
+          <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.0"></label>
+          <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.1"></label>
+          <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.2"></label>
+        </div>
+      </div>
       <div id="object-props" hidden>
         <div class="properties-header">
           <p>Свойства</p>

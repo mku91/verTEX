@@ -29,7 +29,7 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
     if (!target) {
       const result = await dialog.showSaveDialog(windowOf(event), {
         title: 'Сохранить проект',
-        defaultPath: `Без названия.${EXTENSION}`,
+        defaultPath: `Unnamed.${EXTENSION}`,
         filters: FILTERS,
       });
       if (result.canceled || !result.filePath) return null;

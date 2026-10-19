@@ -113,6 +113,7 @@ const ACTIONS = {
   'project-save': () => project.save(),
   'project-save-as': () => project.saveAs(),
   'project-close': () => project.close(), // the window wants to close
+  'project-close-file': () => project.closeProject(), // back to the welcome screen
   'export-gltf': () => exportModel('gltf'),
   'render-sprites': () => renderMode.show(),
   new: () => project.newProject(), // the menu of a program not yet restarted
@@ -129,6 +130,7 @@ const hotkeys = new Hotkeys(
     { id: 'file.open', group: 'Файл', label: 'Открыть…', keys: 'Ctrl+KeyO', run: () => ACTIONS['project-open']() },
     { id: 'file.save', group: 'Файл', label: 'Сохранить', keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
     { id: 'file.save-as', group: 'Файл', label: 'Сохранить как…', keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
+    { id: 'file.close', group: 'Файл', label: 'Закрыть проект', keys: 'Ctrl+Shift+KeyQ', run: () => ACTIONS['project-close-file']() },
 
     { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyQ', run: () => editor.setTool('select') },
     { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
@@ -1249,6 +1251,9 @@ async function exportModel(format) {
 const WELCOME_ACTIONS = ['project-new', 'project-open', 'project-close', 'new', 'settings'];
 const WELCOME_HOTKEYS = ['file.new', 'file.open', 'view.settings'];
 const welcome = new Welcome($('welcome'), project, window.vertex?.recent);
+project.addEventListener('closed', () => {
+  if (renderMode.open) renderMode.close();
+});
 
 // The sprite render: the model into a PNG sprite sheet (see render-mode.js),
 // written where the user says, as an export is.

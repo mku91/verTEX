@@ -22,6 +22,7 @@ export class Welcome {
     element.querySelector('[data-welcome="new"]').addEventListener('click', () => project.newProject());
     element.querySelector('[data-welcome="open"]').addEventListener('click', () => project.open());
     project.addEventListener('open', () => this.hide());
+    project.addEventListener('closed', () => this.show());
     this.show();
   }
 

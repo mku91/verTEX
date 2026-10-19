@@ -82,6 +82,7 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
         { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
+        { label: 'Закрыть проект', accelerator: 'CmdOrCtrl+Shift+Q', registerAccelerator: false, click: send('project-close-file') },
         { type: 'separator' },
         { label: 'Экспорт в glTF…', click: send('export-gltf') },
         { label: 'Рендер спрайтов…', click: send('render-sprites') },

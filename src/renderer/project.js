@@ -54,7 +54,7 @@ export function upgradeModel(model, version) {
   for (let at = Math.max(1, version); at < VERSION; at++) if (MIGRATIONS[at] && out) out = MIGRATIONS[at](out);
   return out;
 }
-const UNTITLED = 'Без названия';
+const UNTITLED = 'Unnamed';
 
 const round = (value) => +value.toFixed(6);
 
@@ -478,6 +478,20 @@ export class Project extends EventTarget {
 
   saveAs() {
     return this.run(() => this.write(true));
+  }
+
+  // Back to the welcome screen (see welcome.js): the project closed - its
+  // unsaved changes asked about first, as before opening another - and a
+  // new scene put in its place behind the screen, with nothing to undo.
+  closeProject() {
+    return this.run(async () => {
+      if (!(await this.mayDiscard())) return;
+      if (!this.editor.newProject()) return;
+      this.path = null;
+      this.savedState = this.editor.history.id;
+      this.report();
+      this.dispatchEvent(new Event('closed'));
+    });
   }
 
   // The window is being closed with unsaved changes.

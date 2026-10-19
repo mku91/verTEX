@@ -268,7 +268,11 @@ export class SpriteRenderer {
   // Points of the model at rest, in the frames of their objects: for
   // `vertices` (indices) { objects (ids), places (x, y, z each) } - and, with
   // `geometry` (the surface, a corner a vertex of `vertices`), the corners'
-  // normals too, for posing it (see posed()).
+  // normals too, for posing it (see posed()). A point in the skin (see
+  // skin.js) is bent by its nodes, not moved by its object: its place and
+  // normal are in the world, and `weights[i]` its weights ([[node id,
+  // weight]]; null for the others), `rests` every such node's frame at rest,
+  // undone (Bᵢ⁻¹, see ModelPose).
   restPoints(vertices, geometry = null) {
     const { mesh } = this.editor;
     const frames = worldFrames(this.editor);
@@ -277,28 +281,62 @@ export class SpriteRenderer {
     const places = new Float32Array(vertices.length * 3);
     const normals = geometry ? new Float32Array(vertices.length * 3) : null;
     const normal = geometry?.getAttribute('normal');
+    const weights = mesh.weights.size ? new Array(vertices.length).fill(null) : null;
+    const rests = new Map();
     const point = new THREE.Vector3();
     vertices.forEach((vertex, i) => {
       const id = mesh.vertexObject[vertex];
       const frame = frames.get(id);
-      if (!back.has(id)) back.set(id, frame.quaternion.clone().invert());
+      const skin = weights ? mesh.weights.get(vertex) : null;
       objects[i] = id;
+      if (skin) {
+        weights[i] = skin;
+        for (const [node] of skin) {
+          const at = frames.get(node);
+          if (at && !rests.has(node)) rests.set(node, new THREE.Matrix4().compose(at.origin, at.quaternion, new THREE.Vector3(1, 1, 1)).invert());
+        }
+        point.copy(mesh.vertices[vertex]).toArray(places, i * 3);
+        if (normals) point.fromBufferAttribute(normal, i).toArray(normals, i * 3);
+        return;
+      }
+      if (!back.has(id)) back.set(id, frame.quaternion.clone().invert());
       point.copy(mesh.vertices[vertex]).sub(frame.origin).applyQuaternion(back.get(id)).toArray(places, i * 3);
       if (normals) point.fromBufferAttribute(normal, i).applyQuaternion(back.get(id)).toArray(normals, i * 3);
     });
-    return { objects, places, normals };
+    return { objects, places, normals, weights, rests };
   }
 
   // Every point of `points` (see restPoints()) where the pose `matrices`
-  // (Map id -> Matrix4, see posedMatrices()) puts it: `visit(x, y, z)`.
+  // (Map id -> Matrix4, see posedMatrices()) puts it: `visit(x, y, z, i, e)`
+  // - `e` the elements of the matrix that put it there: its object's, or for
+  // a point in the skin its nodes' bends mixed by its weights (Σ wᵢ·Mᵢ·Bᵢ⁻¹;
+  // a node not posed bends nothing).
   eachPosed(points, matrices, visit) {
-    const { objects, places } = points;
+    const { objects, places, weights, rests } = points;
+    const bends = new Map(); // node id -> the elements of Mᵢ·Bᵢ⁻¹
+    for (const [node, back] of rests ?? []) {
+      const matrix = matrices.get(node);
+      if (matrix) bends.set(node, matrix.clone().multiply(back).elements);
+    }
+    const mixed = new Float32Array(16);
     for (let i = 0; i < objects.length; i++) {
-      const e = matrices.get(objects[i])?.elements;
+      let e;
+      const skin = weights?.[i];
+      if (skin) {
+        mixed.fill(0);
+        for (const [node, weight] of skin) {
+          const bend = bends.get(node);
+          if (bend) for (let k = 0; k < 16; k++) mixed[k] += bend[k] * weight;
+          else for (let k = 0; k < 16; k += 5) mixed[k] += weight;
+        }
+        e = mixed;
+      } else {
+        e = matrices.get(objects[i])?.elements;
+      }
       const x = places[i * 3];
       const y = places[i * 3 + 1];
       const z = places[i * 3 + 2];
-      if (e) visit(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]);
+      if (e) visit(e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14], i, e);
     }
   }
 
@@ -309,21 +347,25 @@ export class SpriteRenderer {
     const normal = geometry.getAttribute('normal');
     const p = position.array;
     const n = normal.array;
-    const { objects, places, normals } = corners;
+    const { objects, normals, weights } = corners;
     const turns = new Map(); // id -> its normal matrix's elements
-    let at = 0;
-    this.eachPosed(corners, matrices, (x, y, z) => {
-      // (eachPosed() leaves out no corner: every object is in a pose)
-      while (!matrices.has(objects[at])) at++;
+    const bent = new THREE.Matrix3();
+    const whole = new THREE.Matrix4();
+    this.eachPosed(corners, matrices, (x, y, z, at, e) => {
       const i = at * 3;
       p[i] = x;
       p[i + 1] = y;
       p[i + 2] = z;
       const id = objects[at];
-      let m = turns.get(id);
-      if (!m) {
-        m = new THREE.Matrix3().getNormalMatrix(matrices.get(id)).elements;
-        turns.set(id, m);
+      let m;
+      if (weights?.[at]) {
+        m = bent.getNormalMatrix(whole.fromArray(e)).elements;
+      } else {
+        m = turns.get(id);
+        if (!m) {
+          m = new THREE.Matrix3().getNormalMatrix(matrices.get(id)).elements;
+          turns.set(id, m);
+        }
       }
       const a = normals[i];
       const b = normals[i + 1];
@@ -335,7 +377,6 @@ export class SpriteRenderer {
       n[i] = nx / length;
       n[i + 1] = ny / length;
       n[i + 2] = nz / length;
-      at++;
     });
     position.needsUpdate = true;
     normal.needsUpdate = true;

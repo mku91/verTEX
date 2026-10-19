@@ -15,6 +15,11 @@ import * as THREE from 'three';
 //             the edges), so that a joint bends smoothly, not at one edge.
 // The nodes weighted to have their pivot points fixed (see Editor.pinPivots()):
 // what a vertex bends about must not wander as the model is edited.
+//
+// With the mirror on (see mirror.js) every such change is made on the other
+// side too, as Blender's X-mirror does it: a vertex's twin - the vertex at
+// its mirrored place - takes its weights, each to the node mirrored (see
+// mirroredNode()). A twin selected as well is left as the change made it.
 
 const SMOOTH_PASSES = 2; // a press of "Сгладить"
 const SMOOTH_SHARE = 0.5; // how much of a vertex's weights its neighbours' take, a pass
@@ -38,6 +43,7 @@ function change(editor, work) {
   if (vertices.length === 0 || editor.busy()) return false;
   const before = editor.snapshot();
   work(vertices);
+  mirrorSkin(editor, vertices);
   // (the nodes bent with: their pivot points fixed)
   const nodes = new Set([...editor.mesh.weights.values()].flatMap((weights) => weights.map(([node]) => node)));
   editor.pinPivots(editor.mesh.objects.flatMap((object, index) => (nodes.has(object.id) ? [index] : [])));
@@ -231,4 +237,81 @@ export function shownSkinNodes(editor) {
   if (editor.mode !== 'object') return new Set();
   const { objects } = editor.mesh;
   return new Set([...editor.picked].filter((index) => objects[index]?.kind === 'node').map((index) => objects[index].id));
+}
+
+// --- the mirror ---------------------------------------------------------------------
+
+const MIRROR_EPS = 1e-4;
+const placeKey = (p) => `${Math.round(p.x / MIRROR_EPS)}|${Math.round(p.y / MIRROR_EPS)}|${Math.round(p.z / MIRROR_EPS)}`;
+const mirrored = (point, planes) => {
+  const q = point.clone();
+  for (const { axis, value } of planes) q[axis] = 2 * value - q[axis];
+  return q;
+};
+// A name with its side turned over: Left <-> Right, L <-> R (a word of its own).
+const SIDES = { l: 'r', r: 'l', left: 'right', right: 'left' };
+const otherSide = (name) => name.replace(/left|right|(?<![a-z])[lr](?![a-z])/gi, (word) => {
+  const other = SIDES[word.toLowerCase()];
+  if (word === word.toUpperCase()) return other.toUpperCase();
+  return word[0] === word[0].toUpperCase() ? other[0].toUpperCase() + other.slice(1) : other;
+});
+
+// The node that is the mirror image of node `id` across `planes` ([{ axis,
+// value }], see Mirror.planesFor()): the one whose pivot point stands where
+// its own is mirrored to - of several there, the one named as its other
+// side (Arm_L, Arm_R), else the first. A node on the planes, or with none
+// there, is its own image. (Blender goes by the names alone: here the
+// places come first, as the mirror goes by them.)
+export function mirroredNode(editor, id, planes) {
+  const { objects } = editor.mesh;
+  const index = objects.findIndex((object) => object.id === id);
+  if (index < 0) return id;
+  const pivot = editor.pivotPoint(index);
+  const target = mirrored(pivot, planes);
+  if (target.distanceTo(pivot) < MIRROR_EPS) return id;
+  const there = objects.filter((object, i) => object.kind === 'node' && i !== index && editor.pivotPoint(i).distanceTo(target) < MIRROR_EPS);
+  if (there.length === 0) return id;
+  const name = otherSide(objects[index].name);
+  return (there.find((object) => object.name === name) ?? there[0]).id;
+}
+
+// Weights ([[node id, weight]]) mirrored across `planes`: each to the node mirrored.
+export function mirroredWeights(editor, weights, planes) {
+  const sum = new Map();
+  for (const [node, weight] of weights) {
+    const other = mirroredNode(editor, node, planes);
+    sum.set(other, (sum.get(other) ?? 0) + weight);
+  }
+  return [...sum];
+}
+
+// The change made to `vertices`' weights made on their twins as well (see the top).
+function mirrorSkin(editor, vertices) {
+  const { mesh, mirror } = editor;
+  if (!mirror.active()) return;
+  const chosen = new Set(vertices);
+  const at = new Map(); // place -> the vertices there
+  mesh.vertices.forEach((p, i) => {
+    const key = placeKey(p);
+    if (!at.has(key)) at.set(key, []);
+    at.get(key).push(i);
+  });
+  const planesOf = new Map(); // object id -> its planes
+  for (const vertex of vertices) {
+    const id = mesh.vertexObject[vertex];
+    if (!planesOf.has(id)) planesOf.set(id, mirror.planesFor(mesh.objects.findIndex((object) => object.id === id)));
+    const planes = planesOf.get(id);
+    const local = planes.some((plane) => plane.local);
+    for (let mask = 1; mask < 1 << planes.length; mask++) {
+      const some = planes.filter((_, k) => mask & (1 << k));
+      const key = placeKey(mirrored(mesh.vertices[vertex], some));
+      if (key === placeKey(mesh.vertices[vertex])) continue;
+      for (const twin of at.get(key) ?? []) {
+        if (chosen.has(twin) || (local && mesh.vertexObject[twin] !== id)) continue;
+        const own = mesh.weights.get(vertex);
+        if (own) mesh.setWeights(twin, mirroredWeights(editor, own, some));
+        else mesh.weights.delete(twin);
+      }
+    }
+  }
 }

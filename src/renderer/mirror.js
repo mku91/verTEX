@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mirrorRotation, setRotation } from './frames.js';
 import { inheritUV } from './mesh.js';
+import { mirroredWeights } from './skin.js';
 
 // Mirror modeling: every edit is repeated on the other side of a plane (or of
 // several), as if the pointer had a twin there.
@@ -460,6 +461,9 @@ export class Mirror {
           w = findAt(target, owner);
           if (w === undefined) {
             w = mesh.addVertex(target.x, target.y, target.z, owner ?? id);
+            // (in the skin as its source is, bent by the nodes mirrored)
+            const weights = mesh.weights.get(v);
+            if (weights) mesh.setWeights(w, mirroredWeights(this.editor, weights, some));
             const key = keyOf(target);
             if (!positions.has(key)) positions.set(key, []);
             positions.get(key).push(w);

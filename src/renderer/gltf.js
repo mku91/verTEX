@@ -37,6 +37,14 @@
 //     mesh lost); and every shape is a child node, where the shape is in the
 //     object's frame. A convex shape is a mesh of its hull, which no node
 //     shows; a trimesh one is the object's own mesh.
+//   - The skin (see skin.js) is a glTF skin, one an object: an object with
+//     vertices in it has its mesh bent by the nodes they are weighted to -
+//     its joints - with the four weights and joints of every corner
+//     (WEIGHTS_0, JOINTS_0); a joint's inverse bind matrix takes the
+//     object's frame at rest into the joint's, at rest. Its vertices not in
+//     the skin go with the object, as here: they are weighted to the
+//     object's own node, wholly, which is a joint too. (A skinned mesh's
+//     node moves nothing of it, glTF has it: only the joints do.)
 
 import * as THREE from 'three';
 import { quaternionOf } from './frames.js';
@@ -55,6 +63,7 @@ function modelNormals(model) {
 
 // The numbers glTF has for these (they are WebGL's).
 const FLOAT = 5126;
+const UNSIGNED_BYTE = 5121;
 const UNSIGNED_SHORT = 5123;
 const UNSIGNED_INT = 5125;
 const ARRAY_BUFFER = 34962;
@@ -123,7 +132,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
   const accessor = (piece, type, count, more = {}) =>
     gltf.accessors.push({
       bufferView: view(piece, type === 'SCALAR' ? ELEMENT_ARRAY_BUFFER : ARRAY_BUFFER),
-      componentType: piece instanceof Float32Array ? FLOAT : piece instanceof Uint16Array ? UNSIGNED_SHORT : UNSIGNED_INT,
+      componentType: piece instanceof Float32Array ? FLOAT : piece instanceof Uint8Array ? UNSIGNED_BYTE : piece instanceof Uint16Array ? UNSIGNED_SHORT : UNSIGNED_INT,
       count,
       type,
       ...more,
@@ -151,9 +160,50 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     return materials.get(key);
   };
 
+  // What is hidden, itself or by a node above it, is left out.
+  const byId = new Map(model.objects.map((object) => [object.id, object]));
+  const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
+  const shown = model.objects.filter((object) => !hidden(object));
+  const numbers = new Map(shown.map((object, i) => [object.id, i]));
+
+  // The skins: an object's joints (ids) and, for every vertex of it, its
+  // weights to them as [joint number, weight] - or none, for an object with
+  // no vertex in the skin. A weight to a node left out goes to the object.
+  const skinWeights = new Map(model.weights ?? []);
+  const skins = new Map(); // object id -> { joints, weights: Map vertex -> [[joint, weight]] }
+  for (const object of shown) {
+    if (object.kind === 'node') continue;
+    const vertices = model.vertexObject.flatMap((id, vertex) => (id === object.id ? [vertex] : []));
+    if (!vertices.some((vertex) => skinWeights.has(vertex))) continue;
+    const joints = [];
+    const joint = (id) => (joints.includes(id) ? joints.indexOf(id) : joints.push(id) - 1);
+    const weights = new Map();
+    for (const vertex of vertices) {
+      const own = (skinWeights.get(vertex) ?? []).filter(([node, weight]) => numbers.has(node) && weight > 0);
+      const sum = own.reduce((total, [, weight]) => total + weight, 0);
+      const entries = own.map(([node, weight]) => [joint(node), weight]);
+      if (sum < 1 - 1e-6) entries.push([joint(object.id), 1 - sum]);
+      weights.set(vertex, entries);
+    }
+    skins.set(object.id, { joints, weights });
+  }
+  // An entry's frame in the world, at rest (as its node has it, in its parents').
+  const restFrames = new Map();
+  const restOf = (id) => {
+    if (!restFrames.has(id)) {
+      const object = byId.get(id);
+      const local = new THREE.Matrix4().compose(new THREE.Vector3(...object.position), quaternionOf(object.rotation ?? null), new THREE.Vector3(1, 1, 1));
+      restFrames.set(id, numbers.has(object.parent) ? restOf(object.parent).clone().multiply(local) : local);
+    }
+    return restFrames.get(id);
+  };
+
   // An object's mesh: every corner of every face of it a vertex, the faces in triangles.
   const cornerNormal = modelNormals(model);
   const meshOf = (object) => {
+    const skin = skins.get(object.id);
+    const joints = [];
+    const weights = [];
     const textured = Boolean(object.atlas) && Boolean(picture);
     const positions = [];
     const normals = [];
@@ -168,6 +218,15 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
         normals.push(normal.x, normal.y, normal.z);
         const place = model.uvs?.[i]?.[corner];
         places.push(place ? place[0] / model.atlas.width : 0, place ? place[1] / model.atlas.height : 0);
+        if (skin) {
+          // (the four greatest; four at most there are, see EditableMesh.setWeights())
+          const entries = [...skin.weights.get(vertex)].sort((a, b) => b[1] - a[1]).slice(0, 4);
+          const sum = entries.reduce((total, [, weight]) => total + weight, 0);
+          for (let k = 0; k < 4; k++) {
+            joints.push(entries[k]?.[0] ?? 0);
+            weights.push(entries[k] ? entries[k][1] / sum : 0);
+          }
+        }
       });
       for (const triangle of triangles(i)) indices.push(...triangle.map((vertex) => first + face.indexOf(vertex)));
     });
@@ -181,6 +240,10 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
           POSITION: accessor(new Float32Array(positions), 'VEC3', count, { min: box.min.toArray(), max: box.max.toArray() }),
           NORMAL: accessor(new Float32Array(normals), 'VEC3', count),
           ...(textured ? { TEXCOORD_0: accessor(new Float32Array(places), 'VEC2', count) } : {}),
+          ...(skin ? {
+            JOINTS_0: accessor(skin.joints.length > 255 ? new Uint16Array(joints) : new Uint8Array(joints), 'VEC4', count),
+            WEIGHTS_0: accessor(new Float32Array(weights), 'VEC4', count),
+          } : {}),
         },
         indices: accessor(count > 65535 ? new Uint32Array(indices) : new Uint16Array(indices), 'SCALAR', indices.length),
         material: materialFor(textured, !object.oneSided),
@@ -214,11 +277,6 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
   };
   const BODY_MOTION = { static: 'static', kinematic: 'kinematic', dynamic: 'dynamic' };
 
-  // What is hidden, itself or by a node above it, is left out.
-  const byId = new Map(model.objects.map((object) => [object.id, object]));
-  const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
-  const shown = model.objects.filter((object) => !hidden(object));
-  const numbers = new Map(shown.map((object, i) => [object.id, i]));
   // The nodes a body has besides its objects' - its mesh's, its shapes' -
   // go after all the objects', so as not to move their numbers.
   const extra = [];
@@ -232,6 +290,20 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       ...(object.rotation ? { rotation: quaternionOf(object.rotation).toArray() } : {}),
       ...(mesh === null ? {} : { mesh }),
     };
+    // Its skin: the joints, and the matrices taking its frame at rest into theirs.
+    const skin = mesh === null ? null : skins.get(object.id);
+    let skinNumber = null;
+    if (skin) {
+      const matrices = new Float32Array(skin.joints.length * 16);
+      skin.joints.forEach((id, k) => restOf(id).clone().invert().multiply(restOf(object.id)).toArray(matrices, k * 16));
+      gltf.skins ??= [];
+      skinNumber = gltf.skins.push({
+        name: object.name,
+        joints: skin.joints.map((id) => numbers.get(id)),
+        inverseBindMatrices: gltf.accessors.push({ bufferView: view(matrices), componentType: FLOAT, count: skin.joints.length, type: 'MAT4' }) - 1,
+      }) - 1;
+      node.skin = skinNumber;
+    }
     const colliders = object.colliders ?? []; // (a node's too: a bone's, as a ragdoll's)
     if (colliders.length) {
       // A body: the mesh a child of it, and a child for every shape.
@@ -239,7 +311,8 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       const own = [];
       if (mesh !== null) {
         delete node.mesh;
-        children.push(extraNode({ name: `${object.name}-mesh`, mesh }));
+        delete node.skin;
+        children.push(extraNode({ name: `${object.name}-mesh`, mesh, ...(skinNumber === null ? {} : { skin: skinNumber }) }));
       }
       colliders.forEach((collider, k) => {
         const shapeMesh = collider.type === 'convex' ? hullMesh(collider.points) : collider.type === 'trimesh' ? mesh : null;

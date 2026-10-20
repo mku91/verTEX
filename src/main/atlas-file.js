@@ -118,7 +118,7 @@ async function sweep(keep = new Set(), home = HOME) {
   return gone;
 }
 
-function registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow }) {
+function registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow, t = (key) => key }) {
   const links = new WeakMap(); // window -> { folder, base, written (atlas id -> bytes), watcher, timers }
   const inUse = new Set(); // the folders of the windows' projects
 
@@ -272,11 +272,11 @@ function registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow }) {
 
   ipcMain.handle('atlas:pick-program', async (event) => {
     const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
-      title: 'Программа для рисования',
+      title: t('dialog.program.title'),
       properties: ['openFile'],
       filters: process.platform === 'win32'
-        ? [{ name: 'Программы', extensions: ['exe'] }, { name: 'Все файлы', extensions: ['*'] }]
-        : [{ name: 'Все файлы', extensions: ['*'] }],
+        ? [{ name: t('dialog.program.filter'), extensions: ['exe'] }, { name: t('dialog.all-files'), extensions: ['*'] }]
+        : [{ name: t('dialog.all-files'), extensions: ['*'] }],
     });
     return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
   });

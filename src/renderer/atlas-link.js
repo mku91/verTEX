@@ -11,6 +11,8 @@
 // The picture is opened in the user's external editor - the program whose
 // path is in the settings (EXTERNAL_EDITOR_KEY) - or, with none set, in
 // whatever the system opens such files with.
+import { t } from './i18n.js';
+
 export const EXTERNAL_EDITOR_KEY = 'vertex.externalEditor';
 
 export class AtlasLink extends EventTarget {
@@ -99,8 +101,8 @@ export class AtlasLink extends EventTarget {
     const result = await this.api.open(program, this.editor.atlas.id);
     if (result?.error) {
       await this.project.api.alert(
-        'Не удалось открыть атлас',
-        program ? `Программа из настроек не запустилась:\n${program}\n\n${result.error}` : result.error,
+        t('atlas-link.open-failed'),
+        program ? t('atlas-link.program-failed', { program, error: result.error }) : result.error,
       );
     }
   }

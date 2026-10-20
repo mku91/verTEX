@@ -25,6 +25,8 @@
 // another face's or the empty room between them. See-through pixels (as
 // the surface draws them: alpha under a half) are left as they are.
 
+import { t } from './i18n.js';
+
 // The settings as they are at first, and what each may be.
 export const RETRO_DEFAULTS = {
   brightness: 0, // -100 .. 100
@@ -43,12 +45,12 @@ export const RETRO_DEFAULTS = {
 };
 
 export const DITHERS = {
-  none: 'Нет',
-  bayer2: 'Байер 2×2',
-  bayer4: 'Байер 4×4',
-  bayer8: 'Байер 8×8',
-  floyd: 'Флойд — Стейнберг',
-  atkinson: 'Аткинсон',
+  none: t('retro.dither.none'),
+  bayer2: t('retro.dither.bayer2'),
+  bayer4: t('retro.dither.bayer4'),
+  bayer8: t('retro.dither.bayer8'),
+  floyd: t('retro.dither.floyd'),
+  atkinson: t('retro.dither.atkinson'),
 };
 
 // Palettes of old machines and of pixel artists (lospec.com).
@@ -61,7 +63,7 @@ export const PALETTES = {
   EGA: ['#000000', '#0000aa', '#00aa00', '#00aaaa', '#aa0000', '#aa00aa', '#aa5500', '#aaaaaa', '#555555', '#5555ff', '#55ff55', '#55ffff', '#ff5555', '#ff55ff', '#ffff55', '#ffffff'],
   'ZX Spectrum': ['#000000', '#0000d7', '#d70000', '#d700d7', '#00d700', '#00d7d7', '#d7d700', '#d7d7d7', '#0000ff', '#ff0000', '#ff00ff', '#00ff00', '#00ffff', '#ffff00', '#ffffff'],
   CGA: ['#000000', '#55ffff', '#ff55ff', '#ffffff'],
-  '1 бит': ['#000000', '#ffffff'],
+  [t('retro.palette.1bit')]: ['#000000', '#ffffff'],
 };
 
 // --- colours ---------------------------------------------------------------------

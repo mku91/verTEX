@@ -8,6 +8,7 @@
 // `api` is the main process's list of those projects (window.vertex.recent,
 // see src/main/recent.js), absent when the page runs without it.
 import { WelcomeBackdrop } from './welcome-backdrop.js';
+import { t, locale } from './i18n.js';
 
 export class Welcome {
   constructor(element, project, api) {
@@ -65,7 +66,7 @@ export class Welcome {
     const card = document.createElement('div');
     card.className = 'welcome-card';
     card.classList.toggle('missing', missing);
-    card.title = missing ? `${path}\n\nФайла нет на месте` : path;
+    card.title = missing ? t('welcome.missing.title', { path }) : path;
 
     const picture = document.createElement('div');
     picture.className = 'welcome-picture';
@@ -84,11 +85,11 @@ export class Welcome {
     const title = document.createElement('b');
     title.textContent = name;
     const note = document.createElement('small');
-    note.textContent = missing ? 'файл не найден' : new Date(opened).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' });
+    note.textContent = missing ? t('welcome.missing') : new Date(opened).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' });
 
     const remove = document.createElement('button');
     remove.className = 'welcome-remove';
-    remove.title = 'Убрать из списка (файл останется на месте)';
+    remove.title = t('welcome.remove');
     remove.innerHTML = '<i class="fa-solid fa-xmark"></i>';
     remove.addEventListener('click', async (event) => {
       event.stopPropagation();

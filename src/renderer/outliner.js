@@ -4,6 +4,7 @@ import { BODY_COLORS, SHAPE_ICONS, shapeLabel } from './collisions.js';
 import { latinOnly } from './names.js';
 import { boundByNode, selectBound } from './skin.js';
 import { confirmIt } from './ask-dialog.js';
+import { t } from './i18n.js';
 
 // Objects joined - asked first when they are on different atlases: the
 // joined one is on the first one's, and the others' faces are laid out on
@@ -14,9 +15,9 @@ async function joinAsked(editor, joined) {
   if (atlases.size > 1) {
     const first = editor.atlasById(joined.map((index) => objects[index]?.atlas).find(Boolean));
     const sure = await confirmIt(
-      'Объединить объекты с разных атласов?',
-      `Объединённый будет на атласе «${first?.name}»; грани с других атласов разложатся на нём заново, нарисованное для них останется на прежних. Действие можно отменить.`,
-      'Объединить',
+      t('outliner.join.title'),
+      t('outliner.join.text', { atlas: first?.name }),
+      t('outliner.join.ok'),
     );
     if (!sure) return;
   }
@@ -35,7 +36,7 @@ const CLIPBOARD_KEYS = new Set(['KeyA', 'KeyC', 'KeyV', 'KeyX', 'KeyZ', 'KeyY'])
 // Where a new object may be put up against the selection: automatically (a
 // selected face's side, or the one towards the camera), or on a side chosen.
 const SIDES = [
-  { id: 'auto', label: 'Авто', title: 'Сторона выделенных граней, или та, что к камере' },
+  { id: 'auto', label: t('outliner.side.auto.label'), title: t('outliner.side.auto.title') },
   { id: 'x+', label: 'X+', axis: 'x', sign: 1 },
   { id: 'x-', label: 'X−', axis: 'x', sign: -1 },
   { id: 'y+', label: 'Y+', axis: 'y', sign: 1 },
@@ -48,29 +49,29 @@ const SIDES = [
 // and limits. A kind without fields is made at once.
 const PRIMITIVES = {
   cube: {
-    title: 'Куб',
-    fields: [{ id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 }],
+    title: t('outliner.primitive.cube'),
+    fields: [{ id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 }],
   },
   cone: {
-    title: 'Конус',
+    title: t('outliner.primitive.cone'),
     fields: [
-      { id: 'sides', label: 'Вершин в основании', value: 8, min: 3, max: 64, whole: true },
-      { id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 },
+      { id: 'sides', label: t('outliner.field.sides'), value: 8, min: 3, max: 64, whole: true },
+      { id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 },
     ],
   },
   cylinder: {
-    title: 'Цилиндр',
+    title: t('outliner.primitive.cylinder'),
     fields: [
-      { id: 'sides', label: 'Вершин в основании', value: 8, min: 3, max: 64, whole: true },
-      { id: 'size', label: 'Диаметр', value: 1, min: 0.01, max: 100 },
-      { id: 'height', label: 'Высота', value: 1, min: 0.01, max: 100 },
+      { id: 'sides', label: t('outliner.field.sides'), value: 8, min: 3, max: 64, whole: true },
+      { id: 'size', label: t('outliner.field.diameter'), value: 1, min: 0.01, max: 100 },
+      { id: 'height', label: t('outliner.field.height'), value: 1, min: 0.01, max: 100 },
     ],
   },
   sphere: {
-    title: 'Сфера',
+    title: t('outliner.primitive.sphere'),
     fields: [
-      { id: 'segments', label: 'Детализация', value: 8, min: 3, max: 48, whole: true },
-      { id: 'size', label: 'Размер', value: 1, min: 0.01, max: 100 },
+      { id: 'segments', label: t('outliner.field.segments'), value: 8, min: 3, max: 48, whole: true },
+      { id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 },
     ],
   },
 };
@@ -172,8 +173,8 @@ export class Outliner {
       if (marker) row.lastElementChild.style.color = marker;
       row.append(name);
       row.title = node
-        ? `Узел: внутри ${island.children.length}`
-        : `${island.vertices.length} вершин, ${island.faces.length} граней`;
+        ? t('outliner.row.node.title', { count: island.children.length })
+        : `${t('outliner.row.vertices', { count: island.vertices.length })}, ${t('outliner.row.faces', { count: island.faces.length })}`;
       // A node's lock: picked only whole in the main view while it is shut (see Editor.lockedOwner()).
       if (node) {
         // Open, shut (picked whole) or 'nearest' (picked as the nearest node).
@@ -184,10 +185,10 @@ export class Outliner {
         lock.classList.toggle('nearest', locked === 'nearest');
         lock.dataset.lock = index;
         lock.title = locked === true
-          ? 'Узел закрыт: в главном виде щелчок по любой его части выделяет весь узел (в дереве и в трёх видах части выделяются как обычно). Нажмите — «ближайший узел»'
+          ? t('outliner.lock.shut.title')
           : locked === 'nearest'
-            ? 'Ближайший узел: в главном виде щелчок по объекту в нём выделяет ближайший к нему узел вверх по иерархии. Нажмите, чтобы открыть'
-            : 'Узел открыт: его части выделяются по отдельности. Нажмите, чтобы закрыть — тогда в главном виде он будет выделяться целиком';
+            ? t('outliner.lock.nearest.title')
+            : t('outliner.lock.open.title');
         // (nearest: a child - a part picked as the node it is a child of)
         lock.innerHTML = `<i class="fa-solid ${locked === 'nearest' ? 'fa-child' : locked ? 'fa-lock' : 'fa-lock-open'}"></i>`;
         row.append(lock);
@@ -197,7 +198,7 @@ export class Outliner {
         const plus = document.createElement('span');
         plus.className = 'outliner-add';
         plus.dataset.addInto = island.id;
-        plus.title = 'Создать объект в этом узле';
+        plus.title = t('outliner.add-into.title');
         plus.innerHTML = '<i class="fa-solid fa-plus"></i>';
         row.append(plus);
       }
@@ -206,7 +207,7 @@ export class Outliner {
       const eye = document.createElement('span');
       eye.className = 'outliner-eye';
       eye.dataset.eye = '';
-      eye.title = island.hiddenOwn ? 'Показать' : 'Скрыть';
+      eye.title = island.hiddenOwn ? t('outliner.show') : t('outliner.hide');
       eye.innerHTML = island.hiddenOwn ? EYE_OFF_ICON : EYE_ICON;
       row.append(eye);
       rows.push(row);
@@ -226,7 +227,7 @@ export class Outliner {
         name.className = 'outliner-name';
         name.textContent = shapeLabel(object.colliders, k);
         line.append(name);
-        line.title = 'Фигура столкновения: щелчок — выбрать, двойной щелчок — переименовать, Delete — удалить';
+        line.title = t('outliner.shape.title');
         rows.push(line);
       });
       // What it binds (a node): an object a row, in the skin's green; a press picks those vertices.
@@ -242,7 +243,7 @@ export class Outliner {
         name.className = 'outliner-name';
         name.textContent = `${owner?.name ?? '?'} · ${vertices.length}`;
         line.append(name);
-        line.title = `Вершины объекта «${owner?.name ?? '?'}», привязанные к «${island.name}»: щелчок — выделить их и настроить вес в панели «Скин»`;
+        line.title = t('outliner.skin.title', { object: owner?.name ?? '?', node: island.name });
         rows.push(line);
       }
       for (const child of island.children) addRow(child, depth + 1, carries);
@@ -385,11 +386,11 @@ export class Outliner {
         const k = Number(shape.dataset.shape.split(':')[1]);
         this.shapes?.pickShape(index, k);
         menu.replaceChildren(
-          item('Переименовать', () => {
+          item(t('outliner.menu.rename'), () => {
             const line = this.list.querySelector(`[data-shape="${index}:${k}"]`);
             if (line) this.rename(line);
           }),
-          item('Удалить', () => this.shapes?.removeShape(index, k)),
+          item(t('outliner.menu.delete'), () => this.shapes?.removeShape(index, k)),
         );
         // (the press picked it, and the list was built anew: the row is the new one's)
         this.list.querySelector(`[data-shape="${index}:${k}"]`)?.classList.add('context');
@@ -416,26 +417,27 @@ export class Outliner {
       colors.className = 'submenu';
       colors.append(
         ...MARKER_COLORS.map((marker) => swatch(marker.label, marker.color, marker.id)),
-        swatch('Без цвета', null, null),
+        swatch(t('outliner.menu.no-color'), null, null),
       );
       const colorItem = document.createElement('div');
       colorItem.className = 'submenu-item';
       const colorLabel = document.createElement('button');
-      colorLabel.innerHTML = '<span>Цвет метки</span><i class="fa-solid fa-chevron-right"></i>';
+      colorLabel.innerHTML = '<span></span><i class="fa-solid fa-chevron-right"></i>';
+      colorLabel.firstElementChild.textContent = t('outliner.menu.marker-color');
       colorItem.append(colorLabel, colors);
       // Joining: the picked objects into this one, when it is one of them.
       const joined = [index, ...whole.filter((other) => other !== index)].filter(
         (other) => editor.topology.islands[other].kind !== 'node',
       );
       menu.replaceChildren(
-        item('Центровать', () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
-        item('Опустить на пол', () => editor.dropToFloor(whole), editor.contents(whole).vertices.size > 0),
-        item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
+        item(t('outliner.menu.center'), () => editor.focusObject(index), editor.contents([index]).vertices.size > 0),
+        item(t('outliner.menu.drop'), () => editor.dropToFloor(whole), editor.contents(whole).vertices.size > 0),
+        item(island.hiddenOwn ? t('outliner.show') : t('outliner.hide'), () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
-        item('Дублировать', () => editor.duplicateObjects(whole)),
-        item('Объединить в один объект', () => joinAsked(editor, joined), island.kind !== 'node' && joined.length > 1),
-        item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
-        item('Удалить', () => editor.deleteObject(index)),
+        item(t('outliner.menu.duplicate'), () => editor.duplicateObjects(whole)),
+        item(t('outliner.menu.join'), () => joinAsked(editor, joined), island.kind !== 'node' && joined.length > 1),
+        item(t('outliner.menu.reset-pivot'), () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
+        item(t('outliner.menu.delete'), () => editor.deleteObject(index)),
       );
       row.classList.add('context');
       menu.hidden = false;
@@ -667,13 +669,13 @@ export class Outliner {
     block.className = 'attach';
     const label = document.createElement('label');
     label.className = 'choice';
-    label.title = selected ? 'Новый объект встанет вплотную к выделенному, на выбранной стороне' : 'Ничего не выделено: объект появится в начале координат';
+    label.title = selected ? t('outliner.attach.title') : t('outliner.attach.none.title');
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = this.attach && selected;
     box.disabled = !selected;
     const caption = document.createElement('span');
-    caption.textContent = 'Прижать к выделенному';
+    caption.textContent = t('outliner.attach.caption');
     label.append(box, caption);
     const sides = document.createElement('div');
     sides.className = 'sides';
@@ -698,7 +700,7 @@ export class Outliner {
       button.dataset.side = side.id;
       button.textContent = side.label;
       if (side.axis) button.classList.add(`axis-${side.axis}`);
-      button.title = side.title ?? `Со стороны ${side.label} выделенного объекта`;
+      button.title = side.title ?? t('outliner.side.title', { side: side.label });
       button.addEventListener('mousedown', (event) => event.preventDefault()); // the keyboard stays where it is
       button.addEventListener('click', () => {
         this.side = side.id;
@@ -723,7 +725,7 @@ export class Outliner {
     form.dataset.kind = kind;
     // (made in a node: its name says so)
     const node = this.into === null ? null : this.editor.mesh.objects.find((object) => object.id === this.into);
-    form.querySelector('h3').textContent = node ? `${title} · в узел ${node.name}` : title;
+    form.querySelector('h3').textContent = node ? t('outliner.form.into', { title, node: node.name }) : title;
     form.querySelector('.fields').replaceChildren(
       ...fields.map((field) => {
         const label = document.createElement('label');
@@ -735,7 +737,7 @@ export class Outliner {
         input.inputMode = field.whole ? 'numeric' : 'decimal';
         input.spellcheck = false;
         input.value = field.value;
-        input.title = `от ${field.min} до ${field.max} · чтобы менять, ведите вверх или вниз за точку справа`;
+        input.title = t('outliner.field.range.title', { min: field.min, max: field.max });
         // Dragging the field's handle up or down changes its value.
         const scrub = scrubbable(input, {
           read: () => parseFloat(input.value.replace(',', '.')),

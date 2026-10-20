@@ -1,10 +1,11 @@
 import { AxisGizmo } from './axis-gizmo.js';
+import { t } from './i18n.js';
 
 const CAPTIONS = {
-  free: 'Направление: авто',
-  x: 'Направление: X',
-  y: 'Направление: Y',
-  z: 'Направление: Z',
+  free: t('extrude-popup.auto'),
+  x: t('extrude-popup.axis', { axis: 'X' }),
+  y: t('extrude-popup.axis', { axis: 'Y' }),
+  z: t('extrude-popup.axis', { axis: 'Z' }),
 };
 
 // Small popup at the bottom of the viewport, shown while an edge is being

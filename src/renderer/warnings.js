@@ -1,11 +1,6 @@
-const TOAST_TIME = 8000; // ms a new warning stays up before it goes to the status bar
+import { t } from './i18n.js';
 
-// The Russian form of a noun for a count: [1, 2-4, 5+].
-const plural = (count, [one, few, many]) => {
-  const n = Math.abs(count) % 100;
-  if (n >= 11 && n <= 14) return many;
-  return n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many;
-};
+const TOAST_TIME = 8000; // ms a new warning stays up before it goes to the status bar
 
 const point = (p) => `(${[p.x, p.y, p.z].map((n) => +n.toFixed(3)).join(', ')})`;
 
@@ -107,8 +102,8 @@ export class Warnings {
     const places = this.pending.length;
     this.toast.querySelector('p').textContent =
       places === 1
-        ? `${vertices} вершины стоят в одной точке. Рекомендуется соединить их в одну.`
-        : `Вершины совпадают в ${places} местах (всего ${vertices}). Рекомендуется соединить их.`;
+        ? t('warnings.toast.one-place', { count: vertices })
+        : t('warnings.toast.places', { count: places, vertices });
     this.toast.classList.add('shown'); // slides in, see the styles
     // The bar starts over.
     const bar = this.toast.querySelector('.toast-timer i');
@@ -130,12 +125,12 @@ export class Warnings {
   // The two buttons in the status bar are always there; each is filled with
   // its colour only while it has something to show.
   show() {
-    const set = (button, count, forms) => {
+    const set = (button, count, key) => {
       button.classList.toggle('active', count > 0);
-      button.querySelector('span').textContent = `${count} ${plural(count, forms)}`;
+      button.querySelector('span').textContent = t(key, { count });
     };
-    set(this.button, this.current.length + (this.notes?.length ?? 0), ['предупреждение', 'предупреждения', 'предупреждений']);
-    set(this.errorButton, this.errors.length, ['ошибка', 'ошибки', 'ошибок']);
+    set(this.button, this.current.length + (this.notes?.length ?? 0), 'warnings.count.warnings');
+    set(this.errorButton, this.errors.length, 'warnings.count.errors');
     if (!this.list.hidden) this.showList();
   }
 
@@ -156,8 +151,8 @@ export class Warnings {
     const errors = this.listed === 'error';
     list.classList.toggle('errors', errors);
     const head = make('div', null, 'warnings-head');
-    head.append(make('span', errors ? 'Ошибки' : 'Предупреждения'));
-    if (!errors && this.current.length > 1) head.append(action('Соединить все', () => this.answer(this.current, true)));
+    head.append(make('span', t(errors ? 'warnings.head.errors' : 'warnings.head.warnings')));
+    if (!errors && this.current.length > 1) head.append(action(t('warnings.merge-all'), () => this.answer(this.current, true)));
     const rows = errors
       ? this.errors.map((error) => {
           const row = make('div', null, 'warning-row');
@@ -167,15 +162,15 @@ export class Warnings {
       : [...this.current.map((warning) => {
           const row = make('div', null, 'warning-row');
           const count = warning.indices.length;
-          const text = make('span', `${count} ${plural(count, ['вершина', 'вершины', 'вершин'])} в одной точке ${point(warning.point)} · ${warning.name}`);
-          row.append(text, action('Оставить', () => this.answer([warning], false)), action('Соединить', () => this.answer([warning], true)));
+          const text = make('span', t('warnings.row', { vertices: t('warnings.vertices', { count }), point: point(warning.point), name: warning.name }));
+          row.append(text, action(t('warnings.keep'), () => this.answer([warning], false)), action(t('warnings.merge'), () => this.answer([warning], true)));
           return row;
         }), ...(this.notes ?? []).map((note) => {
           const row = make('div', null, 'warning-row');
           row.append(make('span', note.text));
           return row;
         })];
-    if (rows.length === 0) rows.push(make('div', errors ? 'Ошибок нет' : 'Предупреждений нет', 'warning-none'));
+    if (rows.length === 0) rows.push(make('div', t(errors ? 'warnings.none.errors' : 'warnings.none.warnings'), 'warning-none'));
     list.replaceChildren(head, ...rows);
   }
 }

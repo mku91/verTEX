@@ -15,6 +15,7 @@ import { unwrap as nearAngles } from './animation.js';
 import { latinName, freeName } from './names.js';
 import { retrofy, paletteOf } from './retro.js';
 import { weightsOf } from './skin.js';
+import { t } from './i18n.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
 // What the editor works on, see Editor.setWorkspace(); and the tools there.
@@ -1505,13 +1506,8 @@ export class Editor extends EventTarget {
       if ((Math.max(...heights) - Math.min(...heights)) * ppu <= 0.1) return;
       bent.set(owner, (bent.get(owner) ?? 0) + 1);
     });
-    const plural = (count) => {
-      const n = count % 100;
-      if (n >= 11 && n <= 14) return 'неплоских граней';
-      return n % 10 === 1 ? 'неплоская грань' : n % 10 >= 2 && n % 10 <= 4 ? 'неплоские грани' : 'неплоских граней';
-    };
     return [...bent].map(([id, count]) => ({
-      text: `${count} ${plural(count)}: текстура ляжет с искажением · ${objects.find((object) => object.id === id)?.name ?? ''}`,
+      text: t('editor.warning.bent-faces', { count, object: objects.find((object) => object.id === id)?.name ?? '' }),
     }));
   }
 
@@ -1821,7 +1817,7 @@ export class Editor extends EventTarget {
     return mesh.objects
       .filter((object) => object.kind !== 'node' && object.colliders?.length && bent.has(object.id))
       .map((object) => ({
-        text: `Коллизии объекта «${object.name}» не гнутся вместе со скином — повесьте формы на узлы-кости`,
+        text: t('editor.notice.skin-colliders', { object: object.name }),
         signature: `skin-colliders:${object.id}`,
       }));
   }
@@ -3325,7 +3321,7 @@ export class Editor extends EventTarget {
           (Math.abs(d2) < 1e-12 && within(a, b, d)) ||
           (Math.abs(d3) < 1e-12 && within(c, d, a)) ||
           (Math.abs(d4) < 1e-12 && within(c, d, b));
-        if (crossing || touching) return 'контур пересекает сам себя';
+        if (crossing || touching) return t('editor.polygon.crossing');
       }
     }
     // Checked after the crossings: a figure of eight has no net area either.
@@ -3334,7 +3330,7 @@ export class Editor extends EventTarget {
       const b = flat[(i + 1) % count];
       doubleArea += a.x * b.y - b.x * a.y;
     });
-    if (Math.abs(doubleArea) < 1e-9) return 'точки лежат на одной прямой';
+    if (Math.abs(doubleArea) < 1e-9) return t('editor.polygon.collinear');
     return null;
   }
 
@@ -5398,31 +5394,31 @@ export class Editor extends EventTarget {
     const point = (p) => [p.x, p.y, p.z].map(number).join(' ');
 
     return [
-      'verTEX — проект как текст',
-      `режим: ${this.mode} | инструмент: ${this.tool} | операция: ${this.operation ?? 'нет'} | фиксация оси: ${this.axisLock} | шаг сетки: ${this.snapGrid.step}`,
-      `камера: позиция ${point(camera.position)} | цель ${point(orbit.target)}`,
-      `история: отмен ${this.history.undoStack.length}, повторов ${this.history.redoStack.length}`,
+      'verTEX — the project as text',
+      `mode: ${this.mode} | tool: ${this.tool} | operation: ${this.operation ?? 'none'} | axis lock: ${this.axisLock} | grid step: ${this.snapGrid.step}`,
+      `camera: position ${point(camera.position)} | target ${point(orbit.target)}`,
+      `history: undo ${this.history.undoStack.length}, redo ${this.history.redoStack.length}`,
       '',
-      `вершины (${vertices.length}) — номер: x y z`,
+      `vertices (${vertices.length}) — index: x y z`,
       ...vertices.map((vertex, i) => `  ${i}: ${point(vertex)}`),
       '',
-      `грани (${faces.length}) — номер: номера вершин по обходу`,
+      `faces (${faces.length}) — index: vertex indices in winding order`,
       ...faces.map((face, i) => `  ${i}: ${face.join(' ')}`),
       '',
-      `висящие рёбра (${wires.length}) — номер: две вершины`,
+      `loose edges (${wires.length}) — index: two vertices`,
       ...wires.map((wire, i) => `  ${i}: ${wire.join(' ')}`),
       '',
-      `объекты (${this.topology.islands.length}) — номер «имя»: вершины | грани`,
+      `objects (${this.topology.islands.length}) — index «name»: vertices | faces`,
       ...this.topology.islands.map(
         (island, i) =>
           island.kind === 'node'
-            ? `  ${i} узел «${island.name}»${island.hidden ? ' (скрыта)' : ''}: ${list(island.children)}`
-            : `  ${i} «${island.name}»${island.parentIndex === null ? '' : ` (в узле ${island.parentIndex})`}${island.hidden ? ' (скрыт)' : ''}: ${list(island.vertices)} | ${list(island.faces)}`,
+            ? `  ${i} node «${island.name}»${island.hidden ? ' (hidden)' : ''}: ${list(island.children)}`
+            : `  ${i} «${island.name}»${island.parentIndex === null ? '' : ` (in node ${island.parentIndex})`}${island.hidden ? ' (hidden)' : ''}: ${list(island.vertices)} | ${list(island.faces)}`,
       ),
       '',
-      `выделение, элементы режима «${this.mode}»: ${list([...this.picked])}`,
-      `выделение, вершины: ${list(sorted(this.selection))}`,
-      `редактируемый объект (таргет), вершины: ${list(sorted(this.target))}`,
+      `selection, «${this.mode}» mode elements: ${list([...this.picked])}`,
+      `selection, vertices: ${list(sorted(this.selection))}`,
+      `edited object (target), vertices: ${list(sorted(this.target))}`,
     ].join('\n');
   }
 

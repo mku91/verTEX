@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { AXIS_LOCKS } from './editor.js';
+import { t } from './i18n.js';
 
 const AXIS_LENGTH = 34; // SVG units, see the viewBox in MARKUP
 const LOCK_LINE_LENGTH = 54;
 
 const CAPTIONS = {
-  free: 'Свободно',
-  x: 'Только X',
-  y: 'Только Y',
-  z: 'Только Z',
+  free: t('axis-gizmo.free'),
+  x: t('axis-gizmo.only', { axis: 'X' }),
+  y: t('axis-gizmo.only', { axis: 'Y' }),
+  z: t('axis-gizmo.only', { axis: 'Z' }),
 };
 
 const MARKUP = `

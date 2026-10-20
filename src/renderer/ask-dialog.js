@@ -7,6 +7,8 @@
 // presses the button in focus (the primary one, at first), Tab goes round
 // them. One at a time: a second waits for the first to be answered.
 
+import { t } from './i18n.js';
+
 let queue = Promise.resolve();
 let element = null;
 
@@ -90,24 +92,24 @@ function show({ title, detail, buttons, cancel }) {
 
 // A message, and "Понятно".
 export function tell(title, detail = '') {
-  return ask({ title, detail, buttons: [{ label: 'Понятно', value: true, primary: true }], cancel: true });
+  return ask({ title, detail, buttons: [{ label: t('ask.ok'), value: true, primary: true }], cancel: true });
 }
 
 // Whether to go on with something: true for `yes`, false for "Отмена".
 export function confirmIt(title, detail, yes) {
-  return ask({ title, detail, buttons: [{ label: 'Отмена', value: false }, { label: yes, value: true, primary: true }], cancel: false });
+  return ask({ title, detail, buttons: [{ label: t('ask.cancel'), value: false }, { label: yes, value: true, primary: true }], cancel: false });
 }
 
 // The unsaved changes of the project `name`: 'save', 'discard' or 'cancel'
 // (as the main process's question was, see project-io.js).
 export function askSave(name) {
   return ask({
-    title: `Сохранить изменения в «${name}»?`,
-    detail: 'Если не сохранить, изменения будут потеряны.',
+    title: t('ask.save.title', { name }),
+    detail: t('ask.save.detail'),
     buttons: [
-      { label: 'Не сохранять', value: 'discard', aside: true, tone: 'lose' },
-      { label: 'Отмена', value: 'cancel' },
-      { label: 'Сохранить', value: 'save', primary: true, tone: 'keep' },
+      { label: t('ask.save.discard'), value: 'discard', aside: true, tone: 'lose' },
+      { label: t('ask.cancel'), value: 'cancel' },
+      { label: t('ask.save.save'), value: 'save', primary: true, tone: 'keep' },
     ],
     cancel: 'cancel',
   });

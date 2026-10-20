@@ -1,6 +1,7 @@
 import { theme, onThemeChange } from './theme.js';
 import { facePixels } from './atlas.js';
 import { confirmIt } from './ask-dialog.js';
+import { t } from './i18n.js';
 
 // The UV editor: the atlas, flat, with the faces drawn on it.
 //
@@ -168,34 +169,35 @@ export class UVEditor {
     const started = objects.some((object) => object.atlas === atlas.id);
     // (with several atlases: onto the one shown here, from none or from another)
     // (with several, the plus alone: which atlas it is, the choice beside it says)
-    add.querySelector('span').textContent = multiAtlas ? '' : started ? 'Добавить в атлас' : 'Создать атлас';
+    add.querySelector('span').textContent = multiAtlas ? '' : t(started ? 'uv.add.add' : 'uv.add.create');
     add.classList.toggle('worded', !multiAtlas);
     add.title = multiAtlas
-      ? `Положить выбранные объекты на атлас «${atlas.name}»: их грани получат место на нём (с другого атласа — разложатся заново)`
-      : 'Положить выбранные объекты на атлас: их грани получат место на картинке';
+      ? t('uv.add.title-named', { name: atlas.name })
+      : t('uv.add.title');
     add.disabled = none || (multiAtlas ? !hand.some((object) => object.atlas !== atlas.id) : !hand.some((object) => !object.atlas));
     this.container.querySelector('[data-uv="remove"]').disabled = !hand.some((object) => object.atlas);
     const { marquee, tool } = this.editor;
     this.status.textContent = none
-      ? 'Атласов пока нет: создайте атлас кнопкой с листом'
+      ? t('uv.status.no-atlas')
       : tool === 'marquee'
       ? marquee
-        ? `Выделено ${marquee.w} × ${marquee.h} px, место ${marquee.x}, ${marquee.y}${this.editor.floating ? ' · плавает: Enter — положить, Esc — вернуть' : ''}`
+        ? t('uv.status.marquee', { w: marquee.w, h: marquee.h, x: marquee.x, y: marquee.y }) + (this.editor.floating ? ` · ${t('uv.status.floating')}` : '')
         : ''
       : charts.length === 0
       ? ''
       : charts.length === 1
-        ? `${charts[0].rect.w} × ${charts[0].rect.h} px, место ${charts[0].rect.x}, ${charts[0].rect.y}${charts[0].shaped ? ' · форма изменена' : charts[0].pinned ? ' · закреплён' : ''}`
-        : `Лоскутов: ${charts.length}`;
+        ? t('uv.status.chart', { w: charts[0].rect.w, h: charts[0].rect.h, x: charts[0].rect.x, y: charts[0].rect.y }) +
+          (charts[0].shaped ? ` · ${t('uv.status.shaped')}` : charts[0].pinned ? ` · ${t('uv.status.pinned')}` : '')
+        : t('uv.status.charts', { count: charts.length });
     this.draw();
   }
 
   // Cleaning the atlas, asked first: what goes is not to be seen in it, and it is easily forgotten.
   async askClean() {
     const sure = await confirmIt(
-      `Очистить атлас «${this.editor.atlas.name}»?`,
-      'Будет стёрто всё нарисованное, что не показывает ни одна грань: оставшееся от удалённых, перенесённых и уменьшенных граней и нарисованное мимо лоскутов. Действие можно отменить.',
-      'Очистить',
+      t('uv.clean.question', { name: this.editor.atlas.name }),
+      t('uv.clean.detail'),
+      t('uv.clean.ok'),
     );
     if (sure) this.editor.cleanAtlas();
   }
@@ -237,7 +239,7 @@ export class UVEditor {
         this.editor.regenerateCharts(faces);
         return;
       }
-      confirmIt('Перегенерировать весь атлас?', 'Всё нарисованное на текстуре будет потеряно. Действие можно отменить.', 'Перегенерировать')
+      confirmIt(t('uv.regenerate.question'), t('uv.regenerate.detail'), t('uv.regenerate.ok'))
         .then((yes) => yes && this.editor.regenerateCharts(faces));
     }
   }
@@ -780,7 +782,7 @@ export class UVEditor {
     const show = () => {
       const title = document.createElement('div');
       title.className = 'uv-face-menu-title';
-      title.textContent = `Грани здесь: ${faces.length}`;
+      title.textContent = t('uv.faces-menu.title', { count: faces.length });
       const rows = faces.map((index) => {
         const row = document.createElement('label');
         row.className = 'uv-face-menu-row';
@@ -795,18 +797,18 @@ export class UVEditor {
           this.draw();
         });
         const text = document.createElement('span');
-        text.textContent = `${nameOf(index)} · грань ${index}`;
+        text.textContent = t('uv.faces-menu.face', { name: nameOf(index), index });
         row.append(tick, text);
         return row;
       });
       const all = document.createElement('button');
-      all.textContent = 'Все';
+      all.textContent = t('uv.faces-menu.all');
       all.addEventListener('click', () => {
         setPicked(faces);
         show();
       });
       const nothing = document.createElement('button');
-      nothing.textContent = 'Ни одной';
+      nothing.textContent = t('uv.faces-menu.none');
       nothing.addEventListener('click', () => {
         setPicked([]);
         show();

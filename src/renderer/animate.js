@@ -9,6 +9,7 @@ import { PROPERTIES, setKey, removeKeys, keyId, unwrap } from './animation.js';
 import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { freeName } from './names.js';
+import { t } from './i18n.js';
 
 // The animation mode at work (see animation.js, timeline.js): the model
 // shown in the pose of the frame looked at, and posed by hand.
@@ -561,7 +562,7 @@ export class AnimationMode {
     // A quaternion's turn has a fourth number, W, shown first (as Blender does).
     const quaternion = values.rotation.length === 4;
     this.panel.querySelector('[data-pose="rotation.3"]').closest('label').hidden = !quaternion;
-    this.panel.querySelector('.pose-rotation-title').textContent = quaternion ? 'Поворот (кватернион)' : 'Поворот';
+    this.panel.querySelector('.pose-rotation-title').textContent = quaternion ? t('animate.rotation.quaternion') : t('animate.rotation');
     for (const input of this.inputs) {
       if (document.activeElement === input) continue;
       const [property, axis] = input.dataset.pose.split('.');
@@ -575,7 +576,7 @@ export class AnimationMode {
       const posed = this.overrides.get(entry.id)?.[mark.dataset.key] !== undefined;
       mark.classList.toggle('keyed', keyed);
       mark.classList.toggle('posed', posed && !keyed);
-      mark.title = keyed ? 'Ключ на этом кадре — нажмите, чтобы убрать' : 'Нет ключа на этом кадре — нажмите, чтобы поставить';
+      mark.title = keyed ? t('animate.mark.keyed.title') : t('animate.mark.title');
     }
   }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OrthoViews, paintedMaterials } from './ortho-views.js';
+import { localize } from './i18n.js';
 import { theme, onThemeChange } from './theme.js';
 
 // The views in a window of their own: two by two, a perspective view and the
@@ -63,6 +64,7 @@ export class ViewsWindow extends EventTarget {
   build() {
     const win = this.window;
     const doc = win.document;
+    localize(doc); // the window's page runs no scripts of its own
     this.applyTheme();
     // The three views, with the window's own watcher of sizes.
     this.ortho = new OrthoViews(doc.getElementById('quad'), this.editor, { Observer: win.ResizeObserver });

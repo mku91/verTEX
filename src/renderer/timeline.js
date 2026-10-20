@@ -1,6 +1,7 @@
 import { theme, onThemeChange } from './theme.js';
 import { scrubbable } from './scrub.js';
 import { latinOnly, latinName, freeName } from './names.js';
+import { t } from './i18n.js';
 import {
   MAX_FPS, PROPERTIES, frameOf, keyId, moveKeys, removeKeys, setInterpolation, setKey, copyKeys, pasteKeys,
   EASE_FAMILIES, EASE_DIRECTIONS, easing, easeParts, bezierOf, setEase, stillKeys, sameValue,
@@ -56,17 +57,16 @@ const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
 const NAMES_WIDTH = 220; // px, at first
 const NAMES_MIN = 120;
-const PROPERTY_NAMES = { position: 'Позиция', rotation: 'Поворот', scale: 'Масштаб' };
+const PROPERTY_NAMES = { position: t('timeline.channel.position'), rotation: t('timeline.channel.rotation'), scale: t('timeline.channel.scale') };
 const TOOL_OF = { position: 'move', rotation: 'rotate', scale: 'scale' }; // the tool a track's name takes
-const TOOL_NAMES = { position: 'перемещение (W)', rotation: 'поворот (R)', scale: 'масштаб (S)' };
 const NEW_CLIP = { fps: 12, length: 24, loop: false }; // (going round, or there and back, when asked: see LOOPS)
 // The loop button as it is for each way of going round (see LOOPS).
 const LOOP_LOOKS = {
-  false: { icon: 'fa-repeat', title: 'Без цикла: клип проигрывается один раз. Нажмите — цикл' },
-  true: { icon: 'fa-repeat', title: 'Цикл: клип проигрывается по кругу, в Godot он получит зацикливание. Нажмите — пинг-понг' },
-  pingpong: { icon: 'fa-right-left', title: 'Пинг-понг: клип проигрывается вперёд, затем назад, и так по кругу. В Godot это цикл вдвое длиннее: обратный ход записывается в него. Нажмите — без цикла' },
+  false: { icon: 'fa-repeat', title: t('timeline.loop.off.title') },
+  true: { icon: 'fa-repeat', title: t('timeline.loop.on.title') },
+  pingpong: { icon: 'fa-right-left', title: t('timeline.loop.pingpong.title') },
 };
-const INTERPOLATION_NAMES = { linear: 'Линейная', step: 'Шаг', smooth: 'Плавная' };
+const INTERPOLATION_NAMES = { linear: t('timeline.interpolation.linear'), step: t('timeline.interpolation.step'), smooth: t('timeline.interpolation.smooth') };
 const KEY_COLORS = { position: 'keyPosition', rotation: 'keyRotation', scale: 'keyScale' }; // theme's, see theme.js
 const PREVIEW_COLOR = '#8be9fd'; // the frame looked at, while a key's curve is previewed
 const STILL_COLOR = '#ff5555'; // a key that repeats the one before it
@@ -153,10 +153,10 @@ export class Timeline extends EventTarget {
     restore.classList.toggle('lost', lost);
     restore.querySelector('i').className = `fa-solid ${state === 'pending' ? 'fa-triangle-exclamation' : 'fa-rotate-left'}`;
     restore.title = lost
-      ? `Вернуть позу, изменённую на кадре ${state} и сброшенную без ключа`
+      ? t('timeline.restore.lost.title', { frame: state })
       : state === 'pending'
-        ? 'Не в ключах: поза изменена, но ключ не поставлен — при смене кадра она сбросится туда, где показан призрак (K — поставить ключ). После сброса здесь можно будет её вернуть'
-        : 'Вернуть позу: если поза, изменённая без ключа, сбросится при смене кадра, её можно будет вернуть здесь';
+        ? t('timeline.restore.pending.title')
+        : t('timeline.restore.title');
   }
 
   toggle(open = !this.open) {
@@ -227,8 +227,8 @@ export class Timeline extends EventTarget {
   openClipPopup(clip) {
     const popup = this.clipPopup;
     const { name, frames: length } = popup.elements; // (`frames`: a form's `length` is how many fields it has)
-    popup.querySelector('.grid-popup-title').textContent = clip ? 'Анимация' : 'Новая анимация';
-    popup.querySelector('[type="submit"]').textContent = clip ? 'Сохранить' : 'Создать';
+    popup.querySelector('.grid-popup-title').textContent = clip ? t('timeline.clip-popup.edit') : t('timeline.clip-popup.new');
+    popup.querySelector('[type="submit"]').textContent = clip ? t('timeline.clip-popup.save') : t('timeline.clip-popup.create');
     name.value = clip?.name ?? '';
     name.placeholder = clip ? '' : freeName('idle', new Set(this.clips.map((other) => other.name)));
     length.value = clip?.length ?? NEW_CLIP.length;
@@ -442,7 +442,7 @@ export class Timeline extends EventTarget {
     fields.loop.title = loop.title;
     const play = this.section.querySelector('[data-tl="play"]');
     play.firstElementChild.className = `fa-solid ${this.playing ? 'fa-pause' : 'fa-play'}`;
-    play.title = this.playing ? 'Пауза (Enter)' : 'Воспроизвести (Enter)';
+    play.title = this.playing ? t('timeline.pause') : t('timeline.play');
     this.section.querySelector('[data-tl="autokey"]').classList.toggle('active', this.autokey);
     this.showFrame();
   }
@@ -522,11 +522,11 @@ export class Timeline extends EventTarget {
           sub.style.paddingLeft = `${26 + depth * 12}px`;
           sub.textContent = PROPERTY_NAMES[property];
           sub.dataset.track = `${index}:${property}`;
-          sub.title = `Выделить и взять ${TOOL_NAMES[property]}`;
+          sub.title = t(`timeline.track.select.${property}`);
           const plus = document.createElement('button');
           plus.className = `tl-add ${property}`;
           plus.textContent = '+';
-          plus.title = `Ключ: ${PROPERTY_NAMES[property].toLowerCase()} на этом кадре`;
+          plus.title = t(`timeline.track.add.${property}`);
           plus.dataset.add = `${index}:${property}`;
           // The turn's row: how the entry is turned - a symbol to switch it by.
           if (property === 'rotation' && islands[index].kind !== undefined) {
@@ -536,8 +536,8 @@ export class Timeline extends EventTarget {
             mode.textContent = quaternion ? 'ℍ' : '∠';
             mode.dataset.mode = index;
             mode.title = quaternion
-              ? 'Поворот кватернионами (W, X, Y, Z): кратчайший путь, без «шарнирного замка», но не больше пол-оборота между ключами. Нажмите — перейти на углы'
-              : 'Поворот углами (X, Y, Z): можно больше 360° между ключами, но при повороте по нескольким осям путь бывает кривым. Нажмите — перейти на кватернионы';
+              ? t('timeline.rotation.quaternion.title')
+              : t('timeline.rotation.euler.title');
             sub.append(mode);
           }
           sub.append(plus);
@@ -935,14 +935,14 @@ export class Timeline extends EventTarget {
     popup.className = 'key-popup';
     popup.hidden = true;
     popup.innerHTML = `
-      <div class="kp-head"><i class="kp-grip" title="Потяните, чтобы переставить окно"></i><span></span><button class="kp-step" data-step="-1" title="Предыдущий ключ этой дорожки"><i class="fa-solid fa-chevron-left"></i></button><button class="kp-step" data-step="1" title="Следующий ключ этой дорожки"><i class="fa-solid fa-chevron-right"></i></button><button class="kp-close" title="Закрыть (Esc)"><i class="fa-solid fa-xmark"></i></button></div>
-      <label><span>Кадр</span><input data-kp="frame" inputmode="numeric" spellcheck="false"></label>
+      <div class="kp-head"><i class="kp-grip" title="${t('timeline.key-popup.grip.title')}"></i><span></span><button class="kp-step" data-step="-1" title="${t('timeline.key-popup.prev.title')}"><i class="fa-solid fa-chevron-left"></i></button><button class="kp-step" data-step="1" title="${t('timeline.key-popup.next.title')}"><i class="fa-solid fa-chevron-right"></i></button><button class="kp-close" title="${t('timeline.key-popup.close.title')}"><i class="fa-solid fa-xmark"></i></button></div>
+      <label><span>${t('timeline.key-popup.frame')}</span><input data-kp="frame" inputmode="numeric" spellcheck="false"></label>
       <label hidden><span class="axis">W</span><input data-kp="3" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis x">X</span><input data-kp="0" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis y">Y</span><input data-kp="1" inputmode="decimal" spellcheck="false"></label>
       <label><span class="axis z">Z</span><input data-kp="2" inputmode="decimal" spellcheck="false"></label>
       <div class="kp-kinds">${Object.entries(INTERPOLATION_NAMES).map(([kind, label]) => `<button data-kind="${kind}">${label}</button>`).join('')}</div>
-      <button class="kp-delete">Удалить ключ</button>
+      <button class="kp-delete">${t('timeline.key-popup.delete')}</button>
       <p class="kp-still" hidden></p>`;
     document.body.append(popup);
     this.popup = popup;
@@ -953,15 +953,15 @@ export class Timeline extends EventTarget {
     curve.className = 'key-popup curve-popup';
     curve.inert = true;
     curve.innerHTML = `
-      <div class="kp-head"><span>Кривая перехода</span></div>
-        <canvas class="kp-graph" title="Кривая перехода к следующему ключу: потяните за ручки, чтобы сделать свою"></canvas>
+      <div class="kp-head"><span>${t('timeline.curve.title')}</span></div>
+        <canvas class="kp-graph" title="${t('timeline.curve.graph.title')}"></canvas>
         <div class="kp-families">
-          <button data-family="" title="Мягкий разгон и торможение (smoothstep)">Обычная</button>
+          <button data-family="" title="${t('timeline.curve.default.title')}">${t('timeline.curve.default')}</button>
           ${Object.entries(EASE_FAMILIES).map(([family, { label }]) => `<button data-family="${family}">${label}</button>`).join('')}
-          <button data-family="custom" disabled title="Своя кривая: задаётся ручками на графике">Своя</button>
+          <button data-family="custom" disabled title="${t('timeline.curve.custom.title')}">${t('timeline.curve.custom')}</button>
         </div>
-        <div class="kp-dirs">${EASE_DIRECTIONS.map((direction) => `<button data-direction="${direction}" title="${{ In: 'Разгон: медленно в начале', Out: 'Торможение: медленно в конце', InOut: 'Разгон и торможение' }[direction]}">${direction}</button>`).join('')}</div>
-        <button class="kp-preview" title="Предпросмотр: переход от этого ключа к следующему по кругу, с секундой паузы в начале и в конце"><i class="fa-solid fa-play"></i><span>Предпросмотр</span></button>
+        <div class="kp-dirs">${EASE_DIRECTIONS.map((direction) => `<button data-direction="${direction}" title="${{ In: t('timeline.curve.in.title'), Out: t('timeline.curve.out.title'), InOut: t('timeline.curve.inout.title') }[direction]}">${direction}</button>`).join('')}</div>
+        <button class="kp-preview" title="${t('timeline.preview.title')}"><i class="fa-solid fa-play"></i><span>${t('timeline.preview')}</span></button>
 `;
     document.body.append(curve);
     this.curvePopup = curve;
@@ -1165,14 +1165,14 @@ export class Timeline extends EventTarget {
     const stillNote = popup.querySelector('.kp-still');
     const still = Boolean(before) && sameValue(found.value, before.value);
     stillNote.hidden = !still;
-    if (still) stillNote.textContent = `Дубликат предыдущего ключа (кадр ${before.frame}): с кадра ${before.frame} по ${found.frame} значение не меняется — это пауза`;
+    if (still) stillNote.textContent = t('timeline.key.still', { before: before.frame, frame: found.frame });
     for (const button of popup.querySelectorAll('[data-step]')) button.disabled = !this.stepKey(Number(button.dataset.step));
     // The preview: there is something to see only with a key after this one.
     const preview = curve.querySelector('.kp-preview');
     preview.disabled = !next;
     preview.title = next
-      ? 'Предпросмотр: переход от этого ключа к следующему по кругу, с секундой паузы в начале и в конце'
-      : 'Предпросмотр: у этой дорожки нет ключа после этого';
+      ? t('timeline.preview.title')
+      : t('timeline.preview.none.title');
     if (!smooth || !next) this.stopPreview();
     preview.classList.toggle('active', Boolean(this.preview));
     preview.firstElementChild.className = `fa-solid ${this.preview ? 'fa-stop' : 'fa-play'}`;
@@ -1418,7 +1418,7 @@ export class Timeline extends EventTarget {
       menu.replaceChildren(
         ...Object.entries(INTERPOLATION_NAMES).map(([kind, label]) =>
           item(`${kinds.size === 1 && kinds.has(kind) ? '● ' : ''}${label}`, () => this.setInterpolation(kind), kinds.size === 1 && kinds.has(kind))),
-        item('Удалить', () => this.deleteKeys()),
+        item(t('timeline.menu.delete'), () => this.deleteKeys()),
       );
       menu.hidden = false;
       const { width, height } = menu.getBoundingClientRect();
@@ -1523,12 +1523,12 @@ export class Timeline extends EventTarget {
       seconds.textBaseline = 'top';
       const firstTime = Math.max(0, Math.floor(this.scroll / fps / each) * each);
       const lastTime = (this.scroll + width / this.frameWidth) / fps;
-      for (let t = firstTime; t <= lastTime + 1e-9; t += each) {
-        const x = Math.round(this.xOf(t * fps));
-        const inside = t * fps <= length + 1e-9;
+      for (let time = firstTime; time <= lastTime + 1e-9; time += each) {
+        const x = Math.round(this.xOf(time * fps));
+        const inside = time * fps <= length + 1e-9;
         seconds.fillStyle = inside ? colors.dim : colors.border;
         seconds.fillRect(x, 0, 1, 6);
-        const label = `${+t.toFixed(2)} с`;
+        const label = t('timeline.seconds', { value: +time.toFixed(2) });
         seconds.fillText(label, x + 4, 6);
       }
       // A short mark at every whole frame when there is room for it.

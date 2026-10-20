@@ -1,3 +1,4 @@
+import { t, locale, languages, localize } from './i18n.js'; // first: the markup gets its words before anything reads them
 import { Viewport } from './viewport.js';
 import { Editor, MODES, OPERATION_MODES } from './editor.js';
 import { AxisGizmo } from './axis-gizmo.js';
@@ -69,7 +70,7 @@ new SkinMarks(editor); // (what the skin binds to a node picked: its vertices, i
 const posePreview = new PosePreview(editor);
 posePreview.addEventListener('change', () => {
   $('skin-pose').classList.toggle('active', posePreview.on);
-  if (posePreview.on) toast('Пробная поза: модель не меняется', { icon: 'fa-person-walking' });
+  if (posePreview.on) toast(t('app.skin.toast.pose'), { icon: 'fa-person-walking' });
 });
 new SkinHeat(editor); // (and how much: the surface painted by the weight, in the model workspace)
 new ExtrudePopup(document.getElementById('extrude-popup'), viewport, editor);
@@ -128,65 +129,65 @@ const ACTIONS = {
 // called, its node there, its default keys and what it does.
 const hotkeys = new Hotkeys(
   [
-    { id: 'file.new', group: 'Файл', label: 'Новый проект', keys: 'Ctrl+KeyN', run: () => ACTIONS['project-new']() },
-    { id: 'file.open', group: 'Файл', label: 'Открыть…', keys: 'Ctrl+KeyO', run: () => ACTIONS['project-open']() },
-    { id: 'file.save', group: 'Файл', label: 'Сохранить', keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
-    { id: 'file.save-as', group: 'Файл', label: 'Сохранить как…', keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
-    { id: 'file.close', group: 'Файл', label: 'Закрыть проект', keys: 'Ctrl+Shift+KeyQ', run: () => ACTIONS['project-close-file']() },
+    { id: 'file.new', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.new'), keys: 'Ctrl+KeyN', run: () => ACTIONS['project-new']() },
+    { id: 'file.open', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.open'), keys: 'Ctrl+KeyO', run: () => ACTIONS['project-open']() },
+    { id: 'file.save', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.save'), keys: 'Ctrl+KeyS', run: () => ACTIONS['project-save']() },
+    { id: 'file.save-as', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.save-as'), keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
+    { id: 'file.close', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.close'), keys: 'Ctrl+Shift+KeyQ', run: () => ACTIONS['project-close-file']() },
 
-    { id: 'tool.select', group: 'Инструменты', label: 'Выделение', keys: 'KeyQ', run: () => editor.setTool('select') },
-    { id: 'tool.move', group: 'Инструменты', label: 'Перемещение', keys: 'KeyW', run: () => editor.setTool('move') },
-    { id: 'tool.rotate', group: 'Инструменты', label: 'Вращение', keys: 'KeyR', run: () => editor.setTool('rotate') },
-    { id: 'tool.scale', group: 'Инструменты', label: 'Масштаб', keys: 'KeyS', run: () => editor.setTool('scale') },
-    { id: 'tool.pivot', group: 'Инструменты', label: 'Опорная точка', keys: 'KeyD', run: () => editor.setTool('pivot') },
-    { id: 'tool.paint', group: 'Рисование', label: 'Кисть', keys: 'KeyV', run: () => editor.setTool('paint') },
-    { id: 'tool.pipette', group: 'Рисование', label: 'Пипетка', keys: 'KeyI', run: () => editor.setTool('pipette') },
-    { id: 'tool.fill', group: 'Рисование', label: 'Заливка', keys: 'KeyE', run: () => editor.setTool('fill') },
-    { id: 'tool.rect', group: 'Рисование', label: 'Прямоугольник', keys: 'KeyM', run: () => editor.setTool('rect') },
-    { id: 'tool.ellipse', group: 'Рисование', label: 'Эллипс', keys: 'KeyO', run: () => editor.setTool('ellipse') },
-    { id: 'tool.marquee', group: 'Рисование', label: 'Выделение пикселей', keys: '', run: () => editor.setTool('marquee') },
+    { id: 'tool.select', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.select'), keys: 'KeyQ', run: () => editor.setTool('select') },
+    { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => editor.setTool('move') },
+    { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => editor.setTool('rotate') },
+    { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => editor.setTool('scale') },
+    { id: 'tool.pivot', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.pivot'), keys: 'KeyD', run: () => editor.setTool('pivot') },
+    { id: 'tool.paint', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.paint'), keys: 'KeyV', run: () => editor.setTool('paint') },
+    { id: 'tool.pipette', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.pipette'), keys: 'KeyI', run: () => editor.setTool('pipette') },
+    { id: 'tool.fill', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill'), keys: 'KeyE', run: () => editor.setTool('fill') },
+    { id: 'tool.rect', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.rect'), keys: 'KeyM', run: () => editor.setTool('rect') },
+    { id: 'tool.ellipse', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.ellipse'), keys: 'KeyO', run: () => editor.setTool('ellipse') },
+    { id: 'tool.marquee', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.marquee'), keys: '', run: () => editor.setTool('marquee') },
 
-    { id: 'op.place', group: 'Режимы', label: 'Разместить', keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
-    { id: 'op.cut', group: 'Режимы', label: 'Разрез', keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
-    { id: 'op.extrude', group: 'Режимы', label: 'Экструд', keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
-    { id: 'op.polygon', group: 'Режимы', label: 'Полигон', keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
-    { id: 'op.pencil', group: 'Режимы', label: 'Карандаш', keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
-    { id: 'op.collisions', group: 'Режимы', label: 'Коллизии', keys: '', run: () => ACTIONS['toggle-collisions']() },
-    { id: 'op.animation', group: 'Режимы', label: 'Анимация', keys: '', run: () => ACTIONS['toggle-animation']() },
-    { id: 'anim.key', group: 'Анимация', label: 'Поставить ключ', keys: 'KeyK', run: () => animationMode.keyPicked() },
+    { id: 'op.place', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.place'), keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
+    { id: 'op.cut', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.cut'), keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
+    { id: 'op.extrude', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.extrude'), keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
+    { id: 'op.polygon', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.polygon'), keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
+    { id: 'op.pencil', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.pencil'), keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
+    { id: 'op.collisions', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.collisions'), keys: '', run: () => ACTIONS['toggle-collisions']() },
+    { id: 'op.animation', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.animation'), keys: '', run: () => ACTIONS['toggle-animation']() },
+    { id: 'anim.key', group: t('app.hotkeys.group.animation'), label: t('app.hotkeys.anim.key'), keys: 'KeyK', run: () => animationMode.keyPicked() },
 
-    { id: 'edit.select-all', group: 'Правка', label: 'Выделить всё', keys: 'KeyA', run: () => editor.selectAll() },
-    { id: 'edit.make-face', group: 'Правка', label: 'Создать грань', keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
-    { id: 'edit.flip-faces', group: 'Правка', label: 'Инвертировать грань', keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
-    { id: 'edit.delete', group: 'Правка', label: 'Удалить выделенное', keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : deleteSelection() },
+    { id: 'edit.select-all', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.select-all'), keys: 'KeyA', run: () => editor.selectAll() },
+    { id: 'edit.make-face', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.make-face'), keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
+    { id: 'edit.flip-faces', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.flip-faces'), keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
+    { id: 'edit.delete', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.delete'), keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : deleteSelection() },
     // Copying and pasting leave the keys to the system where they have nothing to do.
     // (In the animation mode copying and pasting are the timeline's keys'.)
-    { id: 'edit.copy', group: 'Правка', label: 'Копировать', keys: 'Ctrl+KeyC', run: () => editor.workspace === 'animation' ? timeline.copyKeys() : pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
-    { id: 'edit.cut', group: 'Правка', label: 'Вырезать пиксели', keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
-    { id: 'edit.paste', group: 'Правка', label: 'Вставить', keys: 'Ctrl+KeyV', run: () => editor.workspace === 'animation' ? timeline.pasteKeys() : pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
-    { id: 'edit.undo', group: 'Правка', label: 'Отменить', keys: 'Ctrl+KeyZ', run: () => editor.undo() },
-    { id: 'edit.redo', group: 'Правка', label: 'Повторить', keys: 'Ctrl+KeyY', run: () => editor.redo() },
+    { id: 'edit.copy', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.copy'), keys: 'Ctrl+KeyC', run: () => editor.workspace === 'animation' ? timeline.copyKeys() : pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
+    { id: 'edit.cut', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.cut'), keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
+    { id: 'edit.paste', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.paste'), keys: 'Ctrl+KeyV', run: () => editor.workspace === 'animation' ? timeline.pasteKeys() : pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
+    { id: 'edit.undo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.undo'), keys: 'Ctrl+KeyZ', run: () => editor.undo() },
+    { id: 'edit.redo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.redo'), keys: 'Ctrl+KeyY', run: () => editor.redo() },
 
     // The selection modes, in the order of their buttons. (An operation that
     // cannot work in a mode has its button off, and its key does nothing.)
-    { id: 'mode.object', group: 'Режим выделения', label: 'Объект', keys: 'Digit1', run: () => pickMode('object') },
-    { id: 'mode.face', group: 'Режим выделения', label: 'Грань', keys: 'Digit2', run: () => pickMode('face') },
-    { id: 'mode.edge', group: 'Режим выделения', label: 'Ребро', keys: 'Digit3', run: () => pickMode('edge') },
-    { id: 'mode.vertex', group: 'Режим выделения', label: 'Вершина', keys: 'Digit4', run: () => pickMode('vertex') },
-    { id: 'axis.free', group: 'Фиксация оси', label: 'Свободно', keys: 'Shift+Digit1', run: () => editor.setAxisLock('free') },
-    { id: 'axis.x', group: 'Фиксация оси', label: 'Ось X', keys: 'Shift+Digit2', run: () => editor.setAxisLock('x') },
-    { id: 'axis.y', group: 'Фиксация оси', label: 'Ось Y', keys: 'Shift+Digit3', run: () => editor.setAxisLock('y') },
-    { id: 'axis.z', group: 'Фиксация оси', label: 'Ось Z', keys: 'Shift+Digit4', run: () => editor.setAxisLock('z') },
+    { id: 'mode.object', group: t('app.hotkeys.group.selection-mode'), label: t('app.hotkeys.mode.object'), keys: 'Digit1', run: () => pickMode('object') },
+    { id: 'mode.face', group: t('app.hotkeys.group.selection-mode'), label: t('app.hotkeys.mode.face'), keys: 'Digit2', run: () => pickMode('face') },
+    { id: 'mode.edge', group: t('app.hotkeys.group.selection-mode'), label: t('app.hotkeys.mode.edge'), keys: 'Digit3', run: () => pickMode('edge') },
+    { id: 'mode.vertex', group: t('app.hotkeys.group.selection-mode'), label: t('app.hotkeys.mode.vertex'), keys: 'Digit4', run: () => pickMode('vertex') },
+    { id: 'axis.free', group: t('app.hotkeys.group.axis-lock'), label: t('app.hotkeys.axis.free'), keys: 'Shift+Digit1', run: () => editor.setAxisLock('free') },
+    { id: 'axis.x', group: t('app.hotkeys.group.axis-lock'), label: t('app.hotkeys.axis.x'), keys: 'Shift+Digit2', run: () => editor.setAxisLock('x') },
+    { id: 'axis.y', group: t('app.hotkeys.group.axis-lock'), label: t('app.hotkeys.axis.y'), keys: 'Shift+Digit3', run: () => editor.setAxisLock('y') },
+    { id: 'axis.z', group: t('app.hotkeys.group.axis-lock'), label: t('app.hotkeys.axis.z'), keys: 'Shift+Digit4', run: () => editor.setAxisLock('z') },
 
-    { id: 'view.frame', group: 'Вид', label: 'Показать выделенное', keys: 'KeyF', run: () => ACTIONS.frame() },
-    { id: 'view.views', group: 'Вид', label: 'Три вида', keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
-    { id: 'view.uv', group: 'Вид', label: 'Редактор UV', keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
-    { id: 'view.local', group: 'Вид', label: 'Локальные оси', keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
-    { id: 'view.preview', group: 'Вид', label: 'Просмотр', keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
-    { id: 'view.focus', group: 'Вид', label: 'Фокус', keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
-    { id: 'view.light', group: 'Вид', label: 'Свет', keys: '', run: () => ACTIONS['toggle-light']() },
-    { id: 'view.orientation', group: 'Вид', label: 'Ориентация граней', keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
-    { id: 'view.settings', group: 'Вид', label: 'Настройки', keys: 'Ctrl+Comma', run: () => openSettings() },
+    { id: 'view.frame', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.frame'), keys: 'KeyF', run: () => ACTIONS.frame() },
+    { id: 'view.views', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.views'), keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.uv', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.uv'), keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
+    { id: 'view.local', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.local'), keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
+    { id: 'view.preview', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.preview'), keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
+    { id: 'view.focus', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.focus'), keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
+    { id: 'view.light', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.light'), keys: '', run: () => ACTIONS['toggle-light']() },
+    { id: 'view.orientation', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.orientation'), keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
+    { id: 'view.settings', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.settings'), keys: 'Ctrl+Comma', run: () => openSettings() },
   ],
   // The fixed keys below can't be given to anything else.
   ['Escape', 'Tab', 'Shift+Tab', 'Space', 'Enter', 'NumpadEnter', 'Backspace', 'PageUp', 'PageDown', 'Ctrl+Shift+KeyZ', 'F1'],
@@ -223,20 +224,20 @@ const FIXED_KEYS = {
   'Ctrl+Shift+KeyZ': () => editor.redo(),
 };
 const FIXED_KEY_NOTES = [
-  ['Esc', 'Отменить действие, выйти из режима, снять выделение'],
-  ['Tab / Shift+Tab', 'Следующий / предыдущий режим выделения; в разрезе — вертикальный / горизонтальный'],
-  ['Пробел + ПКМ', 'Панорама камеры'],
-  ['Enter', 'Полигон: замкнуть контур; выделение пикселей: положить перенесённое'],
-  ['Backspace', 'Полигон: убрать последнюю точку'],
-  ['PgUp / PgDn', 'Полигон: сдвинуть плоскость'],
-  ['Ctrl+Shift+Z', 'Повторить'],
-  ['Ctrl (зажат)', 'Мелкая сетка'],
-  ['Shift (зажат)', 'Добавить к выделению, рамка'],
-  ['Alt (зажат)', 'Масштаб с одной стороны'],
-  ['F1 (зажат)', 'Развёртка: приглушить картинку, кроме грани под указателем (на развёртке или на модели)'],
-  ['Alt + колесо', 'Экструд: расширить / сузить вытягиваемую грань на шаг малой сетки'],
-  ['Ctrl / Alt (зажаты)', 'Перетаскивание числового поля: шаг 0.1 / 0.01'],
-  ['X / C / Z (зажаты)', 'При перетаскивании: только по оси X / Y / Z'],
+  ['Esc', t('app.hotkeys.fixed.esc')],
+  ['Tab / Shift+Tab', t('app.hotkeys.fixed.tab')],
+  [t('app.hotkeys.fixed.space-rmb.keys'), t('app.hotkeys.fixed.space-rmb')],
+  ['Enter', t('app.hotkeys.fixed.enter')],
+  ['Backspace', t('app.hotkeys.fixed.backspace')],
+  ['PgUp / PgDn', t('app.hotkeys.fixed.page')],
+  ['Ctrl+Shift+Z', t('app.hotkeys.fixed.redo')],
+  [t('app.hotkeys.fixed.ctrl.keys'), t('app.hotkeys.fixed.ctrl')],
+  [t('app.hotkeys.fixed.shift.keys'), t('app.hotkeys.fixed.shift')],
+  [t('app.hotkeys.fixed.alt.keys'), t('app.hotkeys.fixed.alt')],
+  [t('app.hotkeys.fixed.f1.keys'), t('app.hotkeys.fixed.f1')],
+  [t('app.hotkeys.fixed.alt-wheel.keys'), t('app.hotkeys.fixed.alt-wheel')],
+  [t('app.hotkeys.fixed.ctrl-alt.keys'), t('app.hotkeys.fixed.ctrl-alt')],
+  [t('app.hotkeys.fixed.xcz.keys'), t('app.hotkeys.fixed.xcz')],
 ];
 
 
@@ -271,15 +272,12 @@ for (const button of toolButtons) {
 // The skin (see skin.js): the vertices selected bound to a node, smoothed, let go.
 // Each says what it did (a toast): in the model workspace a skin shows
 // nothing - it bends only as its nodes are posed, in the animation one.
-// (1 вершина привязана, 4 вершины привязаны, 5 вершин привязано)
-const vertexForm = (count) => (count % 10 === 1 && count % 100 !== 11 ? 0 : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14) ? 1 : 2);
-const vertexCount = (count) => `${count} ${['вершина', 'вершины', 'вершин'][vertexForm(count)]}`;
-const done = (count, stem) => `${vertexCount(count)} ${stem}${['а', 'ы', 'о'][vertexForm(count)]}`;
+const vertexCount = (count) => t('app.skin.vertices', { count });
 $('skin-bind').addEventListener('click', () => {
   const id = Number($('skin-node').value);
   const count = editor.selection.size;
   const node = editor.mesh.objects.find((object) => object.id === id)?.name;
-  if (id && bindToNode(editor, id)) toast(`${done(count, 'привязан')} к «${node}»`, { icon: 'fa-link' });
+  if (id && bindToNode(editor, id)) toast(t('app.skin.toast.bound', { count, node }), { icon: 'fa-link' });
 });
 // The weight of the node chosen, set on the selected vertices.
 const skinWeight = () => {
@@ -295,10 +293,10 @@ const applySkinWeight = () => {
   const done = setWeight(editor, id, weight);
   if (!done) return;
   const set = count - done.stuck;
-  const stuck = `${vertexCount(done.stuck)} с весом 1: их объект не в узле, остаток отдать некуда`;
-  if (!done.stuck) toast(`Вес ${weight} к «${node}»: ${vertexCount(count)}`, { icon: 'fa-weight-hanging' });
-  else if (set === 0) toast(`Вес не изменён — ${stuck}`, { icon: 'fa-triangle-exclamation', tone: 'warn' });
-  else toast(`Вес ${weight} к «${node}»: ${vertexCount(set)}; ${stuck}`, { icon: 'fa-weight-hanging' });
+  const stuck = t('app.skin.weight.stuck', { count: done.stuck });
+  if (!done.stuck) toast(t('app.skin.toast.weight', { weight, node, vertices: vertexCount(count) }), { icon: 'fa-weight-hanging' });
+  else if (set === 0) toast(t('app.skin.toast.weight-unchanged', { stuck }), { icon: 'fa-triangle-exclamation', tone: 'warn' });
+  else toast(t('app.skin.toast.weight-partial', { weight, node, vertices: vertexCount(set), stuck }), { icon: 'fa-weight-hanging' });
 };
 $('skin-weight-set').addEventListener('click', applySkinWeight);
 $('skin-weight-value').addEventListener('keydown', (event) => {
@@ -317,18 +315,18 @@ scrubbable($('skin-weight-value'), {
 $('skin-weight-set').addEventListener('mousedown', (event) => event.preventDefault());
 $('skin-auto').addEventListener('click', () => {
   const count = autoWeights(editor);
-  if (count) toast(`Веса по костям: ${vertexCount(count)}`, { icon: 'fa-wand-magic-sparkles' });
+  if (count) toast(t('app.skin.toast.auto', { vertices: vertexCount(count) }), { icon: 'fa-wand-magic-sparkles' });
 });
 $('skin-auto').addEventListener('mousedown', (event) => event.preventDefault());
 $('skin-pose').addEventListener('click', () => posePreview.toggle());
 $('skin-pose').addEventListener('mousedown', (event) => event.preventDefault());
 $('skin-smooth').addEventListener('click', () => {
   const count = editor.selection.size;
-  if (smoothWeights(editor)) toast(`Веса сглажены: ${vertexCount(count)}`, { icon: 'fa-wave-square' });
+  if (smoothWeights(editor)) toast(t('app.skin.toast.smoothed', { vertices: vertexCount(count) }), { icon: 'fa-wave-square' });
 });
 $('skin-unbind').addEventListener('click', () => {
   const count = editor.selection.size;
-  if (unbind(editor)) toast(`${done(count, 'отвязан')}`, { icon: 'fa-link-slash' });
+  if (unbind(editor)) toast(t('app.skin.toast.unbound', { count }), { icon: 'fa-link-slash' });
 });
 $('skin-node').addEventListener('change', (event) => event.target.blur());
 for (const id of ['skin-bind', 'skin-smooth', 'skin-unbind']) $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
@@ -504,6 +502,13 @@ for (const input of coordInputs) {
 for (const [id, { label }] of Object.entries(THEMES)) $('theme').add(new Option(label, id));
 $('theme').value = theme.id;
 $('theme').addEventListener('change', (event) => setTheme(event.target.value));
+// The language: kept for the next start (the words are put in as the page starts).
+for (const { id, name } of languages) $('language').add(new Option(name, id));
+$('language').value = locale;
+$('language').addEventListener('change', (event) => {
+  window.vertex.locale.set(event.target.value);
+  $('language-note').hidden = event.target.value === locale;
+});
 
 // --- grid controls (top bar): the snap step and its fine division -------
 
@@ -527,11 +532,11 @@ function showGrid() {
       const index = COARSE_STEPS.indexOf(step);
       control.slider.value = index;
       control.value.textContent = COARSE_LABELS[index];
-      control.output.textContent = `Шаг ${COARSE_LABELS[index]}`;
+      control.output.textContent = t('app.grid.step', { step: COARSE_LABELS[index] });
     } else {
       control.slider.value = fineDivisor;
       control.value.textContent = `÷${fineDivisor}`;
-      control.output.textContent = `Клетка делится на ${fineDivisor} — шаг ${+(step / fineDivisor).toFixed(5)}`;
+      control.output.textContent = t('app.grid.fine', { divisor: fineDivisor, step: +(step / fineDivisor).toFixed(5) });
     }
   }
 }
@@ -608,7 +613,7 @@ const ZOOM_SETTINGS = [
   },
   {
     id: 'zoom-smoothness', key: 'vertex.zoomSmoothness', property: 'zoomSmoothness',
-    label: (value) => (value === 0 ? 'мгновенно' : String(value)),
+    label: (value) => (value === 0 ? t('app.settings.zoom.instant') : String(value)),
   },
 ];
 for (const { id, key, property, label } of ZOOM_SETTINGS) {
@@ -651,10 +656,10 @@ function showHotkeyList(note = '') {
     const keys = document.createElement('button');
     keys.className = 'hotkey-keys';
     keys.dataset.hotkey = binding.id;
-    keys.textContent = capturingHotkey === binding.id ? 'Нажмите клавиши…' : hotkeys.label(binding.id);
+    keys.textContent = capturingHotkey === binding.id ? t('app.settings.hotkeys.capturing') : hotkeys.label(binding.id);
     keys.classList.toggle('capturing', capturingHotkey === binding.id);
     keys.classList.toggle('unset', !hotkeys.keysOf(binding.id));
-    keys.title = 'Нажмите, затем нажмите новое сочетание клавиш · Esc — оставить как есть';
+    keys.title = t('app.settings.hotkeys.keys-title');
     keys.addEventListener('click', () => {
       capturingHotkey = capturingHotkey === binding.id ? null : binding.id;
       showHotkeyList();
@@ -662,7 +667,7 @@ function showHotkeyList(note = '') {
     const reset = document.createElement('button');
     reset.className = 'hotkey-reset';
     reset.innerHTML = '<i class="fa-solid fa-rotate-left"></i>';
-    reset.title = `Вернуть по умолчанию: ${comboLabel(binding.keys)}`;
+    reset.title = t('app.settings.hotkeys.reset-title', { keys: comboLabel(binding.keys) });
     reset.disabled = !hotkeys.isCustom(binding.id);
     reset.addEventListener('click', () => {
       capturingHotkey = null;
@@ -671,7 +676,7 @@ function showHotkeyList(note = '') {
     row.append(label, keys, reset);
     list.append(row);
   }
-  heading('Не настраиваются');
+  heading(t('app.settings.hotkeys.fixed-heading'));
   for (const [keys, meaning] of FIXED_KEY_NOTES) {
     const row = document.createElement('div');
     row.className = 'hotkey-row fixed';
@@ -701,9 +706,9 @@ window.addEventListener('keydown', (event) => {
   capturingHotkey = null;
   const loser = hotkeys.set(id, combo);
   if (loser === false) {
-    showHotkeyList(`${comboLabel(combo)} — фиксированная клавиша, её нельзя назначить`);
+    showHotkeyList(t('app.settings.hotkeys.fixed-key', { keys: comboLabel(combo) }));
   } else if (loser) {
-    showHotkeyList(`${comboLabel(combo)} было у действия «${loser.label}» — оно осталось без клавиши`);
+    showHotkeyList(t('app.settings.hotkeys.taken', { keys: comboLabel(combo), action: loser.label }));
   }
 }, true);
 $('hotkeys-reset').addEventListener('click', () => {
@@ -819,14 +824,14 @@ for (const button of placeButtons) {
 }
 document.getElementById('place-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-const OPERATION_NAMES = { place: 'Размещение', cut: 'Разрез', extrude: 'Экструд', polygon: 'Полигон', pencil: 'Карандаш' };
+const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
 // --- the mirror (top bar) ------------------------------------------------------
 
 const mirrorDisplay = new MirrorDisplay(viewport, editor);
-const PARTS = { 0: 'выкл', 1: '2 части', 2: '4 части', 3: '8 частей' };
+const PARTS = { 0: t('app.mirror.off'), 1: t('app.mirror.parts', { count: 2 }), 2: t('app.mirror.parts', { count: 4 }), 3: t('app.mirror.parts', { count: 8 }) };
 function closeMirrorPopup() {
   const open = !$('mirror-popup').hidden;
   $('mirror-popup').hidden = true;
@@ -876,13 +881,13 @@ function showMirror() {
   document.querySelector('[data-mirror-note="global"]').textContent = PARTS[globalAxes.size];
   document.querySelector('[data-mirror-note="local"]').textContent = object
     ? `«${object.name}»: ${PARTS[localAxes.length]}`
-    : 'редактируемый объект не один';
+    : t('app.mirror.not-one');
   $('mirror-toggle').classList.toggle('active', editor.mirror.active()); // any mirror, anywhere
   $('mirror-toggle').title = globalAxes.size
-    ? `Зеркало: глобальное по ${[...globalAxes].map((a) => a.toUpperCase()).join(', ')}`
+    ? t('app.mirror.title.global', { axes: [...globalAxes].map((a) => a.toUpperCase()).join(', ') })
     : localAxes.length
-      ? `Зеркало: локальное у «${object.name}» по ${localAxes.map((a) => a.toUpperCase()).join(', ')}`
-      : 'Зеркало: выключено. Правки повторяются по другую сторону плоскости';
+      ? t('app.mirror.title.local', { name: object.name, axes: localAxes.map((a) => a.toUpperCase()).join(', ') })
+      : t('app.mirror.title.off');
   mirrorDisplay.update();
 }
 
@@ -1165,7 +1170,7 @@ const showProject = () => {
   document.title = $('welcome').hidden ? `${project.dirty ? '● ' : ''}${project.name} — verTEX` : 'verTEX';
 };
 project.addEventListener('change', showProject);
-project.addEventListener('saved', () => toast(`Проект «${project.name}» сохранён`));
+project.addEventListener('saved', () => toast(t('app.project.saved', { name: project.name })));
 new MutationObserver(showProject).observe($('welcome'), { attributes: true, attributeFilter: ['hidden'] });
 showProject();
 
@@ -1238,15 +1243,15 @@ function askExport(title) {
 // what Godot reads best.)
 const EXPORTS = {
   gltf: {
-    title: 'Экспорт в glTF',
-    kinds: [{ name: 'glTF, один двоичный файл', extension: 'glb' }, { name: 'glTF, текстовый', extension: 'gltf' }],
+    title: t('app.export.gltf.title'),
+    kinds: [{ name: t('app.export.gltf.glb'), extension: 'glb' }, { name: t('app.export.gltf.text'), extension: 'gltf' }],
   },
 };
 let exporting = false;
 async function exportModel(format) {
   const api = window.vertex?.export;
   if (!api) {
-    await tell('Экспорт заработает после перезапуска программы.');
+    await tell(t('app.export.restart'));
     return;
   }
   if (exporting || editor.busy()) return;
@@ -1256,7 +1261,7 @@ async function exportModel(format) {
     const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(model.objects.find((other) => other.id === object.parent)));
     const meshes = model.objects.filter((object) => object.kind !== 'node' && !hidden(object));
     if (!model.faces.some((face) => meshes.some((object) => object.id === model.vertexObject[face[0]]))) {
-      await tell('Нечего экспортировать', 'В сцене нет ни одной видимой грани.');
+      await tell(t('app.export.nothing'), t('app.export.nothing.detail'));
       return;
     }
     const options = await askExport(EXPORTS[format].title);
@@ -1277,7 +1282,7 @@ async function exportModel(format) {
     const sized = options.scale === 1 ? model : scaledModel(model, options.scale);
     const triangles = (face) => mesh.triangulate(face);
     const result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, pictures, binary: target.extension === 'glb' }));
-    if (result.error) await tell('Не удалось экспортировать модель', result.error);
+    if (result.error) await tell(t('app.export.failed'), result.error);
   } finally {
     exporting = false;
   }
@@ -1353,7 +1358,7 @@ function showAtlases() {
         row.className = 'atlas-row';
         row.classList.toggle('current', one.id === editor.atlasId);
         row.dataset.atlas = one.id;
-        row.title = `Атлас «${one.name}»: ${one.ppu} пикс. на единицу, ${one.width} × ${one.height}. Щелчок — работать с ним, двойной щелчок по имени — переименовать`;
+        row.title = t('app.atlas.row.title', { name: one.name, ppu: one.ppu, width: one.width, height: one.height });
         const name = document.createElement('span');
         name.className = 'atlas-name';
         name.textContent = one.name;
@@ -1362,7 +1367,7 @@ function showAtlases() {
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.dataset.remove = one.id;
-        remove.title = 'Удалить атлас: его объекты останутся без текстуры (можно отменить)';
+        remove.title = t('app.atlas.remove.title');
         remove.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
         remove.disabled = false; // (with several, the last too: the project may have none)
         row.append(name, figures, remove);
@@ -1371,8 +1376,8 @@ function showAtlases() {
       Object.assign(document.createElement('button'), {
         type: 'button',
         className: 'atlas-add',
-        title: 'Новый атлас: пустой, со своим размером пикселя. На него переносятся объекты — в их свойствах или кнопкой в UV-редакторе',
-        innerHTML: '<i class="fa-solid fa-plus"></i><span>Атлас</span>',
+        title: t('app.atlas.add.title'),
+        innerHTML: `<i class="fa-solid fa-plus"></i><span>${t('app.atlas.add.text')}</span>`,
       }),
     );
   }
@@ -1389,9 +1394,9 @@ $('atlas-list').addEventListener('click', async (event) => {
     const atlas = editor.atlasById(remove.dataset.remove);
     const count = editor.mesh.objects.filter((object) => object.atlas === atlas?.id).length;
     const detail = count
-      ? `${count} ${['объект останется', 'объекта останутся', 'объектов останутся'][vertexForm(count)]} без текстуры, нарисованное на атласе пропадёт. Действие можно отменить.`
-      : 'Нарисованное на нём пропадёт. Действие можно отменить.';
-    if (atlas && (await confirmIt(`Удалить атлас «${atlas.name}»?`, detail, 'Удалить'))) editor.removeAtlas(atlas.id);
+      ? t('app.atlas.remove.detail', { count })
+      : t('app.atlas.remove.detail-empty');
+    if (atlas && (await confirmIt(t('app.atlas.remove.message', { name: atlas.name }), detail, t('app.atlas.remove.confirm')))) editor.removeAtlas(atlas.id);
     return;
   }
   const add = event.target.closest('.atlas-add');
@@ -1499,7 +1504,7 @@ const retro = {
   // The palette: a preset's colours, the brush's colour added, a colour taken out, or the picture's own found.
   const presets = () => {
     const brush = colorPopup.palette;
-    return { ...PALETTES, ...(brush?.colors?.length ? { [`Палитра кисти: ${brush.name}`]: brush.colors.map((color) => hexOf(color)) } : {}) };
+    return { ...PALETTES, ...(brush?.colors?.length ? { [t('app.retro.preset.brush', { name: brush.name })]: brush.colors.map((color) => hexOf(color)) } : {}) };
   };
   field('preset').addEventListener('change', () => {
     const colors = presets()[field('preset').value];
@@ -1567,13 +1572,13 @@ function showRetroPalette() {
   const preset = popup.elements.preset;
   const names = Object.keys(retro.presets?.() ?? PALETTES);
   const same = names.find((name) => JSON.stringify((retro.presets?.() ?? PALETTES)[name]) === JSON.stringify(settings.colors));
-  preset.replaceChildren(new Option(same ? same : settings.colors.length ? `Своя: ${settings.colors.length} цв.` : 'Готовая палитра…', '', true, true), ...names.filter((name) => name !== same).map((name) => new Option(name, name)));
+  preset.replaceChildren(new Option(same ? same : settings.colors.length ? t('app.retro.preset.own', { count: settings.colors.length }) : t('app.retro.preset.pick'), '', true, true), ...names.filter((name) => name !== same).map((name) => new Option(name, name)));
   popup.querySelector('.retro-swatches').replaceChildren(...settings.colors.map((color, k) => {
     const swatch = document.createElement('i');
     swatch.className = 'retro-swatch';
     swatch.style.background = color;
     swatch.dataset.color = k;
-    swatch.title = `${color} — щелчок убирает из палитры`;
+    swatch.title = t('app.retro.swatch.title', { color });
     return swatch;
   }));
 }
@@ -1584,10 +1589,10 @@ function openRetro(anchor) {
   const { popup } = retro;
   const { rect, atlas, scope, charts } = editor.retro;
   popup.querySelector('.retro-scope').textContent = scope === 'marquee'
-    ? `выделение ${rect.w}×${rect.h}`
+    ? t('app.retro.scope.selection', { w: rect.w, h: rect.h })
     : scope === 'charts'
-      ? charts === 1 ? `лоскут ${rect.w}×${rect.h}` : `лоскутов: ${charts}`
-      : `атлас ${atlas.name} ${rect.w}×${rect.h}`;
+      ? charts === 1 ? t('app.retro.scope.chart', { w: rect.w, h: rect.h }) : t('app.retro.scope.charts', { count: charts })
+      : t('app.retro.scope.atlas', { name: atlas.name, w: rect.w, h: rect.h });
   popup.hidden = false;
   retro.fill();
   // In the middle of the window (it may be dragged elsewhere by its title, see below).
@@ -1713,7 +1718,7 @@ editor.addEventListener('change', () => {
 $('atlas-open').addEventListener('click', () => atlasLink.open());
 $('atlas-reveal').addEventListener('click', () => atlasLink.reveal());
 $('atlas-repack').addEventListener('click', async () => {
-  if (await confirmIt('Разложить все грани на атласе заново?', 'Всё нарисованное на текстуре будет потеряно. Действие можно отменить.', 'Разложить')) editor.repackAtlas();
+  if (await confirmIt(t('app.atlas.repack.message'), t('app.atlas.repack.detail'), t('app.atlas.repack.confirm'))) editor.repackAtlas();
 });
 for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
@@ -1863,7 +1868,7 @@ function setViewsSize(share) {
     panel.append(body);
     const show = () => {
       panel.classList.toggle('folded', folded.includes(id));
-      header.title = folded.includes(id) ? 'Развернуть' : 'Свернуть';
+      header.title = folded.includes(id) ? t('app.panel.unfold') : t('app.panel.fold');
       // Folded fields are out of reach of the keyboard too.
       inner.inert = folded.includes(id);
     };
@@ -1949,14 +1954,14 @@ function showSkin() {
   const parts = summary.nodes.slice(0, 3).map(({ name, share }) => `${name} ${Math.round(share * 100)}%`);
   if (summary.nodes.length > 3) parts.push('…');
   const line = summary.bound === 0
-    ? `Не в скине${parts.length ? ` — двигается с объектом (${parts.join(', ')})` : ''}`
-    : `${parts.join(' · ')}${summary.free ? ` · без узла ${summary.free}` : ''}`;
-  panel.querySelector('.skin-summary').textContent = `${summary.bound} из ${summary.count} в скине · ${line}`;
+    ? parts.length ? t('app.skin.summary.unbound-moves', { parts: parts.join(', ') }) : t('app.skin.summary.unbound')
+    : `${parts.join(' · ')}${summary.free ? ` · ${t('app.skin.summary.free', { count: summary.free })}` : ''}`;
+  panel.querySelector('.skin-summary').textContent = t('app.skin.summary', { bound: summary.bound, count: summary.count, line });
 }
 
-// 532 -> "532 Б", 20480 -> "20 КБ", 1572864 -> "1.5 МБ".
+// 532 -> "532 B", 20480 -> "20 KB", 1572864 -> "1.5 MB" (the units in the interface's language).
 function formatBytes(bytes) {
-  const units = ['Б', 'КБ', 'МБ', 'ГБ'];
+  const units = [t('app.units.b'), t('app.units.kb'), t('app.units.mb'), t('app.units.gb')];
   let unit = 0;
   while (bytes >= 1024 && unit < units.length - 1) {
     bytes /= 1024;
@@ -2019,7 +2024,7 @@ function refresh() {
     if (!rotation || document.activeElement === input) continue;
     input.value = +rotation[input.dataset.rotation].toFixed(4);
   }
-  $('selection-count').textContent = tool === 'pivot' && point ? 'Опорная точка' : 'Позиция';
+  $('selection-count').textContent = tool === 'pivot' && point ? t('app.properties.pivot') : t('app.properties.position');
   // The objects' own properties: of the objects the selection is in. A box
   // half-ticked when they differ.
   const owners = picked.size ? editor.objectsInHand().map((index) => mesh.objects[index]).filter(Boolean) : [];
@@ -2031,7 +2036,7 @@ function refresh() {
     const select = $('object-atlas');
     select.replaceChildren(
       ...(ids.size > 1 ? [new Option('—', '*', true, true)] : []),
-      new Option('нет', '', false, ids.size === 1 && ids.has('')),
+      new Option(t('app.object.atlas.none'), '', false, ids.size === 1 && ids.has('')),
       ...editor.atlases.map((atlas) => new Option(atlas.name, atlas.id, false, ids.size === 1 && ids.has(atlas.id))),
     );
   }
@@ -2056,7 +2061,7 @@ function refresh() {
   const scope = objects.length ? objects : islands;
   const counted = new Set(scope.flatMap((island) => island.vertices));
   $('stats-title').textContent =
-    objects.length === 0 ? 'Сцена' : objects.length === 1 ? 'Объект' : `Объекты (${objects.length})`;
+    objects.length === 0 ? t('app.stats.scene') : objects.length === 1 ? t('app.stats.object') : t('app.stats.objects', { count: objects.length });
   $('stat-vertices').textContent = counted.size;
   $('stat-edges').textContent = edges.filter(([a]) => counted.has(a)).length;
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
@@ -2076,11 +2081,11 @@ function refresh() {
   // A planet for the world's axes, a pin for the object's own.
   $('local-toggle').firstElementChild.className = `fa-solid ${editor.localAxes ? 'fa-location-dot' : 'fa-globe'}`;
   $('local-toggle').title = editor.localAxes
-    ? `Локальные оси включены: перемещение и вращение идут вдоль осей самого объекта (${hotkeys.label('view.local')}). Нажмите, чтобы вернуть мировые`
-    : `Локальные оси выключены: перемещение и вращение идут вдоль осей мира (${hotkeys.label('view.local')}). Нажмите, чтобы включить`;
+    ? t('app.local-axes.on', { keys: hotkeys.label('view.local') })
+    : t('app.local-axes.off', { keys: hotkeys.label('view.local') });
   $('snap-toggle').title = editor.snapGrid.enabled
-    ? 'Привязка к сетке включена: перемещение и масштаб идут по шагам сетки. Нажмите, чтобы отвязать'
-    : 'Привязка к сетке выключена: перемещение и масштаб свободные. Нажмите, чтобы привязать';
+    ? t('app.snapping.on')
+    : t('app.snapping.off');
   document.querySelector('[data-action="make-face"]').disabled = !editor.canMakeFace();
   document.querySelector('[data-action="flip-faces"]').disabled = editor.facesToFlip().length === 0;
   // The banner keeps its last name while it slides away.

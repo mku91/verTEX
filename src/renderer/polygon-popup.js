@@ -1,12 +1,13 @@
 import { PlaneHatch } from './plane-hatch.js';
 import { axisColor } from './theme.js';
+import { t } from './i18n.js';
 
 // The chosen axis is the one the work plane is perpendicular to.
 const CAPTIONS = {
-  free: 'Выберите плоскость',
-  x: 'Плоскость YZ',
-  y: 'Плоскость XZ',
-  z: 'Плоскость XY',
+  free: t('polygon-popup.choose'),
+  x: t('polygon-popup.plane', { plane: 'YZ' }),
+  y: t('polygon-popup.plane', { plane: 'XZ' }),
+  z: t('polygon-popup.plane', { plane: 'XY' }),
 };
 const AXES = ['x', 'y', 'z'];
 
@@ -27,7 +28,7 @@ export class PolygonPopup {
       button.className = `plane-button ${axis}`;
       button.dataset.plane = axis;
       button.textContent = axis.toUpperCase();
-      button.title = `${CAPTIONS[axis]} — перпендикулярно оси ${axis.toUpperCase()}`;
+      button.title = t('polygon-popup.button', { caption: CAPTIONS[axis], axis: axis.toUpperCase() });
       button.addEventListener('pointerenter', () => this.point(axis));
       button.addEventListener('pointerleave', () => this.point(null));
       button.addEventListener('click', () => {

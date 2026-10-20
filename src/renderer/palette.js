@@ -10,6 +10,8 @@
 //
 // A palette is { name, colors }, the colours [r, g, b] each (0..255).
 
+import { t } from './i18n.js';
+
 export const PALETTE_FILES = '.aseprite,.ase,.gpl,.pal,.hex,.act,.png';
 const MOST = 1024; // colours; a picture that is no palette would give no end of them
 
@@ -29,7 +31,7 @@ const linesOf = (bytes) => textOf(bytes).split(/\r?\n/).map((line) => line.trim(
 // GIMP: a heading, then "r g b" and whatever the colour is called.
 function gpl(bytes) {
   const lines = linesOf(bytes);
-  if (!/^GIMP Palette/i.test(lines[0] ?? '')) fail('это не палитра GIMP: нет заголовка «GIMP Palette»');
+  if (!/^GIMP Palette/i.test(lines[0] ?? '')) fail(t('palette.error.gpl'));
   let name = null;
   const colors = [];
   for (const line of lines.slice(1)) {
@@ -50,7 +52,7 @@ function jasc(bytes) {
 // Microsoft's: "RIFF", a size, "PAL data", a size, a version, how many, then r g b and a flag each.
 function riff(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 24) fail('файл палитры обрывается');
+  if (bytes.length < 24) fail(t('palette.error.truncated'));
   const count = view.getUint16(22, true);
   const colors = [];
   for (let i = 0; i < count && 24 + i * 4 + 3 <= bytes.length; i++) colors.push([...bytes.subarray(24 + i * 4, 27 + i * 4)]);
@@ -65,7 +67,7 @@ function hex(bytes) {
 
 // Adobe's: 256 colours; a longer file says after them how many of those are meant.
 function act(bytes) {
-  if (bytes.length < 768) fail('это не таблица цветов .act: в ней меньше 256 цветов');
+  if (bytes.length < 768) fail(t('palette.error.act'));
   const count = bytes.length >= 770 ? (bytes[768] << 8) | bytes[769] || 256 : 256;
   const colors = [];
   for (let i = 0; i < Math.min(count, 256); i++) colors.push([...bytes.subarray(i * 3, i * 3 + 3)]);
@@ -76,8 +78,8 @@ function act(bytes) {
 // of the first frame - the new kind (0x2019), or one of the two old ones.
 function aseprite(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (bytes.length < 128 + 16 || view.getUint16(4, true) !== 0xa5e0) fail('это не файл Aseprite');
-  if (view.getUint16(128 + 4, true) !== 0xf1fa) fail('файл Aseprite повреждён: нет первого кадра');
+  if (bytes.length < 128 + 16 || view.getUint16(4, true) !== 0xa5e0) fail(t('palette.error.aseprite'));
+  if (view.getUint16(128 + 4, true) !== 0xf1fa) fail(t('palette.error.aseprite-frame'));
   const frameEnd = Math.min(bytes.length, 128 + view.getUint32(128, true));
   const chunks = view.getUint32(128 + 12, true) || view.getUint16(128 + 6, true);
   let fresh = null;
@@ -118,7 +120,7 @@ function aseprite(bytes) {
     at += size;
   }
   const colors = (fresh ?? old ?? []).filter(Boolean);
-  if (colors.length === 0) fail('в этом файле Aseprite нет палитры');
+  if (colors.length === 0) fail(t('palette.error.aseprite-palette'));
   return { colors };
 }
 
@@ -128,7 +130,7 @@ async function picture(bytes) {
   try {
     image = await createImageBitmap(new Blob([bytes]), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
   } catch {
-    fail('картинка не читается');
+    fail(t('palette.error.picture'));
   }
   const canvas = new OffscreenCanvas(image.width, image.height);
   const context = canvas.getContext('2d');
@@ -143,7 +145,7 @@ async function picture(bytes) {
     seen.add(key);
     colors.push([data[i], data[i + 1], data[i + 2]]);
   }
-  if (colors.length > MOST) fail(`в картинке больше ${MOST} цветов: это не палитра`);
+  if (colors.length > MOST) fail(t('palette.error.too-many', { most: MOST }));
   return { colors };
 }
 
@@ -155,11 +157,11 @@ export async function readPalette(fileName, bytes) {
   let read;
   if (extension === 'aseprite' || extension === 'ase') read = aseprite(bytes);
   else if (extension === 'gpl') read = gpl(bytes);
-  else if (extension === 'pal') read = starts('RIFF') ? riff(bytes) : starts('JASC-PAL') ? jasc(bytes) : fail('неизвестный вид файла .pal: читаются JASC и RIFF');
+  else if (extension === 'pal') read = starts('RIFF') ? riff(bytes) : starts('JASC-PAL') ? jasc(bytes) : fail(t('palette.error.pal'));
   else if (extension === 'hex') read = hex(bytes);
   else if (extension === 'act') read = act(bytes);
   else if (extension === 'png') read = await picture(bytes);
-  else fail(`файлы «.${extension}» не читаются: нужен ${PALETTE_FILES.split(',').join(', ')}`);
+  else fail(t('palette.error.extension', { extension, files: PALETTE_FILES.split(',').join(', ') }));
   // Each colour once, in the order they came.
   const seen = new Set();
   const colors = read.colors.filter((color) => {
@@ -169,6 +171,6 @@ export async function readPalette(fileName, bytes) {
     seen.add(key);
     return true;
   }).slice(0, MOST);
-  if (colors.length === 0) fail('в файле не нашлось ни одного цвета');
+  if (colors.length === 0) fail(t('palette.error.no-colors'));
   return { name: read.name || fileName.replace(/\.[^.]*$/, ''), colors };
 }

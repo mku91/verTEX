@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
@@ -21,55 +21,55 @@
   <div id="app">
     <header id="topbar">
       <span class="logo">ver<b>TEX</b></span>
-      <div id="modes" title="Режим выделения: клавиши 1, 2, 3, 4 или Tab / Shift+Tab">
+      <div id="modes" data-i18n-title="html.modes.title">
         <span id="mode-slider"></span>
-        <button data-mode="object">Объект</button>
-        <button data-mode="face">Грань</button>
-        <button data-mode="edge">Ребро</button>
-        <button data-mode="vertex">Вершина</button>
+        <button data-mode="object" data-i18n="html.modes.mode-object.text"></button>
+        <button data-mode="face" data-i18n="html.modes.mode-face.text"></button>
+        <button data-mode="edge" data-i18n="html.modes.mode-edge.text"></button>
+        <button data-mode="vertex" data-i18n="html.modes.mode-vertex.text"></button>
       </div>
       <div id="history-actions" class="top-actions">
-        <button id="undo-button" data-action="undo" title="Отменить" aria-label="Отменить">
+        <button id="undo-button" data-action="undo" data-i18n-title="html.undo-button.title" data-i18n-aria-label="html.undo-button.aria-label">
           <i class="fa-solid fa-arrow-rotate-left"></i>
         </button>
-        <button id="redo-button" data-action="redo" title="Повторить" aria-label="Повторить">
+        <button id="redo-button" data-action="redo" data-i18n-title="html.redo-button.title" data-i18n-aria-label="html.redo-button.aria-label">
           <i class="fa-solid fa-arrow-rotate-right"></i>
         </button>
       </div>
       <div id="top-actions" class="top-actions">
-        <button id="cut-toggle" data-action="toggle-cut" title="Разрез: разрез объекта по линии на грани (K)" aria-label="Разрез">
+        <button id="cut-toggle" data-action="toggle-cut" data-i18n-title="html.cut-toggle.title" data-i18n-aria-label="html.cut-toggle.aria-label">
           <i class="fa-solid fa-scissors"></i>
         </button>
-        <button id="extrude-toggle" data-action="toggle-extrude" title="Экструд: выдавить грани или рёбра (Ctrl+E)" aria-label="Экструд">
+        <button id="extrude-toggle" data-action="toggle-extrude" data-i18n-title="html.extrude-toggle.title" data-i18n-aria-label="html.extrude-toggle.aria-label">
           <i class="fa-solid fa-arrow-up-from-bracket"></i>
         </button>
-        <button id="polygon-toggle" data-action="toggle-polygon" title="Полигон: нарисовать плоский полигон по точкам сетки (G)" aria-label="Полигон">
+        <button id="polygon-toggle" data-action="toggle-polygon" data-i18n-title="html.polygon-toggle.title" data-i18n-aria-label="html.polygon-toggle.aria-label">
           <i class="fa-solid fa-draw-polygon"></i>
         </button>
-        <button id="pencil-toggle" data-action="toggle-pencil" title="Карандаш: рисовать вершины и рёбра, вытягивая их из вершин (P)" aria-label="Карандаш">
+        <button id="pencil-toggle" data-action="toggle-pencil" data-i18n-title="html.pencil-toggle.title" data-i18n-aria-label="html.pencil-toggle.aria-label">
           <i class="fa-solid fa-pencil"></i>
         </button>
-        <button id="place-toggle" data-action="toggle-place" title="Разместить: поставить объект на поверхность другого, прижав выбранной стороной" aria-label="Разместить">
+        <button id="place-toggle" data-action="toggle-place" data-i18n-title="html.place-toggle.title" data-i18n-aria-label="html.place-toggle.aria-label">
           <i class="fa-solid fa-arrows-down-to-line"></i>
         </button>
       </div>
       <div id="mirror-control">
-        <button id="mirror-toggle" class="grid-toggle" title="Зеркало: правки повторяются по другую сторону плоскости">
+        <button id="mirror-toggle" class="grid-toggle" data-i18n-title="html.mirror-toggle.title">
           <i class="fa-solid fa-arrows-left-right-to-line"></i>
         </button>
         <div id="mirror-popup" class="grid-popup" hidden>
-          <div class="grid-popup-title">Глобальное зеркало</div>
+          <div class="grid-popup-title" data-i18n="html.mirror-popup.grid-popup-title.text"></div>
           <div class="plane-buttons mirror-axes" data-mirror="global">
-            <button class="plane-button x" data-mirror-axis="x" title="Плоскость YZ (через начало координат)">X</button>
-            <button class="plane-button y" data-mirror-axis="y" title="Плоскость XZ (через начало координат)">Y</button>
-            <button class="plane-button z" data-mirror-axis="z" title="Плоскость XY (через начало координат)">Z</button>
+            <button class="plane-button x" data-mirror-axis="x" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-x.title">X</button>
+            <button class="plane-button y" data-mirror-axis="y" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-y.title">Y</button>
+            <button class="plane-button z" data-mirror-axis="z" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-z.title">Z</button>
           </div>
           <div class="mirror-note" data-mirror-note="global"></div>
-          <div class="grid-popup-title">Локальное зеркало</div>
+          <div class="grid-popup-title" data-i18n="html.mirror-popup.grid-popup-title.text2"></div>
           <div class="plane-buttons mirror-axes" data-mirror="local">
-            <button class="plane-button x" data-mirror-axis="x" title="Плоскость YZ через опорную точку объекта">X</button>
-            <button class="plane-button y" data-mirror-axis="y" title="Плоскость XZ через опорную точку объекта">Y</button>
-            <button class="plane-button z" data-mirror-axis="z" title="Плоскость XY через опорную точку объекта">Z</button>
+            <button class="plane-button x" data-mirror-axis="x" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-x.title2">X</button>
+            <button class="plane-button y" data-mirror-axis="y" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-y.title2">Y</button>
+            <button class="plane-button z" data-mirror-axis="z" data-i18n-title="html.mirror-popup.plane-buttons.mirror-axis-z.title2">Z</button>
           </div>
           <div class="mirror-note" data-mirror-note="local"></div>
         </div>
@@ -82,23 +82,23 @@
           <i class="fa-solid fa-magnet"></i>
         </button>
         <div class="grid-control" data-grid="coarse">
-          <button title="Крупная сетка: шаг привязки">
+          <button data-i18n-title="html.grid-controls.grid-coarse.button.title">
             <i class="fa-solid fa-table-cells-large"></i>
             <span class="grid-value"></span>
           </button>
           <div class="grid-popup" hidden>
-            <div class="grid-popup-title">Крупная сетка</div>
+            <div class="grid-popup-title" data-i18n="html.grid-controls.grid-coarse.grid-popup.grid-popup-title.text"></div>
             <input type="range" min="0" max="4" step="1">
             <output></output>
           </div>
         </div>
         <div class="grid-control" data-grid="fine">
-          <button title="Мелкая сетка: на сколько частей делится клетка, пока зажат Ctrl">
+          <button data-i18n-title="html.grid-controls.grid-fine.button.title">
             <i class="fa-solid fa-table-cells"></i>
             <span class="grid-value"></span>
           </button>
           <div class="grid-popup" hidden>
-            <div class="grid-popup-title">Мелкая сетка (Ctrl)</div>
+            <div class="grid-popup-title" data-i18n="html.grid-controls.grid-fine.grid-popup.grid-popup-title.text"></div>
             <input type="range" min="2" max="10" step="1">
             <output></output>
           </div>
@@ -106,241 +106,241 @@
       </div>
       <span class="top-separator"></span>
       <div id="screen-modes" class="top-actions">
-        <button id="collision-button" title="Коллизии: фигуры столкновений объектов для Godot — добавить вручную или подобрать автоматически, затем поправить">
-          <i class="fa-solid fa-shapes"></i><span>Коллизии</span>
+        <button id="collision-button" data-i18n-title="html.collision-button.title">
+          <i class="fa-solid fa-shapes"></i><span data-i18n="html.collision-button.span.text"></span>
         </button>
-        <button id="animation-button" data-action="toggle-animation" title="Анимация: движение объектов и узлов по ключевым кадрам — для экспорта в Godot">
-          <i class="fa-solid fa-film"></i><span>Анимация</span>
+        <button id="animation-button" data-action="toggle-animation" data-i18n-title="html.animation-button.title">
+          <i class="fa-solid fa-film"></i><span data-i18n="html.animation-button.span.text"></span>
         </button>
-        <button id="render-button" data-action="render-sprites" title="Рендер спрайтов: модель со всех сторон в PNG-лист для 2D-игры">
-          <i class="fa-solid fa-camera"></i><span>Рендер</span>
+        <button id="render-button" data-action="render-sprites" data-i18n-title="html.render-button.title">
+          <i class="fa-solid fa-camera"></i><span data-i18n="html.render-button.span.text"></span>
         </button>
       </div>
     </header>
 
     <aside id="toolbar">
-      <button data-tool="select" title="Выделение (Q)">
+      <button data-tool="select" data-i18n-title="html.toolbar.tool-select.title">
         <i class="fa-solid fa-arrow-pointer"></i>
       </button>
-      <button data-tool="move" title="Перемещение (W)">
+      <button data-tool="move" data-i18n-title="html.toolbar.tool-move.title">
         <i class="fa-solid fa-up-down-left-right"></i>
       </button>
-      <button data-tool="rotate" title="Вращение (R)">
+      <button data-tool="rotate" data-i18n-title="html.toolbar.tool-rotate.title">
         <i class="fa-solid fa-rotate"></i>
       </button>
-      <button data-tool="scale" title="Масштаб (S)">
+      <button data-tool="scale" data-i18n-title="html.toolbar.tool-scale.title">
         <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
       </button>
-      <button data-tool="pivot" title="Опорная точка (D)">
+      <button data-tool="pivot" data-i18n-title="html.toolbar.tool-pivot.title">
         <i class="fa-solid fa-crosshairs"></i>
       </button>
 
       <hr>
 
-      <button data-tool="paint" title="Кисть: рисовать по модели или по развёртке, пиксель за пикселем. Shift+щелчок — прямая линия от последней точки (с Space — вдоль граней модели), Alt+щелчок берёт цвет (V)">
+      <button data-tool="paint" data-i18n-title="html.toolbar.tool-paint.title">
         <i class="fa-solid fa-paintbrush"></i>
       </button>
-      <button id="paint-color" title="Цвет и палитра"><span></span></button>
-      <button data-tool="pipette" title="Пипетка: взять цвет с модели или с развёртки. С любым инструментом рисования то же делает Alt+щелчок (I)">
+      <button id="paint-color" data-i18n-title="html.paint-color.title"><span></span></button>
+      <button data-tool="pipette" data-i18n-title="html.toolbar.tool-pipette.title">
         <i class="fa-solid fa-eye-dropper"></i>
       </button>
-      <button data-tool="fill" title="Заливка: закрасить область одного цвета. На модели — в пределах лоскута грани, на развёртке — по всей картинке (E)">
+      <button data-tool="fill" data-i18n-title="html.toolbar.tool-fill.title">
         <i class="fa-solid fa-fill-drip"></i>
       </button>
       <div id="shape-tools" class="tool-group">
-        <button id="shape-tool" title="Фигуры: растянуть от нажатия до отпускания. Нажатие открывает выбор фигуры">
+        <button id="shape-tool" data-i18n-title="html.shape-tool.title">
           <i class="fa-regular fa-square"></i>
         </button>
         <div class="tool-flyout" hidden>
-          <button data-shape="rect" data-filled="0" title="Прямоугольник (M)"><i class="fa-regular fa-square"></i></button>
-          <button data-shape="rect" data-filled="1" title="Закрашенный прямоугольник"><i class="fa-solid fa-square"></i></button>
-          <button data-shape="ellipse" data-filled="0" title="Эллипс (O)"><i class="fa-regular fa-circle"></i></button>
-          <button data-shape="ellipse" data-filled="1" title="Закрашенный эллипс"><i class="fa-solid fa-circle"></i></button>
+          <button data-shape="rect" data-filled="0" data-i18n-title="html.shape-tools.tool-flyout.shape-rect.filled-0.title"><i class="fa-regular fa-square"></i></button>
+          <button data-shape="rect" data-filled="1" data-i18n-title="html.shape-tools.tool-flyout.shape-rect.filled-1.title"><i class="fa-solid fa-square"></i></button>
+          <button data-shape="ellipse" data-filled="0" data-i18n-title="html.shape-tools.tool-flyout.shape-ellipse.filled-0.title"><i class="fa-regular fa-circle"></i></button>
+          <button data-shape="ellipse" data-filled="1" data-i18n-title="html.shape-tools.tool-flyout.shape-ellipse.filled-1.title"><i class="fa-solid fa-circle"></i></button>
         </div>
       </div>
-      <button data-tool="marquee" title="Выделение пикселей — только на развёртке: протянуть — выделить прямоугольник; тянуть изнутри — перенести (с Alt — копию); Delete — стереть, Ctrl+C / Ctrl+X / Ctrl+V — копировать, вырезать, вставить; кнопки поворота и отражения на развёртке — повернуть выделенное. Enter — положить, Esc — вернуть">
+      <button data-tool="marquee" data-i18n-title="html.toolbar.tool-marquee.title">
         <i class="fa-solid fa-border-none"></i>
       </button>
 
       <hr>
 
-      <button data-action="make-face" title="Создать грань через выделенные вершины или рёбра; из двух вершин — ребро (Ctrl+D)">
+      <button data-action="make-face" data-i18n-title="html.toolbar.action-make-face.title">
         <i class="fa-solid fa-square-plus"></i>
       </button>
-      <button data-action="flip-faces" title="Инвертировать грань: поменять местами лицевую и обратную стороны выделенных граней или всех граней выбранных объектов (Ctrl+I)">
+      <button data-action="flip-faces" data-i18n-title="html.toolbar.action-flip-faces.title">
         <i class="fa-solid fa-clone"></i>
       </button>
-      <button data-action="delete" title="Удалить выделенные вершины (Delete)">
+      <button data-action="delete" data-i18n-title="html.toolbar.action-delete.title">
         <i class="fa-solid fa-trash-can"></i>
       </button>
-      <button data-action="frame" title="Показать выделенное (F)">
+      <button data-action="frame" data-i18n-title="html.toolbar.action-frame.title">
         <i class="fa-solid fa-expand"></i>
       </button>
 
       <!-- At the bottom of the toolbar, next to the panel it opens. -->
-      <button data-action="views-window" title="Виды в отдельном окне: перспектива и три вида, два на два">
+      <button data-action="views-window" data-i18n-title="html.toolbar.action-views-window.title">
         <i class="fa-solid fa-up-right-from-square"></i>
       </button>
-      <button data-action="toggle-views" title="Три вида (B)">
+      <button data-action="toggle-views" data-i18n-title="html.toolbar.action-toggle-views.title">
         <i class="fa-solid fa-table-columns"></i>
       </button>
-      <button data-action="toggle-uv" title="Редактор UV: атлас с гранями, перестановка граней по картинке">
+      <button data-action="toggle-uv" data-i18n-title="html.toolbar.action-toggle-uv.title">
         <i class="fa-solid fa-object-group"></i>
       </button>
     </aside>
 
     <div id="workspace">
     <main id="viewport">
-      <div id="mode-indicator" title="Режим выделения: объект — куб, грань — плоскость, ребро — линия, вершина — точка"></div>
+      <div id="mode-indicator" data-i18n-title="html.mode-indicator.title"></div>
       <div id="sim-controls">
-        <button id="sim-start"><i class="fa-solid fa-play"></i><span>Симуляция</span></button>
-        <button id="sim-restart" title="Начать заново"><i class="fa-solid fa-rotate-left"></i></button>
+        <button id="sim-start"><i class="fa-solid fa-play"></i><span data-i18n="html.sim-start.span.text"></span></button>
+        <button id="sim-restart" data-i18n-title="html.sim-restart.title"><i class="fa-solid fa-rotate-left"></i></button>
       </div>
       <div id="operation-banner">
         <span id="operation-name"></span>
-        <button id="operation-close" title="Выключить режим (Esc)">
+        <button id="operation-close" data-i18n-title="html.operation-close.title">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
       <div id="place-options" class="tool-options">
-        <span>Сторона</span>
-        <button data-place="-y" class="axis y" title="Низ объекта (по его оси Y)">−Y</button>
-        <button data-place="+y" class="axis y" title="Верх объекта">+Y</button>
-        <button data-place="-x" class="axis x" title="Сторона −X объекта">−X</button>
-        <button data-place="+x" class="axis x" title="Сторона +X объекта">+X</button>
-        <button data-place="-z" class="axis z" title="Сторона −Z объекта">−Z</button>
-        <button data-place="+z" class="axis z" title="Сторона +Z объекта">+Z</button>
+        <span data-i18n="html.place-options.span.text"></span>
+        <button data-place="-y" class="axis y" data-i18n-title="html.place-options.place-y.title">−Y</button>
+        <button data-place="+y" class="axis y" data-i18n-title="html.place-options.place-y.title2">+Y</button>
+        <button data-place="-x" class="axis x" data-i18n-title="html.place-options.place-x.title">−X</button>
+        <button data-place="+x" class="axis x" data-i18n-title="html.place-options.place-x.title2">+X</button>
+        <button data-place="-z" class="axis z" data-i18n-title="html.place-options.place-z.title">−Z</button>
+        <button data-place="+z" class="axis z" data-i18n-title="html.place-options.place-z.title2">+Z</button>
       </div>
       <div id="cut-options" class="tool-options">
-        <button data-cut="vertical" title="Вертикальный разрез (Tab — переключить)">
-          <i class="fa-solid fa-grip-lines-vertical"></i><span>Вертикальный</span>
+        <button data-cut="vertical" data-i18n-title="html.cut-options.button.title">
+          <i class="fa-solid fa-grip-lines-vertical"></i><span data-i18n="html.cut-options.button.span.text"></span>
         </button>
-        <button data-cut="horizontal" title="Горизонтальный разрез (Tab — переключить)">
-          <i class="fa-solid fa-grip-lines"></i><span>Горизонтальный</span>
+        <button data-cut="horizontal" data-i18n-title="html.cut-options.button.title2">
+          <i class="fa-solid fa-grip-lines"></i><span data-i18n="html.cut-options.button.span.text2"></span>
         </button>
       </div>
-      <div id="axis-gizmo" title="Фиксация перемещения вершины: Shift+1 — свободно, Shift+2 — X, Shift+3 — Y, Shift+4 — Z"></div>
-      <button id="light-button" data-action="toggle-light" title="Свет: модель освещена как в игре — солнце с тенями на модели и на полу и рассеянный свет неба. Повернув камеру, видно освещённую и теневую стороны">
+      <div id="axis-gizmo" data-i18n-title="html.axis-gizmo.title"></div>
+      <button id="light-button" data-action="toggle-light" data-i18n-title="html.light-button.title">
         <i class="fa-solid fa-sun"></i>
       </button>
-      <button id="preview-button" data-action="toggle-preview" title="Просмотр: только модель с текстурой на чёрном фоне, без сетки, рёбер, вершин и выделения — как она будет выглядеть после экспорта">
+      <button id="preview-button" data-action="toggle-preview" data-i18n-title="html.preview-button.title">
         <i class="fa-solid fa-eye"></i>
       </button>
-      <button id="focus-button" data-action="toggle-focus" title="Фокус: тёмный фон, объект — белый каркас с точками вершин, выбор сквозь объект (T)">
+      <button id="focus-button" data-action="toggle-focus" data-i18n-title="html.focus-button.title">
         <i class="fa-solid fa-bullseye"></i>
       </button>
       <div id="shading">
-        <button id="shading-button" title="Вид объекта">
+        <button id="shading-button" data-i18n-title="html.shading-button.title">
           <i class="fa-solid fa-circle-half-stroke"></i>
         </button>
         <div id="shading-menu" hidden>
-          <button data-shading="solid">Сплошной</button>
-          <button data-shading="wireframe">Каркас</button>
-          <button data-shading="orientation" title="Лицевая сторона грани — голубая, обратная — красная (N)">Ориентация граней</button>
-          <button data-shading="textured" title="Модель с текстурой из атласа проекта">Текстура</button>
-          <button data-shading="weights" title="Веса скина: выделите узел (или строку привязки под ним) — поверхность окрасится по тому, насколько он её гнёт: синий — нисколько, красный — целиком">Веса скина</button>
+          <button data-shading="solid" data-i18n="html.shading-menu.shading-solid.text"></button>
+          <button data-shading="wireframe" data-i18n="html.shading-menu.shading-wireframe.text"></button>
+          <button data-shading="orientation" data-i18n-title="html.shading-menu.shading-orientation.title" data-i18n="html.shading-menu.shading-orientation.text"></button>
+          <button data-shading="textured" data-i18n-title="html.shading-menu.shading-textured.title" data-i18n="html.shading-menu.shading-textured.text"></button>
+          <button data-shading="weights" data-i18n-title="html.shading-menu.shading-weights.title" data-i18n="html.shading-menu.shading-weights.text"></button>
         </div>
       </div>
       <div id="overlap-toast">
         <div class="toast-timer"><i></i></div>
         <p></p>
         <div class="toast-buttons">
-          <button data-keep>Оставить</button>
-          <button data-merge>Соединить</button>
+          <button data-keep data-i18n="html.overlap-toast.toast-buttons.button.text"></button>
+          <button data-merge data-i18n="html.overlap-toast.toast-buttons.button.text2"></button>
         </div>
       </div>
-      <div id="polygon-popup" hidden title="Плоскость полигона: клик по оси, которой она перпендикулярна"></div>
-      <div id="extrude-popup" hidden title="Куда выдавить ребро: клик по оси, по центру — авто"></div>
+      <div id="polygon-popup" hidden data-i18n-title="html.polygon-popup.title"></div>
+      <div id="extrude-popup" hidden data-i18n-title="html.extrude-popup.title"></div>
     </main>
-    <div id="views-splitter" hidden title="Потяните, чтобы изменить высоту панели; двойной клик — вернуть исходную"></div>
-    <section id="ortho-views" hidden title="ЛКМ — тянуть вершину · Shift+перетаскивание — рамка выделения · ПКМ — панорама · Колесо — масштаб"></section>
-    <div id="anim-splitter" hidden title="Потяните, чтобы поделить место между тремя видами и таймлайном; двойной клик — поровну"></div>
+    <div id="views-splitter" hidden data-i18n-title="html.views-splitter.title"></div>
+    <section id="ortho-views" hidden data-i18n-title="html.ortho-views.title"></section>
+    <div id="anim-splitter" hidden data-i18n-title="html.anim-splitter.title"></div>
     <section id="timeline" hidden>
       <div class="uv-bar tl-bar">
-        <b>АНИМАЦИЯ</b>
-        <select class="clip-select" title="Клип, с которым работаете"></select>
-        <button data-tl="add" title="Новый клип: имя и длина спрашиваются"><i class="fa-solid fa-plus"></i></button>
-        <button data-tl="edit" title="Имя и длина клипа"><i class="fa-solid fa-pen"></i></button>
-        <button data-tl="duplicate" title="Дублировать клип"><i class="fa-regular fa-clone"></i></button>
-        <button data-tl="delete" title="Удалить клип (можно отменить)"><i class="fa-solid fa-trash-can"></i></button>
+        <b data-i18n="html.timeline.uv-bar.b.text"></b>
+        <select class="clip-select" data-i18n-title="html.timeline.uv-bar.clip-select.title"></select>
+        <button data-tl="add" data-i18n-title="html.timeline.uv-bar.tl-add.title"><i class="fa-solid fa-plus"></i></button>
+        <button data-tl="edit" data-i18n-title="html.timeline.uv-bar.tl-edit.title"><i class="fa-solid fa-pen"></i></button>
+        <button data-tl="duplicate" data-i18n-title="html.timeline.uv-bar.tl-duplicate.title"><i class="fa-regular fa-clone"></i></button>
+        <button data-tl="delete" data-i18n-title="html.timeline.uv-bar.tl-delete.title"><i class="fa-solid fa-trash-can"></i></button>
         <i class="uv-divider"></i>
-        <button data-tl="first" title="В начало"><i class="fa-solid fa-backward-step"></i></button>
-        <button data-tl="prev" title="Кадр назад"><i class="fa-solid fa-caret-left"></i></button>
-        <button data-tl="play" title="Воспроизвести (Enter)"><i class="fa-solid fa-play"></i></button>
-        <button data-tl="next" title="Кадр вперёд"><i class="fa-solid fa-caret-right"></i></button>
-        <button data-tl="last" title="В конец"><i class="fa-solid fa-forward-step"></i></button>
-        <button class="tl-loop" title="Цикл: клип проигрывается по кругу. В Godot он получит зацикливание"><i class="fa-solid fa-repeat"></i></button>
+        <button data-tl="first" data-i18n-title="html.timeline.uv-bar.tl-first.title"><i class="fa-solid fa-backward-step"></i></button>
+        <button data-tl="prev" data-i18n-title="html.timeline.uv-bar.tl-prev.title"><i class="fa-solid fa-caret-left"></i></button>
+        <button data-tl="play" data-i18n-title="html.timeline.uv-bar.tl-play.title"><i class="fa-solid fa-play"></i></button>
+        <button data-tl="next" data-i18n-title="html.timeline.uv-bar.tl-next.title"><i class="fa-solid fa-caret-right"></i></button>
+        <button data-tl="last" data-i18n-title="html.timeline.uv-bar.tl-last.title"><i class="fa-solid fa-forward-step"></i></button>
+        <button class="tl-loop" data-i18n-title="html.timeline.uv-bar.tl-loop.title"><i class="fa-solid fa-repeat"></i></button>
         <span class="tl-frame"></span>
         <i class="uv-divider"></i>
-        <label class="tl-field tl-number" title="Кадров в секунду">FPS<input type="text" name="clip-fps" inputmode="numeric" spellcheck="false"></label>
-        <label class="tl-field tl-number" title="Длина клипа в кадрах">Длина<input type="text" name="clip-length" inputmode="numeric" spellcheck="false"></label>
+        <label class="tl-field tl-number" data-i18n-title="html.timeline.uv-bar.tl-field.title">FPS<input type="text" name="clip-fps" inputmode="numeric" spellcheck="false"></label>
+        <label class="tl-field tl-number" data-i18n-title="html.timeline.uv-bar.tl-field.title2"><i18n-text data-i18n="html.timeline.uv-bar.tl-field.text"></i18n-text><input type="text" name="clip-length" inputmode="numeric" spellcheck="false"></label>
         <i class="uv-divider"></i>
-        <button data-tl="key" title="Вставить ключ: то, что изменено вручную у выделенного, на этом кадре (K)"><i class="fa-solid fa-key"></i></button>
-        <button data-tl="autokey" class="tl-autokey" title="Автоключ: всякое движение объекта сразу ставит ключ на текущем кадре. Выключен — движение временное, ключ ставит K"><span class="rec-dot"></span></button>
+        <button data-tl="key" data-i18n-title="html.timeline.uv-bar.tl-key.title"><i class="fa-solid fa-key"></i></button>
+        <button data-tl="autokey" class="tl-autokey" data-i18n-title="html.timeline.uv-bar.tl-autokey.title"><span class="rec-dot"></span></button>
         <i class="uv-divider"></i>
         <button class="tl-restore" disabled><i class="fa-solid fa-rotate-left"></i></button>
       </div>
-      <p class="tl-empty" hidden>Клипов пока нет — создайте первый кнопкой «+» вверху</p>
+      <p class="tl-empty" hidden data-i18n="html.timeline.tl-empty.text"></p>
       <div class="tl-body">
         <div class="tl-corner">
-          <button class="tl-nodes-only" data-tl="nodesonly" title="Только узлы: в таймлайне видны только узлы, ключи ставятся только им, а щелчок по объекту в виде выделяет его узел. Ключи самих объектов остаются в клипе и проигрываются, но не видны"><i class="fa-solid fa-circle-nodes"></i></button>
-          <button class="tl-add tl-add-all" data-tl="keyall" title="Ключ на всё: позиция, поворот и масштаб всех объектов и узлов на текущем кадре, как они показаны">+</button>
+          <button class="tl-nodes-only" data-tl="nodesonly" data-i18n-title="html.timeline.tl-body.tl-corner.tl-nodesonly.title"><i class="fa-solid fa-circle-nodes"></i></button>
+          <button class="tl-add tl-add-all" data-tl="keyall" data-i18n-title="html.timeline.tl-body.tl-corner.tl-keyall.title">+</button>
         </div>
-        <canvas class="tl-ruler" title="Щелчок или перетаскивание — перейти к кадру · колесо — прокрутка · Ctrl+колесо — масштаб · средняя кнопка — сдвиг"></canvas>
+        <canvas class="tl-ruler" data-i18n-title="html.timeline.tl-body.tl-ruler.title"></canvas>
         <div class="tl-scroll">
           <div class="tl-names"></div>
           <div class="tl-lanes-box"><canvas class="tl-lanes"></canvas></div>
         </div>
         <div class="tl-corner tl-corner-bottom"></div>
-        <canvas class="tl-seconds" title="Время в секундах (кадр / FPS клипа)"></canvas>
-        <div class="tl-resize" title="Потяните, чтобы изменить ширину колонки имён; двойной щелчок — вернуть исходную"></div>
+        <canvas class="tl-seconds" data-i18n-title="html.timeline.tl-body.tl-seconds.title"></canvas>
+        <div class="tl-resize" data-i18n-title="html.timeline.tl-body.tl-resize.title"></div>
       </div>
     </section>
     <section id="uv-editor" hidden>
       <div class="uv-bar">
         <b>UV</b>
-        <button id="uv-atlas-new" title="Новый атлас: пустой, со своим размером пикселя" hidden><i class="fa-solid fa-file-circle-plus"></i></button>
-        <select id="uv-atlas" title="Атлас, который показан здесь и на котором рисует кисть" hidden></select>
-        <button data-uv="add" class="worded" title="Положить выбранные объекты на атлас: их грани получат место на картинке">
-          <i class="fa-solid fa-plus"></i><span>Создать атлас</span>
+        <button id="uv-atlas-new" data-i18n-title="html.uv-atlas-new.title" hidden><i class="fa-solid fa-file-circle-plus"></i></button>
+        <select id="uv-atlas" data-i18n-title="html.uv-atlas.title" hidden></select>
+        <button data-uv="add" class="worded" data-i18n-title="html.uv-editor.uv-bar.uv-add.title">
+          <i class="fa-solid fa-plus"></i><span data-i18n="html.uv-editor.uv-bar.uv-add.span.text"></span>
         </button>
-        <button data-uv="remove" title="Убрать выбранные объекты с атласа: их грани потеряют место на картинке; нарисованное для них останется, пока не нажата «Очистить» (можно отменить)">
+        <button data-uv="remove" data-i18n-title="html.uv-editor.uv-bar.uv-remove.title">
           <i class="fa-solid fa-minus"></i>
         </button>
         <i class="uv-divider"></i>
-        <button data-uv="turn-left" title="Повернуть выбранные лоскуты на 90° против часовой стрелки">
+        <button data-uv="turn-left" data-i18n-title="html.uv-editor.uv-bar.uv-turn-left.title">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
-        <button data-uv="turn-right" title="Повернуть выбранные лоскуты на 90° по часовой стрелке">
+        <button data-uv="turn-right" data-i18n-title="html.uv-editor.uv-bar.uv-turn-right.title">
           <i class="fa-solid fa-rotate-right"></i>
         </button>
-        <button data-uv="flip-h" title="Отразить выбранные лоскуты слева направо">
+        <button data-uv="flip-h" data-i18n-title="html.uv-editor.uv-bar.uv-flip-h.title">
           <i class="fa-solid fa-left-right"></i>
         </button>
-        <button data-uv="flip-v" title="Отразить выбранные лоскуты сверху вниз">
+        <button data-uv="flip-v" data-i18n-title="html.uv-editor.uv-bar.uv-flip-v.title">
           <i class="fa-solid fa-up-down"></i>
         </button>
         <i class="uv-divider"></i>
         <!-- The same, of the faces' places only: the picture stays, the faces show it mirrored or turned. -->
-        <button data-uv="map-turn-left" class="uv-only" title="Повернуть развёртку на 90° против часовой стрелки: картинка на атласе остаётся на месте, грань показывает её повёрнутой. Только для квадратных лоскутов">
+        <button data-uv="map-turn-left" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-left.title">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
-        <button data-uv="map-turn-right" class="uv-only" title="Повернуть развёртку на 90° по часовой стрелке: картинка на атласе остаётся на месте, грань показывает её повёрнутой. Только для квадратных лоскутов">
+        <button data-uv="map-turn-right" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-right.title">
           <i class="fa-solid fa-rotate-right"></i>
         </button>
-        <button data-uv="map-flip-h" class="uv-only" title="Отразить развёртку слева направо: картинка на атласе остаётся на месте, грань показывает её зеркально">
+        <button data-uv="map-flip-h" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-h.title">
           <i class="fa-solid fa-left-right"></i>
         </button>
-        <button data-uv="map-flip-v" class="uv-only" title="Отразить развёртку сверху вниз: картинка на атласе остаётся на месте, грань показывает её зеркально">
+        <button data-uv="map-flip-v" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-v.title">
           <i class="fa-solid fa-up-down"></i>
         </button>
-        <button data-uv="shape" title="Замок формы. Закрыт: лоскут можно только переставить, повернуть и отразить. Открыт: у выбранных лоскутов появляются маркеры в углах, и их можно двигать по пикселям — грань при этом растягивается">
+        <button data-uv="shape" data-i18n-title="html.uv-editor.uv-bar.uv-shape.title">
           <i class="fa-solid fa-lock"></i>
         </button>
-        <button data-uv="regenerate" title="Перегенерировать выбранные лоскуты: закрепление и изменённая форма снимаются, лоскуты раскладываются заново и заливаются шаблоном; нарисованное на старом месте остаётся, пока не нажата «Очистить». Если ничего не выбрано — весь атлас. Можно отменить">
+        <button data-uv="regenerate" data-i18n-title="html.uv-editor.uv-bar.uv-regenerate.title">
           <i class="fa-solid fa-arrows-rotate"></i>
         </button>
-        <button data-uv="clean" title="Очистить: стереть с атласа всё нарисованное, что не показывает ни одна грань — оставшееся от удалённых, перенесённых и уменьшенных граней и нарисованное мимо лоскутов. Перед этим спрашивается; можно отменить">
+        <button data-uv="clean" data-i18n-title="html.uv-editor.uv-bar.uv-clean.title">
           <!-- (a broom of its own: the icon font's looks like a brush) -->
           <svg class="icon-broom" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M14.4 1.6 8.4 7.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -348,58 +348,58 @@
             <path d="M6.9 9.1 1.4 10.2M6.9 9.1 2.3 12.3M6.9 9.1 3.7 13.7M6.9 9.1 5.8 14.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </button>
-        <button data-uv="pack" title="Перепаковать: уложить все лоскуты атласа плотно, вместе с нарисованным на них, по тем же правилам, что и раскладка; лоскуты с общей картинкой (лежащие друг на друге) переносятся вместе, картинка не размножается; атлас уменьшится, если они поместятся в меньший. Лоскуты не поворачиваются; нарисованное мимо лоскутов не сохраняется. Можно отменить">
+        <button data-uv="pack" data-i18n-title="html.uv-editor.uv-bar.uv-pack.title">
           <i class="fa-solid fa-boxes-packing"></i>
         </button>
-        <button data-uv="fit" title="Показать атлас целиком">
+        <button data-uv="fit" data-i18n-title="html.uv-editor.uv-bar.uv-fit.title">
           <i class="fa-solid fa-expand"></i>
         </button>
         <i class="uv-divider"></i>
-        <button data-uv="paste" title="Вставить картинку из буфера обмена: она ляжет поверх атласа в левый верхний угол (атлас при нужде вырастет). Её можно перетащить и потянуть за уголки, чтобы изменить размер (Shift — с теми же пропорциями). Enter или щелчок мимо — положить, Esc — отменить">
+        <button data-uv="paste" data-i18n-title="html.uv-editor.uv-bar.uv-paste.title">
           <i class="fa-solid fa-paste"></i>
         </button>
         <i class="uv-divider"></i>
-        <button data-uv="retro" title="Искажение: подогнать текстуру под палитру, добавить дизеринг, шум, поправить цвета — «ретрофикация». Действует на выделенные пиксели, а без выделения на весь атлас; результат виден сразу, «Применить» записывает его одним шагом отмены">
+        <button data-uv="retro" data-i18n-title="html.uv-editor.uv-bar.uv-retro.title">
           <i class="fa-solid fa-wand-magic-sparkles"></i>
         </button>
         <span class="uv-status"></span>
       </div>
-      <canvas title="ЛКМ — выбрать лоскут (Shift — добавить) · тянуть — переставить на другое место картинки · колесо — масштаб · ПКМ — сдвиг вида"></canvas>
+      <canvas data-i18n-title="html.uv-editor.canvas.title"></canvas>
     </section>
     </div>
 
-    <div id="panel-splitter" title="Потяните, чтобы изменить ширину панели; двойной клик — вернуть исходную"></div>
+    <div id="panel-splitter" data-i18n-title="html.panel-splitter.title"></div>
     <aside id="panel">
       <section id="outliner-section">
         <div class="outliner-header">
-          <h2>Сцена</h2>
-          <button id="add-object" title="Добавить объект"><i class="fa-solid fa-plus"></i></button>
+          <h2 data-i18n="html.outliner-section.outliner-header.h2.text"></h2>
+          <button id="add-object" data-i18n-title="html.add-object.title"><i class="fa-solid fa-plus"></i></button>
         </div>
         <div id="add-menu" hidden>
-          <button data-primitive="cube">Куб…</button>
-          <button data-primitive="cone">Конус…</button>
-          <button data-primitive="cylinder">Цилиндр…</button>
-          <button data-primitive="sphere">Сфера…</button>
-          <button data-node>Узел</button>
+          <button data-primitive="cube" data-i18n="html.add-menu.button.text"></button>
+          <button data-primitive="cone" data-i18n="html.add-menu.button.text2"></button>
+          <button data-primitive="cylinder" data-i18n="html.add-menu.button.text3"></button>
+          <button data-primitive="sphere" data-i18n="html.add-menu.button.text4"></button>
+          <button data-node data-i18n="html.add-menu.button.text5"></button>
         </div>
         <form id="add-form" hidden>
           <h3></h3>
           <div class="fields"></div>
           <div class="form-buttons">
-            <button type="button" data-cancel>Отмена</button>
-            <button type="submit">Создать</button>
+            <button type="button" data-cancel data-i18n="html.add-form.form-buttons.type-button.text"></button>
+            <button type="submit" data-i18n="html.add-form.form-buttons.type-submit.text"></button>
           </div>
         </form>
-        <div id="outliner" title="Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх"></div>
+        <div id="outliner" data-i18n-title="html.outliner.title"></div>
       </section>
       <section id="float-panels">
       <div id="dimensions" hidden>
         <div class="properties-header">
-          <p>Размер</p>
-          <button id="copy-size" title="Скопировать размеры X, Y, Z одной строкой">
+          <p data-i18n="html.dimensions.properties-header.p.text"></p>
+          <button id="copy-size" data-i18n-title="html.copy-size.title">
             <i class="fa-regular fa-copy"></i>
           </button>
-          <button id="paste-size" title="Вставить размеры X, Y, Z из буфера обмена">
+          <button id="paste-size" data-i18n-title="html.paste-size.title">
             <i class="fa-regular fa-paste"></i>
           </button>
         </div>
@@ -410,13 +410,13 @@
       <div id="properties" hidden>
         <div class="properties-header">
           <p id="selection-count"></p>
-          <button id="center-pivot" hidden title="Поставить опорную точку в центр объекта">
+          <button id="center-pivot" hidden data-i18n-title="html.center-pivot.title">
             <i class="fa-solid fa-arrows-to-dot"></i>
           </button>
-          <button id="copy-vector" title="Скопировать X, Y, Z одной строкой">
+          <button id="copy-vector" data-i18n-title="html.copy-vector.title">
             <i class="fa-regular fa-copy"></i>
           </button>
-          <button id="paste-vector" title="Вставить X, Y, Z из буфера обмена">
+          <button id="paste-vector" data-i18n-title="html.paste-vector.title">
             <i class="fa-regular fa-paste"></i>
           </button>
         </div>
@@ -426,73 +426,73 @@
       </div>
       <div id="rotation" hidden>
         <div class="properties-header">
-          <p>Вращение</p>
-          <button id="copy-rotation" title="Скопировать углы X, Y, Z одной строкой">
+          <p data-i18n="html.rotation.properties-header.p.text"></p>
+          <button id="copy-rotation" data-i18n-title="html.copy-rotation.title">
             <i class="fa-regular fa-copy"></i>
           </button>
-          <button id="paste-rotation" title="Вставить углы X, Y, Z из буфера обмена">
+          <button id="paste-rotation" data-i18n-title="html.paste-rotation.title">
             <i class="fa-regular fa-paste"></i>
           </button>
         </div>
-        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="x" title="Угол в градусах"></label>
-        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" title="Угол в градусах"></label>
-        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" title="Угол в градусах"></label>
+        <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="x" data-i18n-title="html.rotation.label.rotation-x.type-text.title"></label>
+        <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="y" data-i18n-title="html.rotation.label.rotation-y.type-text.title"></label>
+        <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-rotation="z" data-i18n-title="html.rotation.label.rotation-z.type-text.title"></label>
       </div>
       <div id="collision-panel" hidden>
         <div class="properties-header">
-          <p>Коллизии</p>
+          <p data-i18n="html.collision-panel.properties-header.p.text"></p>
         </div>
-        <p class="collision-hint">Выберите объект: щелчок по нему или по его фигуре</p>
+        <p class="collision-hint" data-i18n="html.collision-panel.collision-hint.text"></p>
         <div class="collision-body">
-          <div class="body-types" title="Чем объект станет в Godot">
-            <button data-body="static" title="StaticBody3D: неподвижен — стены, пол, камни">Статика</button>
-            <button data-body="kinematic" title="AnimatableBody3D: движется кодом или анимацией — двери, лифты">Кинематика</button>
-            <button data-body="dynamic" title="RigidBody3D: движется физикой — ящики, бочки">Динамика</button>
-            <button data-body="trigger" title="Area3D: ничего не останавливает, только замечает вход — зоны, подбираемые предметы">Триггер</button>
+          <div class="body-types" data-i18n-title="html.collision-panel.collision-body.body-types.title">
+            <button data-body="static" data-i18n-title="html.collision-panel.collision-body.body-types.body-static.title" data-i18n="html.collision-panel.collision-body.body-types.body-static.text"></button>
+            <button data-body="kinematic" data-i18n-title="html.collision-panel.collision-body.body-types.body-kinematic.title" data-i18n="html.collision-panel.collision-body.body-types.body-kinematic.text"></button>
+            <button data-body="dynamic" data-i18n-title="html.collision-panel.collision-body.body-types.body-dynamic.title" data-i18n="html.collision-panel.collision-body.body-types.body-dynamic.text"></button>
+            <button data-body="trigger" data-i18n-title="html.collision-panel.collision-body.body-types.body-trigger.title" data-i18n="html.collision-panel.collision-body.body-types.body-trigger.text"></button>
           </div>
-          <button class="collider-auto"><i class="fa-solid fa-wand-magic-sparkles"></i><span>Авто</span></button>
-          <div class="collider-add" title="Добавить фигуру, подогнанную по объекту">
-            <button data-add="box" title="Коробка по границам объекта">Коробка</button>
-            <button data-add="sphere" title="Сфера вокруг объекта">Сфера</button>
-            <button data-add="capsule" title="Капсула вдоль самой длинной оси объекта">Капсула</button>
-            <button data-add="cylinder" title="Цилиндр вдоль самой длинной оси объекта">Цилиндр</button>
-            <button data-add="convex" title="Выпуклая оболочка: плотно, но без впадин">Оболочка</button>
-            <button data-add="trimesh" title="Сами грани объекта: точно, но только для статики — двигаться такое тело в Godot не может">Сетка</button>
+          <button class="collider-auto"><i class="fa-solid fa-wand-magic-sparkles"></i><span data-i18n="html.collision-panel.collision-body.collider-auto.span.text"></span></button>
+          <div class="collider-add" data-i18n-title="html.collision-panel.collision-body.collider-add.title">
+            <button data-add="box" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title" data-i18n="html.collision-panel.collision-body.collider-add.button.text"></button>
+            <button data-add="sphere" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title2" data-i18n="html.collision-panel.collision-body.collider-add.button.text2"></button>
+            <button data-add="capsule" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title3" data-i18n="html.collision-panel.collision-body.collider-add.button.text3"></button>
+            <button data-add="cylinder" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title4" data-i18n="html.collision-panel.collision-body.collider-add.button.text4"></button>
+            <button data-add="convex" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title5" data-i18n="html.collision-panel.collision-body.collider-add.button.text5"></button>
+            <button data-add="trimesh" data-i18n-title="html.collision-panel.collision-body.collider-add.button.title6" data-i18n="html.collision-panel.collision-body.collider-add.button.text6"></button>
           </div>
           <div class="collider-list"></div>
           <div class="collider-tools">
-            <button class="collider-refit" title="Подогнать фигуру заново по объекту, каким он стал"><i class="fa-solid fa-arrows-rotate"></i><span>Подогнать</span></button>
-            <button class="collider-delete" title="Удалить фигуру (Delete)"><i class="fa-solid fa-trash-can"></i></button>
+            <button class="collider-refit" data-i18n-title="html.collision-panel.collision-body.collider-tools.collider-refit.title"><i class="fa-solid fa-arrows-rotate"></i><span data-i18n="html.collision-panel.collision-body.collider-tools.collider-refit.span.text"></span></button>
+            <button class="collider-delete" data-i18n-title="html.collision-panel.collision-body.collider-tools.collider-delete.title"><i class="fa-solid fa-trash-can"></i></button>
           </div>
           <div class="collider-fields">
-            <div data-for="box sphere capsule cylinder"><p>Центр</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.2"></label></div>
-            <div data-for="box capsule cylinder"><p>Поворот</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.0" title="Угол в градусах"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.1" title="Угол в градусах"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.2" title="Угол в градусах"></label></div>
-            <div data-for="box"><p>Размер</p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.2"></label></div>
-            <div data-for="sphere capsule cylinder"><label><span class="field-name">Радиус</span><input type="text" inputmode="decimal" spellcheck="false" data-field="radius"></label></div>
-            <div data-for="capsule cylinder"><label><span class="field-name">Высота</span><input type="text" inputmode="decimal" spellcheck="false" data-field="height" title="Во всю длину, вместе с закруглениями"></label></div>
+            <div data-for="box sphere capsule cylinder"><p data-i18n="html.collision-panel.collision-body.collider-fields.div.p.text"></p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="center.2"></label></div>
+            <div data-for="box capsule cylinder"><p data-i18n="html.collision-panel.collision-body.collider-fields.div.p.text2"></p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.0" data-i18n-title="html.collision-panel.collision-body.collider-fields.div.label.type-text.title"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.1" data-i18n-title="html.collision-panel.collision-body.collider-fields.div.label.type-text.title2"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="rotation.2" data-i18n-title="html.collision-panel.collision-body.collider-fields.div.label.type-text.title3"></label></div>
+            <div data-for="box"><p data-i18n="html.collision-panel.collision-body.collider-fields.div.p.text3"></p><label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.0"></label><label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.1"></label><label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-field="size.2"></label></div>
+            <div data-for="sphere capsule cylinder"><label><span class="field-name" data-i18n="html.collision-panel.collision-body.collider-fields.div.label.field-name.text"></span><input type="text" inputmode="decimal" spellcheck="false" data-field="radius"></label></div>
+            <div data-for="capsule cylinder"><label><span class="field-name" data-i18n="html.collision-panel.collision-body.collider-fields.div.label.field-name.text2"></span><input type="text" inputmode="decimal" spellcheck="false" data-field="height" data-i18n-title="html.collision-panel.collision-body.collider-fields.div.label.type-text.title4"></label></div>
           </div>
         </div>
       </div>
       <div id="pose-panel" hidden>
         <div class="properties-header">
-          <p>Поза</p>
-          <button class="pose-key" title="Ключ того, что изменено вручную, на этом кадре (K)"><i class="fa-solid fa-key"></i></button>
+          <p data-i18n="html.pose-panel.properties-header.p.text"></p>
+          <button class="pose-key" data-i18n-title="html.pose-panel.properties-header.pose-key.title"><i class="fa-solid fa-key"></i></button>
         </div>
         <div class="pose-group">
-          <div class="pose-title"><button class="key-mark" data-key="position"></button><span>Позиция</span></div>
+          <div class="pose-title"><button class="key-mark" data-key="position"></button><span data-i18n="html.pose-panel.pose-group.pose-title.span.text"></span></div>
           <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.0"></label>
           <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.1"></label>
           <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="position.2"></label>
         </div>
         <div class="pose-group">
-          <div class="pose-title"><button class="key-mark" data-key="rotation"></button><span class="pose-rotation-title">Поворот</span></div>
-          <label hidden><span class="axis">W</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.3" title="W кватерниона (вместе с X, Y, Z: направление и угол поворота; длина приводится к единице)"></label>
-          <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.0" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
-          <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.1" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
-          <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.2" title="Угол в градусах; может быть больше 360 — тогда объект сделает несколько оборотов"></label>
+          <div class="pose-title"><button class="key-mark" data-key="rotation"></button><span class="pose-rotation-title" data-i18n="html.pose-panel.pose-group.pose-title.pose-rotation-title.text"></span></div>
+          <label hidden><span class="axis">W</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.3" data-i18n-title="html.pose-panel.pose-group.label.pose-rotation-3.type-text.title"></label>
+          <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.0" data-i18n-title="html.pose-panel.pose-group.label.pose-rotation-0.type-text.title"></label>
+          <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.1" data-i18n-title="html.pose-panel.pose-group.label.pose-rotation-1.type-text.title"></label>
+          <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="rotation.2" data-i18n-title="html.pose-panel.pose-group.label.pose-rotation-2.type-text.title"></label>
         </div>
         <div class="pose-group">
-          <div class="pose-title"><button class="key-mark" data-key="scale"></button><span>Масштаб</span></div>
+          <div class="pose-title"><button class="key-mark" data-key="scale"></button><span data-i18n="html.pose-panel.pose-group.pose-title.span.text2"></span></div>
           <label><span class="axis x">X</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.0"></label>
           <label><span class="axis y">Y</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.1"></label>
           <label><span class="axis z">Z</span><input type="text" inputmode="decimal" spellcheck="false" data-pose="scale.2"></label>
@@ -500,82 +500,82 @@
       </div>
       <div id="object-props" hidden>
         <div class="properties-header">
-          <p>Свойства</p>
+          <p data-i18n="html.object-props.properties-header.p.text"></p>
         </div>
-        <label class="object-atlas" id="object-atlas-line" title="Атлас, картинкой которого красится объект. При переносе на другой атлас грани раскладываются на нём заново; нарисованное на прежнем остаётся там, пока его не очистить" hidden>
-          <span>Атлас</span>
+        <label class="object-atlas" id="object-atlas-line" data-i18n-title="html.object-atlas-line.title" hidden>
+          <span data-i18n="html.object-atlas-line.span.text"></span>
           <select id="object-atlas"></select>
         </label>
-        <label class="flag" title="Снято — грани видны только с лицевой стороны, как их рисует большинство игровых движков: изнутри замкнутого объекта сквозь него видно то, что за ним. Уходит и в экспорт">
+        <label class="flag" data-i18n-title="html.object-props.flag.title">
           <input type="checkbox" id="back-faces">
-          <span>Изнанка граней</span>
+          <span data-i18n="html.object-props.flag.span.text"></span>
         </label>
-        <label class="flag" title="Снято — грани освещены ровно, каждое ребро видно. Стоит — свет плавно перетекает через рёбра, где грани сходятся под углом меньше указанного, а более острые рёбра остаются резкими. Уходит и в экспорт">
+        <label class="flag" data-i18n-title="html.object-props.flag.title2">
           <input type="checkbox" id="smooth-shading">
-          <span>Сглаживание</span>
-          <input type="text" id="smooth-angle" class="angle" inputmode="numeric" spellcheck="false" title="Рёбра острее этого угла (в градусах) не сглаживаются">
+          <span data-i18n="html.object-props.flag.span.text2"></span>
+          <input type="text" id="smooth-angle" class="angle" inputmode="numeric" spellcheck="false" data-i18n-title="html.smooth-angle.title">
           <span class="unit">°</span>
         </label>
       </div>
       <div id="skin-panel" hidden>
         <div class="properties-header">
-          <p>Скин</p>
+          <p data-i18n="html.skin-panel.properties-header.p.text"></p>
         </div>
         <div class="skin-bind">
-          <select id="skin-node" title="Узел-кость, к которому привязать выделенные вершины"></select>
-          <button type="button" id="skin-bind" title="Выделенные вершины гнутся целиком с этим узлом (вес 1). Опорная точка узла — сустав">Привязать</button>
+          <select id="skin-node" data-i18n-title="html.skin-node.title"></select>
+          <button type="button" id="skin-bind" data-i18n-title="html.skin-bind.title" data-i18n="html.skin-bind.text"></button>
         </div>
         <div class="skin-weight">
-          <label title="Насколько выделенные вершины гнутся с этим узлом: 1 — целиком, 0.5 — наполовину. Остальное — тем, с чем они гнулись (или узлу их объекта)"><span>Вес</span><input type="text" id="skin-weight-value" inputmode="decimal" spellcheck="false"></label>
-          <button type="button" id="skin-weight-set" title="Задать этот вес выбранного узла выделенным вершинам">Задать</button>
+          <label data-i18n-title="html.skin-panel.skin-weight.label.title"><span data-i18n="html.skin-panel.skin-weight.label.span.text"></span><input type="text" id="skin-weight-value" inputmode="decimal" spellcheck="false"></label>
+          <button type="button" id="skin-weight-set" data-i18n-title="html.skin-weight-set.title" data-i18n="html.skin-weight-set.text"></button>
         </div>
         <div class="skin-actions">
-          <button type="button" id="skin-auto" title="Автоматические веса: каждая выделенная вершина привязывается к ближайшим костям (кость — от опорной точки узла к вложенным узлам), чем ближе, тем сильнее, и веса сглаживаются. Расстояние меряется по прямой: соседние части (например, ноги) могут взять друг у друга — поправьте привязкой">Авто</button>
-          <button type="button" id="skin-smooth" title="Веса выделенных вершин становятся похожи на веса соседей по рёбрам — сустав гнётся плавно, а не на одном ребре. Можно нажать несколько раз">Сгладить</button>
-          <button type="button" id="skin-unbind" title="Выделенные вершины больше не гнутся: двигаются целиком со своим объектом">Отвязать</button>
+          <button type="button" id="skin-auto" data-i18n-title="html.skin-auto.title" data-i18n="html.skin-auto.text"></button>
+          <button type="button" id="skin-smooth" data-i18n-title="html.skin-smooth.title" data-i18n="html.skin-smooth.text"></button>
+          <button type="button" id="skin-unbind" data-i18n-title="html.skin-unbind.title" data-i18n="html.skin-unbind.text"></button>
         </div>
-        <button type="button" id="skin-pose" class="skin-pose" title="Пробная поза: поворачивайте, двигайте и масштабируйте узлы гизмо — меш гнётся, модель не меняется и ключи не ставятся. Веса можно править тут же. Выключить — эта кнопка или Esc"><i class="fa-solid fa-person-walking"></i><span>Проверить изгиб</span></button>
+        <button type="button" id="skin-pose" class="skin-pose" data-i18n-title="html.skin-pose.title"><i class="fa-solid fa-person-walking"></i><span data-i18n="html.skin-pose.span.text"></span></button>
         <p class="skin-summary"></p>
       </div>
       </section>
       <section id="texture-section">
-        <h2>Текстура</h2>
+        <h2 data-i18n="html.texture-section.h2.text"></h2>
         <div id="atlas-list" hidden></div>
-        <div class="texture-line" id="ppu-line" title="Сколько пикселей текстуры приходится на единицу длины. Задаётся при создании проекта, одно значение на весь проект">
-          <span>Пикселей на единицу</span><b id="ppu-value"></b>
+        <div class="texture-line" id="ppu-line" data-i18n-title="html.ppu-line.title">
+          <span data-i18n="html.ppu-line.span.text"></span><b id="ppu-value"></b>
         </div>
-        <div class="texture-line" title="Размер атласа: он растёт сам, когда граням не хватает места">
-          <span>Атлас</span><b id="atlas-size"></b>
+        <div class="texture-line" data-i18n-title="html.texture-section.texture-line.title">
+          <span data-i18n="html.texture-section.texture-line.span.text"></span><b id="atlas-size"></b>
         </div>
         <div class="texture-buttons">
-          <button id="atlas-open" title="Открыть картинку атласа в программе для рисования. Рабочая копия картинки кладётся во временную папку; сохранённое в ней сразу видно на модели, а в файл проекта попадает при его сохранении. Рядом кладётся файл-подсказка с контурами граней">
-            <i class="fa-solid fa-paintbrush"></i><span>Рисовать во внешнем редакторе</span>
+          <button id="atlas-open" data-i18n-title="html.atlas-open.title">
+            <i class="fa-solid fa-paintbrush"></i><span data-i18n="html.atlas-open.span.text"></span>
           </button>
-          <button id="atlas-reveal" title="Показать рабочую копию атласа и файл с контурами граней в папке">
+          <button id="atlas-reveal" data-i18n-title="html.atlas-reveal.title">
             <i class="fa-regular fa-folder-open"></i>
           </button>
-          <button id="atlas-repack" title="Разложить все грани на атласе заново, плотно. Нарисованное теряется (можно отменить)">
+          <button id="atlas-repack" data-i18n-title="html.atlas-repack.title">
             <i class="fa-solid fa-table-cells"></i>
           </button>
         </div>
       </section>
       <section id="stats">
-        <h2 id="stats-title" title="Данные выделенных объектов; без выделения — всей сцены"></h2>
+        <h2 id="stats-title" data-i18n-title="html.stats-title.title"></h2>
         <dl>
-          <dt>Вершины</dt><dd id="stat-vertices"></dd>
-          <dt>Рёбра</dt><dd id="stat-edges"></dd>
-          <dt>Грани</dt><dd id="stat-faces"></dd>
-          <dt title="Объём данных модели: координаты вершин и состав граней. Память, занятая редактором, больше.">Размер</dt><dd id="stat-size"></dd>
+          <dt data-i18n="html.stats.dl.dt.text"></dt><dd id="stat-vertices"></dd>
+          <dt data-i18n="html.stats.dl.dt.text2"></dt><dd id="stat-edges"></dd>
+          <dt data-i18n="html.stats.dl.dt.text3"></dt><dd id="stat-faces"></dd>
+          <dt data-i18n-title="html.stats.dl.dt.title" data-i18n="html.stats.dl.dt.text4"></dt><dd id="stat-size"></dd>
         </dl>
       </section>
     </aside>
 
     <footer id="statusbar">
-      <button id="errors-button" class="issues-button" title="Ошибки в модели">
+      <button id="errors-button" class="issues-button" data-i18n-title="html.errors-button.title">
         <i class="fa-solid fa-circle-exclamation"></i>
         <span></span>
       </button>
-      <button id="warnings-button" class="issues-button" title="Предупреждения о модели">
+      <button id="warnings-button" class="issues-button" data-i18n-title="html.warnings-button.title">
         <i class="fa-solid fa-triangle-exclamation"></i>
         <span></span>
       </button>
@@ -590,42 +590,42 @@
     <div class="welcome-box">
       <div class="welcome-head">
         <span class="logo">ver<b>TEX</b></span>
-        <button data-welcome="new" class="primary" title="Создать новый проект">
-          <i class="fa-solid fa-plus"></i><span>Новый проект</span>
+        <button data-welcome="new" class="primary" data-i18n-title="html.welcome.welcome-box.welcome-head.welcome-new.title">
+          <i class="fa-solid fa-plus"></i><span data-i18n="html.welcome.welcome-box.welcome-head.welcome-new.span.text"></span>
         </button>
-        <button data-welcome="open" title="Открыть проект из файла">
-          <i class="fa-regular fa-folder-open"></i><span>Открыть…</span>
+        <button data-welcome="open" data-i18n-title="html.welcome.welcome-box.welcome-head.welcome-open.title">
+          <i class="fa-regular fa-folder-open"></i><span data-i18n="html.welcome.welcome-box.welcome-head.welcome-open.span.text"></span>
         </button>
       </div>
-      <h2>Недавние проекты</h2>
+      <h2 data-i18n="html.welcome.welcome-box.h2.text"></h2>
       <div class="welcome-grid"></div>
-      <p class="welcome-empty" hidden>Здесь появятся проекты, с которыми вы работали.</p>
+      <p class="welcome-empty" hidden data-i18n="html.welcome.welcome-box.welcome-empty.text"></p>
     </div>
   </div>
 
   <div id="new-project-dialog" class="modal" hidden>
     <form class="dialog">
-      <h2>Новый проект</h2>
-      <h3>Текстуры</h3>
+      <h2 data-i18n="html.new-project-dialog.dialog.h2.text"></h2>
+      <h3 data-i18n="html.new-project-dialog.dialog.h3.text"></h3>
       <div class="choice-card">
         <label class="choice">
           <input type="radio" name="atlases" value="single" checked>
-          <span>Один атлас на проект<small>Вся модель красится одной картинкой, пиксель везде одного размера</small></span>
+          <span><i18n-text data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.text"></i18n-text><small data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.small.text"></small></span>
         </label>
-        <label class="field" title="Сколько пикселей текстуры приходится на единицу длины. Потом можно поменять, но развёртка тогда строится заново">
-          <span class="ppu-label">Пикселей на единицу</span>
+        <label class="field" data-i18n-title="html.new-project-dialog.dialog.choice-card.field.title">
+          <span class="ppu-label" data-i18n="html.new-project-dialog.dialog.choice-card.field.ppu-label.text"></span>
           <input name="ppu" type="text" inputmode="numeric" spellcheck="false" value="16">
         </label>
       </div>
       <div class="choice-card">
         <label class="choice">
           <input type="radio" name="atlases" value="multi">
-          <span>Несколько атласов<small>Каждый объект красится картинкой своего атласа, у каждого атласа свой размер пикселя. Атласы создаются в проекте, размер пикселя задаётся при создании</small></span>
+          <span><i18n-text data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.text2"></i18n-text><small data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.small.text2"></small></span>
         </label>
       </div>
       <div class="form-buttons">
-        <button type="button" data-cancel>Отмена</button>
-        <button type="submit">Создать</button>
+        <button type="button" data-cancel data-i18n="html.new-project-dialog.dialog.form-buttons.type-button.text"></button>
+        <button type="submit" data-i18n="html.new-project-dialog.dialog.form-buttons.type-submit.text"></button>
       </div>
     </form>
   </div>
@@ -633,12 +633,12 @@
   <!-- A clip's name and length: asked for a new one, changed for the one worked on (see timeline.js). -->
   <form id="clip-popup" class="grid-popup" hidden>
     <div class="grid-popup-title"></div>
-    <label title="Имя клипа — латиницей: так он будет называться в Godot. Пусто — имя дастся само">
-      <span>Имя</span>
+    <label data-i18n-title="html.clip-popup.label.title">
+      <span data-i18n="html.clip-popup.label.span.text"></span>
       <input name="name" type="text" spellcheck="false" autocomplete="off">
     </label>
-    <label title="Длина клипа в кадрах (при его FPS)">
-      <span>Длина, кадров</span>
+    <label data-i18n-title="html.clip-popup.label.title2">
+      <span data-i18n="html.clip-popup.label.span.text2"></span>
       <input name="frames" type="text" inputmode="numeric" spellcheck="false">
     </label>
     <button type="submit"></button>
@@ -646,58 +646,58 @@
 
   <!-- A new atlas: its pixels per unit asked first (see app.js). -->
   <form id="atlas-popup" class="grid-popup" hidden>
-    <div class="grid-popup-title">Новый атлас</div>
-    <label title="Имя атласа, латиницей. Пусто — имя дастся само">
-      <span>Название</span>
+    <div class="grid-popup-title" data-i18n="html.atlas-popup.grid-popup-title.text"></div>
+    <label data-i18n-title="html.atlas-popup.label.title">
+      <span data-i18n="html.atlas-popup.label.span.text"></span>
       <input name="name" type="text" spellcheck="false" placeholder="atlas" autocomplete="off">
     </label>
-    <label title="Сколько пикселей текстуры приходится на единицу длины на этом атласе. У каждого атласа свой размер пикселя">
-      <span>Пикселей на единицу</span>
+    <label data-i18n-title="html.atlas-popup.label.title2">
+      <span data-i18n="html.atlas-popup.label.span.text2"></span>
       <input name="ppu" type="text" inputmode="numeric" spellcheck="false">
     </label>
-    <button type="submit">Создать</button>
+    <button type="submit" data-i18n="html.atlas-popup.type-submit.text"></button>
   </form>
 
-  <!-- "Искажение": the atlas made retro, tried as it is set (see retro.js, app.js). -->
+  <!-- "Distort": the atlas made retro, tried as it is set (see retro.js, app.js). -->
   <form id="retro-popup" class="grid-popup" hidden>
-    <div class="grid-popup-title"><i class="kp-grip" title="Потяните, чтобы переставить окно"></i>Искажение <small class="retro-scope"></small></div>
-    <div class="retro-section">Цвет</div>
-    <label class="retro-row"><span>Яркость</span><input name="brightness" type="text" inputmode="numeric" spellcheck="false"></label>
-    <label class="retro-row"><span>Контраст</span><input name="contrast" type="text" inputmode="numeric" spellcheck="false"></label>
-    <label class="retro-row"><span>Насыщенность</span><input name="saturation" type="text" inputmode="numeric" spellcheck="false"></label>
-    <label class="retro-row"><span>Гамма</span><input name="gamma" type="text" inputmode="decimal" spellcheck="false"></label>
-    <div class="retro-section">Шум</div>
-    <label class="retro-row"><span>Сила</span><input name="noise" type="text" inputmode="numeric" spellcheck="false"></label>
-    <label class="retro-row" title="Размер зерна шума, в пикселях атласа"><span>Зерно, px</span><input name="grain" type="text" inputmode="numeric" spellcheck="false"></label>
+    <div class="grid-popup-title"><i class="kp-grip" data-i18n-title="html.retro-popup.grid-popup-title.kp-grip.title"></i><i18n-text data-i18n="html.retro-popup.grid-popup-title.text"></i18n-text> <small class="retro-scope"></small></div>
+    <div class="retro-section" data-i18n="html.retro-popup.retro-section.text"></div>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text"></span><input name="brightness" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text2"></span><input name="contrast" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text3"></span><input name="saturation" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text4"></span><input name="gamma" type="text" inputmode="decimal" spellcheck="false"></label>
+    <div class="retro-section" data-i18n="html.retro-popup.retro-section.text2"></div>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text5"></span><input name="noise" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row" data-i18n-title="html.retro-popup.retro-row.title"><span data-i18n="html.retro-popup.retro-row.span.text6"></span><input name="grain" type="text" inputmode="numeric" spellcheck="false"></label>
     <div class="retro-line">
-      <label class="retro-check" title="Снято — у каждого канала свой шум, цветной"><input name="mono" type="checkbox"><span>Одноцветный</span></label>
-      <button type="button" data-retro="seed" title="Другой узор шума"><i class="fa-solid fa-dice"></i></button>
+      <label class="retro-check" data-i18n-title="html.retro-popup.retro-line.retro-check.title"><input name="mono" type="checkbox"><span data-i18n="html.retro-popup.retro-line.retro-check.span.text"></span></label>
+      <button type="button" data-retro="seed" data-i18n-title="html.retro-popup.retro-line.retro-seed.type-button.title"><i class="fa-solid fa-dice"></i></button>
     </div>
-    <div class="retro-section">Цвета</div>
-    <label class="retro-row" title="Без палитры: свести каждый канал к стольким уровням (постеризация). 0 — выкл."><span>Уровней на канал</span><input name="levels" type="text" inputmode="numeric" spellcheck="false"></label>
-    <label class="retro-check" title="Свести цвета к палитре: каждый пиксель берёт ближайший её цвет (ближайший на глаз). Уровни тогда не действуют"><input name="palette" type="checkbox"><span>Палитра</span></label>
+    <div class="retro-section" data-i18n="html.retro-popup.retro-section.text3"></div>
+    <label class="retro-row" data-i18n-title="html.retro-popup.retro-row.title2"><span data-i18n="html.retro-popup.retro-row.span.text7"></span><input name="levels" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-check" data-i18n-title="html.retro-popup.retro-check.title"><input name="palette" type="checkbox"><span data-i18n="html.retro-popup.retro-check.span.text"></span></label>
     <div class="retro-palette">
-      <select name="preset" title="Готовая палитра: заменяет цвета ниже"></select>
+      <select name="preset" data-i18n-title="html.retro-popup.retro-palette.name-preset.title"></select>
       <div class="retro-swatches"></div>
       <div class="retro-line">
-        <button type="button" data-retro="add-color" title="Добавить в палитру текущий цвет кисти"><i class="fa-solid fa-plus"></i><span>Цвет кисти</span></button>
-        <button type="button" data-retro="auto" title="Подобрать палитру по самой картинке: столько цветов, сколько указано">Подобрать</button>
-        <input name="auto" type="text" inputmode="numeric" spellcheck="false" title="Сколько цветов подобрать">
+        <button type="button" data-retro="add-color" data-i18n-title="html.retro-popup.retro-palette.retro-line.retro-add-color.type-button.title"><i class="fa-solid fa-plus"></i><span data-i18n="html.retro-popup.retro-palette.retro-line.retro-add-color.type-button.span.text"></span></button>
+        <button type="button" data-retro="auto" data-i18n-title="html.retro-popup.retro-palette.retro-line.retro-auto.type-button.title" data-i18n="html.retro-popup.retro-palette.retro-line.retro-auto.type-button.text"></button>
+        <input name="auto" type="text" inputmode="numeric" spellcheck="false" data-i18n-title="html.retro-popup.retro-palette.retro-line.name-auto.type-text.title">
       </div>
     </div>
-    <div class="retro-section">Дизеринг</div>
-    <label class="retro-row"><span>Способ</span><select name="dither"></select></label>
-    <label class="retro-row" title="Насколько сильно дизеринг размывает переход между цветами"><span>Сила, %</span><input name="strength" type="text" inputmode="numeric" spellcheck="false"></label>
+    <div class="retro-section" data-i18n="html.retro-popup.retro-section.text4"></div>
+    <label class="retro-row"><span data-i18n="html.retro-popup.retro-row.span.text8"></span><select name="dither"></select></label>
+    <label class="retro-row" data-i18n-title="html.retro-popup.retro-row.title3"><span data-i18n="html.retro-popup.retro-row.span.text9"></span><input name="strength" type="text" inputmode="numeric" spellcheck="false"></label>
     <div class="retro-buttons">
-      <button type="button" data-retro="reset" title="Вернуть все настройки к исходным">Сброс</button>
-      <button type="button" data-retro="cancel">Отмена</button>
-      <button type="submit" class="primary">Применить</button>
+      <button type="button" data-retro="reset" data-i18n-title="html.retro-popup.retro-buttons.retro-reset.type-button.title" data-i18n="html.retro-popup.retro-buttons.retro-reset.type-button.text"></button>
+      <button type="button" data-retro="cancel" data-i18n="html.retro-popup.retro-buttons.retro-cancel.type-button.text"></button>
+      <button type="submit" class="primary" data-i18n="html.retro-popup.retro-buttons.type-submit.text"></button>
     </div>
   </form>
 
   <div id="color-popup" hidden>
-    <div class="color-field" title="Оттенок: левее — бледнее, ниже — темнее"><i></i></div>
-    <div class="color-hue" title="Тон"><i></i></div>
+    <div class="color-field" data-i18n-title="html.color-popup.color-field.title"><i></i></div>
+    <div class="color-hue" data-i18n-title="html.color-popup.color-hue.title"><i></i></div>
     <div class="color-values">
       <label class="color-hex"><span>#</span><input name="hex" type="text" spellcheck="false" maxlength="7"></label>
       <label><span>R</span><input name="r" type="text" inputmode="numeric" spellcheck="false" maxlength="3"></label>
@@ -706,9 +706,9 @@
     </div>
     <div class="color-palette-bar">
       <span class="color-palette-name"></span>
-      <button type="button" data-palette="add" title="Добавить цвет кисти в палитру"><i class="fa-solid fa-plus"></i></button>
-      <button type="button" data-palette="import" title="Загрузить палитру из файла: Aseprite (.aseprite, .ase), GIMP (.gpl), .pal, .hex, .act или картинка .png. Заменяет текущую"><i class="fa-solid fa-folder-open"></i></button>
-      <button type="button" data-palette="reset" title="Вернуть палитру по умолчанию"><i class="fa-solid fa-rotate-left"></i></button>
+      <button type="button" data-palette="add" data-i18n-title="html.color-popup.color-palette-bar.type-button.title"><i class="fa-solid fa-plus"></i></button>
+      <button type="button" data-palette="import" data-i18n-title="html.color-popup.color-palette-bar.type-button.title2"><i class="fa-solid fa-folder-open"></i></button>
+      <button type="button" data-palette="reset" data-i18n-title="html.color-popup.color-palette-bar.type-button.title3"><i class="fa-solid fa-rotate-left"></i></button>
     </div>
     <div class="color-swatches"></div>
     <input type="file" hidden>
@@ -716,20 +716,20 @@
 
   <div id="export-dialog" class="modal" hidden>
     <form class="dialog">
-      <h2>Экспорт</h2>
-      <h3>Модель</h3>
-      <label class="field" title="Во сколько раз модель в файле больше, чем в редакторе: 2 — вдвое больше, 0.5 — вдвое меньше. Единица длины в файле — метр. Проект не меняется">
-        <span>Масштаб</span>
+      <h2 data-i18n="html.export-dialog.dialog.h2.text"></h2>
+      <h3 data-i18n="html.export-dialog.dialog.h3.text"></h3>
+      <label class="field" data-i18n-title="html.export-dialog.dialog.field.title">
+        <span data-i18n="html.export-dialog.dialog.field.span.text"></span>
         <input name="scale" type="text" inputmode="decimal" spellcheck="false" value="1">
       </label>
-      <h3>Текстура</h3>
-      <label class="choice" title="Нужно, если там, куда пойдёт модель, текстура сглаживается или уменьшается на расстоянии. Картинка в самом проекте не меняется">
+      <h3 data-i18n="html.export-dialog.dialog.h3.text2"></h3>
+      <label class="choice" data-i18n-title="html.export-dialog.dialog.choice.title">
         <input type="checkbox" name="extrude">
-        <span>Экструдирование текстур<small>Крайние пиксели каждого лоскута продлеваются наружу, в пустые места атласа, чтобы на швах модели не проступали чужие цвета</small></span>
+        <span><i18n-text data-i18n="html.export-dialog.dialog.choice.span.text"></i18n-text><small data-i18n="html.export-dialog.dialog.choice.span.small.text"></small></span>
       </label>
       <div class="form-buttons">
-        <button type="button" data-cancel>Отмена</button>
-        <button type="submit">Экспортировать</button>
+        <button type="button" data-cancel data-i18n="html.export-dialog.dialog.form-buttons.type-button.text"></button>
+        <button type="submit" data-i18n="html.export-dialog.dialog.form-buttons.type-submit.text"></button>
       </div>
     </form>
   </div>
@@ -737,50 +737,55 @@
   <div id="settings-dialog" hidden>
     <div class="dialog settings">
       <div class="settings-head">
-        <h2>Настройки</h2>
-        <button id="settings-close" title="Закрыть (Esc)">Закрыть</button>
+        <h2 data-i18n="html.settings-dialog.dialog.settings-head.h2.text"></h2>
+        <button id="settings-close" data-i18n-title="html.settings-close.title" data-i18n="html.settings-close.text"></button>
       </div>
       <div class="settings-body">
         <nav id="settings-nav">
-          <div class="settings-group">Интерфейс</div>
-          <button data-page="appearance" class="active">Оформление</button>
-          <div class="settings-group">Редактор</div>
-          <button data-page="controls">Управление</button>
-          <button data-page="hotkeys">Хоткеи</button>
-          <button data-page="textures">Текстуры</button>
+          <div class="settings-group" data-i18n="html.settings-nav.settings-group.text"></div>
+          <button data-page="appearance" class="active" data-i18n="html.settings-nav.active.text"></button>
+          <div class="settings-group" data-i18n="html.settings-nav.settings-group.text2"></div>
+          <button data-page="controls" data-i18n="html.settings-nav.button.text"></button>
+          <button data-page="hotkeys" data-i18n="html.settings-nav.button.text2"></button>
+          <button data-page="textures" data-i18n="html.settings-nav.button.text3"></button>
         </nav>
         <div class="settings-pages">
           <section data-page="appearance">
             <label>
-              <span>Тема</span>
+              <span data-i18n="html.settings-dialog.dialog.settings-body.settings-pages.section.label.span.text"></span>
               <select id="theme"></select>
             </label>
+            <label>
+              <span data-i18n="settings.language"></span>
+              <select id="language"></select>
+            </label>
+            <p class="settings-note" id="language-note" data-i18n="settings.language.restart" hidden></p>
           </section>
           <section data-page="controls" hidden>
-            <label title="На сколько меняется расстояние до объекта за один щелчок колеса">
-              <span>Сила зума колесом</span>
+            <label data-i18n-title="html.settings-dialog.dialog.settings-body.settings-pages.section.label.title">
+              <span data-i18n="html.settings-dialog.dialog.settings-body.settings-pages.section.label.span.text2"></span>
               <input type="range" id="zoom-strength" min="3" max="30" step="1">
               <output id="zoom-strength-value"></output>
             </label>
-            <label title="Как долго камера доезжает после поворота колеса; 0 — мгновенно">
-              <span>Плавность зума</span>
+            <label data-i18n-title="html.settings-dialog.dialog.settings-body.settings-pages.section.label.title2">
+              <span data-i18n="html.settings-dialog.dialog.settings-body.settings-pages.section.label.span.text3"></span>
               <input type="range" id="zoom-smoothness" min="0" max="10" step="1">
               <output id="zoom-smoothness-value"></output>
             </label>
           </section>
           <section data-page="textures" hidden>
-            <label title="Программа, в которой открывается картинка атласа по кнопке «Рисовать во внешнем редакторе»: путь к её исполняемому файлу. Пусто — та, которой система открывает такие файлы">
-              <span>Внешний редактор</span>
-              <input type="text" id="external-editor" spellcheck="false" placeholder="программа по умолчанию">
-              <button type="button" id="external-editor-pick">Обзор…</button>
-              <button type="button" id="external-editor-clear" title="Открывать программой по умолчанию">Сбросить</button>
+            <label data-i18n-title="html.settings-dialog.dialog.settings-body.settings-pages.section.label.title3">
+              <span data-i18n="html.settings-dialog.dialog.settings-body.settings-pages.section.label.span.text4"></span>
+              <input type="text" id="external-editor" spellcheck="false" data-i18n-placeholder="html.external-editor.placeholder">
+              <button type="button" id="external-editor-pick" data-i18n="html.external-editor-pick.text"></button>
+              <button type="button" id="external-editor-clear" data-i18n-title="html.external-editor-clear.title" data-i18n="html.external-editor-clear.text"></button>
             </label>
-            <p class="settings-note">Кнопка «Рисовать во внешнем редакторе» в панели «Текстура» откроет картинку атласа в этой программе. Сохранённое там сразу видно на модели.</p>
+            <p class="settings-note" data-i18n="html.settings-dialog.dialog.settings-body.settings-pages.section.settings-note.text"></p>
           </section>
           <section data-page="hotkeys" hidden>
             <div class="hotkeys-head">
               <span id="hotkey-note"></span>
-              <button id="hotkeys-reset" title="Вернуть все клавиши по умолчанию">Сбросить все</button>
+              <button id="hotkeys-reset" data-i18n-title="html.hotkeys-reset.title" data-i18n="html.hotkeys-reset.text"></button>
             </div>
             <div id="hotkey-list"></div>
           </section>
@@ -792,97 +797,97 @@
   <!-- The sprite render (see render-mode.js): the sheet on the left, its settings on the right. -->
   <section id="render-mode" hidden>
     <div class="render-head">
-      <h2>Рендер спрайтов</h2>
+      <h2 data-i18n="html.render-mode.render-head.h2.text"></h2>
       <span class="render-size"></span>
-      <button data-render="close" title="Вернуться к модели (Esc)">Закрыть</button>
+      <button data-render="close" data-i18n-title="html.render-mode.render-head.button.title" data-i18n="html.render-mode.render-head.button.text"></button>
     </div>
     <div class="render-body">
       <div class="render-preview">
         <div class="render-player">
           <canvas></canvas>
           <div class="player-bar">
-            <button type="button" data-player="previous" title="Предыдущий кадр"><i class="fa-solid fa-backward-step"></i></button>
-            <button type="button" data-player="play" title="Пуск / пауза"><i class="fa-solid fa-pause"></i></button>
-            <button type="button" data-player="next" title="Следующий кадр"><i class="fa-solid fa-forward-step"></i></button>
-            <label title="Кадров в секунду"><input type="text" name="fps" inputmode="numeric" spellcheck="false"><span>кадр/с</span></label>
+            <button type="button" data-player="previous" data-i18n-title="html.render-mode.render-body.render-preview.render-player.player-bar.player-previous.type-button.title"><i class="fa-solid fa-backward-step"></i></button>
+            <button type="button" data-player="play" data-i18n-title="html.render-mode.render-body.render-preview.render-player.player-bar.player-play.type-button.title"><i class="fa-solid fa-pause"></i></button>
+            <button type="button" data-player="next" data-i18n-title="html.render-mode.render-body.render-preview.render-player.player-bar.player-next.type-button.title"><i class="fa-solid fa-forward-step"></i></button>
+            <label data-i18n-title="html.render-mode.render-body.render-preview.render-player.player-bar.label.title"><input type="text" name="fps" inputmode="numeric" spellcheck="false"><span data-i18n="html.render-mode.render-body.render-preview.render-player.player-bar.label.span.text"></span></label>
             <span class="player-frame"></span>
           </div>
         </div>
-        <div class="render-sheet" title="Щелчок по кадру — показать его наверху · колесо — масштаб, правая или средняя кнопка — сдвинуть">
+        <div class="render-sheet" data-i18n-title="html.render-mode.render-body.render-preview.render-sheet.title">
           <canvas></canvas>
         </div>
-        <p class="render-empty" hidden>Нечего рендерить: в сцене нет видимых граней</p>
+        <p class="render-empty" hidden data-i18n="html.render-mode.render-body.render-preview.render-empty.text"></p>
         <div class="render-busy" hidden><i class="fa-solid fa-circle-notch fa-spin"></i><span></span></div>
       </div>
-      <div class="render-splitter" title="Потяните, чтобы изменить ширину панели; двойной клик — вернуть исходную"></div>
+      <div class="render-splitter" data-i18n-title="html.render-mode.render-body.render-splitter.title"></div>
       <form class="render-settings" autocomplete="off">
         <div class="render-animation">
-          <h3>Анимация</h3>
+          <h3 data-i18n="html.render-mode.render-body.render-settings.render-animation.h3.text"></h3>
           <div class="render-source">
-            <button type="button" data-source="rest" title="Модель в покое, как в редакторе: один лист с направлениями">Поза покоя</button>
-            <button type="button" data-source="clips" title="Клипы анимации: на каждый клип и направление — свой PNG с полоской кадров, плюс SpriteFrames для Godot (.tres) и JSON">Клипы</button>
+            <button type="button" data-source="rest" data-i18n-title="html.render-mode.render-body.render-settings.render-animation.render-source.source-rest.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-animation.render-source.source-rest.type-button.text"></button>
+            <button type="button" data-source="clips" data-i18n-title="html.render-mode.render-body.render-settings.render-animation.render-source.source-clips.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-animation.render-source.source-clips.type-button.text"></button>
           </div>
           <div class="render-clips"><div>
-            <label title="Какой клип показан в просмотре. В экспорт идут все клипы"><span>Клип</span><select name="clip"></select></label>
-            <label title="Кадров в секунду у спрайта: клип снимается через равные промежутки времени. Меньше — меньше кадров в PNG"><span>FPS спрайта</span><input type="text" name="spriteFps" inputmode="numeric"></label>
+            <label data-i18n-title="html.render-mode.render-body.render-settings.render-animation.render-clips.div.label.title"><span data-i18n="html.render-mode.render-body.render-settings.render-animation.render-clips.div.label.span.text"></span><select name="clip"></select></label>
+            <label data-i18n-title="html.render-mode.render-body.render-settings.render-animation.render-clips.div.label.title2"><span data-i18n="html.render-mode.render-body.render-settings.render-animation.render-clips.div.label.span.text2"></span><input type="text" name="spriteFps" inputmode="numeric"></label>
             <p class="render-clip-info"></p>
           </div></div>
         </div>
-        <h3>Камера</h3>
-        <label title="Сколько сторон, с которых снята модель: кадров в листе"><span>Направлений</span><input type="text" name="directions" inputmode="numeric"></label>
-        <label title="Поворот модели в первом кадре, в градусах; дальше — равными шагами против часовой стрелки, если смотреть сверху"><span>Начальный угол</span><input type="text" name="start" inputmode="numeric"></label>
-        <label title="0 — сбоку, 26.57 — «изометрия» пиксель-арта 2:1, 90 — сверху"><span>Наклон камеры</span><input type="text" name="elevation" inputmode="decimal"></label>
-        <h3>Кадр</h3>
-        <label title="Пикселей спрайта на пиксель атласа: при 1 пиксели модели становятся пикселями спрайта"><span>Масштаб</span><input type="text" name="scale" inputmode="numeric"></label>
-        <label><span>Ширина, px</span><input type="text" name="width" inputmode="numeric"></label>
-        <label><span>Высота, px</span><input type="text" name="height" inputmode="numeric"></label>
-        <button type="button" data-render="fit" title="Наименьший размер кадра, в который модель помещается со всех сторон">Подобрать по модели</button>
-        <h3>Лист</h3>
-        <div class="render-layout" title="Как кадры лягут на лист: в одну строку, не больше N столбцов (строк сколько понадобится) или не больше N строк (столбцов сколько понадобится)">
-          <button type="button" data-layout="row">В строку</button>
-          <button type="button" data-layout="columns">Столбцы</button>
-          <button type="button" data-layout="rows">Строки</button>
+        <h3 data-i18n="html.render-mode.render-body.render-settings.h3.text"></h3>
+        <label data-i18n-title="html.render-mode.render-body.render-settings.label.title"><span data-i18n="html.render-mode.render-body.render-settings.label.span.text"></span><input type="text" name="directions" inputmode="numeric"></label>
+        <label data-i18n-title="html.render-mode.render-body.render-settings.label.title2"><span data-i18n="html.render-mode.render-body.render-settings.label.span.text2"></span><input type="text" name="start" inputmode="numeric"></label>
+        <label data-i18n-title="html.render-mode.render-body.render-settings.label.title3"><span data-i18n="html.render-mode.render-body.render-settings.label.span.text3"></span><input type="text" name="elevation" inputmode="decimal"></label>
+        <h3 data-i18n="html.render-mode.render-body.render-settings.h3.text2"></h3>
+        <label data-i18n-title="html.render-mode.render-body.render-settings.label.title4"><span data-i18n="html.render-mode.render-body.render-settings.label.span.text4"></span><input type="text" name="scale" inputmode="numeric"></label>
+        <label><span data-i18n="html.render-mode.render-body.render-settings.label.span.text5"></span><input type="text" name="width" inputmode="numeric"></label>
+        <label><span data-i18n="html.render-mode.render-body.render-settings.label.span.text6"></span><input type="text" name="height" inputmode="numeric"></label>
+        <button type="button" data-render="fit" data-i18n-title="html.render-mode.render-body.render-settings.type-button.title" data-i18n="html.render-mode.render-body.render-settings.type-button.text"></button>
+        <h3 data-i18n="html.render-mode.render-body.render-settings.h3.text3"></h3>
+        <div class="render-layout" data-i18n-title="html.render-mode.render-body.render-settings.render-layout.title">
+          <button type="button" data-layout="row" data-i18n="html.render-mode.render-body.render-settings.render-layout.layout-row.type-button.text"></button>
+          <button type="button" data-layout="columns" data-i18n="html.render-mode.render-body.render-settings.render-layout.layout-columns.type-button.text"></button>
+          <button type="button" data-layout="rows" data-i18n="html.render-mode.render-body.render-settings.render-layout.layout-rows.type-button.text"></button>
         </div>
-        <div class="render-count"><div><label><span>Столбцов, не больше</span><input type="text" name="count" inputmode="numeric"></label></div></div>
-        <label title="Пикселей между кадрами"><span>Отступ, px</span><input type="text" name="padding" inputmode="numeric"></label>
-        <h3>Свет</h3>
+        <div class="render-count"><div><label><span data-i18n="html.render-mode.render-body.render-settings.render-count.div.label.span.text"></span><input type="text" name="count" inputmode="numeric"></label></div></div>
+        <label data-i18n-title="html.render-mode.render-body.render-settings.label.title5"><span data-i18n="html.render-mode.render-body.render-settings.label.span.text7"></span><input type="text" name="padding" inputmode="numeric"></label>
+        <h3 data-i18n="html.render-mode.render-body.render-settings.h3.text4"></h3>
         <div class="render-light">
-          <button type="button" data-light="none" title="Чистые цвета текстуры, без теней — затенение уже нарисовано в пикселях">Нет</button>
-          <button type="button" data-light="camera" title="Как в редакторе: свет со стороны зрителя, одинаковый во всех кадрах">Камера</button>
-          <button type="button" data-light="custom" title="Свет с выбранной стороны, неподвижный в мире: при повороте модели видны освещённая и теневая стороны">Настраиваемый</button>
+          <button type="button" data-light="none" data-i18n-title="html.render-mode.render-body.render-settings.render-light.light-none.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-light.light-none.type-button.text"></button>
+          <button type="button" data-light="camera" data-i18n-title="html.render-mode.render-body.render-settings.render-light.light-camera.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-light.light-camera.type-button.text"></button>
+          <button type="button" data-light="custom" data-i18n-title="html.render-mode.render-body.render-settings.render-light.light-custom.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-light.light-custom.type-button.text"></button>
         </div>
         <div class="render-custom"><div>
           <div class="light-dials">
-            <figure title="Вид сбоку: высота источника над горизонтом. Солнце можно перетаскивать">
+            <figure data-i18n-title="html.render-mode.render-body.render-settings.render-custom.div.light-dials.figure.title">
               <canvas data-dial="elevation"></canvas>
-              <figcaption>Высота</figcaption>
+              <figcaption data-i18n="html.render-mode.render-body.render-settings.render-custom.div.light-dials.figure.figcaption.text"></figcaption>
             </figure>
-            <figure title="Вид сверху: с какой стороны светит; треугольник внизу — сторона камеры первого кадра. Солнце можно перетаскивать">
+            <figure data-i18n-title="html.render-mode.render-body.render-settings.render-custom.div.light-dials.figure.title2">
               <canvas data-dial="azimuth"></canvas>
-              <figcaption>Сторона</figcaption>
+              <figcaption data-i18n="html.render-mode.render-body.render-settings.render-custom.div.light-dials.figure.figcaption.text2"></figcaption>
             </figure>
           </div>
-          <label title="0 — спереди (со стороны первого кадра), 90 — справа, 180 — сзади, 270 — слева"><span>Азимут, °</span><input type="text" name="lightAzimuth" inputmode="numeric"></label>
-          <label title="0 — сбоку, по горизонту; 90 — прямо сверху"><span>Высота, °</span><input type="text" name="lightElevation" inputmode="numeric"></label>
-          <label><span>Сила</span><input type="text" name="lightStrength" inputmode="decimal"></label>
+          <label data-i18n-title="html.render-mode.render-body.render-settings.render-custom.div.label.title"><span data-i18n="html.render-mode.render-body.render-settings.render-custom.div.label.span.text"></span><input type="text" name="lightAzimuth" inputmode="numeric"></label>
+          <label data-i18n-title="html.render-mode.render-body.render-settings.render-custom.div.label.title2"><span data-i18n="html.render-mode.render-body.render-settings.render-custom.div.label.span.text2"></span><input type="text" name="lightElevation" inputmode="numeric"></label>
+          <label><span data-i18n="html.render-mode.render-body.render-settings.render-custom.div.label.span.text3"></span><input type="text" name="lightStrength" inputmode="decimal"></label>
         </div></div>
         <div class="render-blend"><div>
-          <div class="render-blend-buttons" title="Как свет переходит в тень">
-            <button type="button" data-blend="smooth" title="Плавно, как есть">Плавное</button>
-            <button type="button" data-blend="steps" title="Ступенями яркости, без переходов между ними — как в рисованном пиксель-арте. У гранёных объектов грани сводятся к стольким оттенкам, у сглаженных свет ложится полосами">Ступенчатое</button>
+          <div class="render-blend-buttons" data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-blend-buttons.title">
+            <button type="button" data-blend="smooth" data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-blend-buttons.blend-smooth.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-blend.div.render-blend-buttons.blend-smooth.type-button.text"></button>
+            <button type="button" data-blend="steps" data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-blend-buttons.blend-steps.type-button.title" data-i18n="html.render-mode.render-body.render-settings.render-blend.div.render-blend-buttons.blend-steps.type-button.text"></button>
           </div>
           <div class="render-steps"><div>
-            <label title="Сколько ступеней яркости от света до тени"><span>Ступеней</span><input type="text" name="steps" inputmode="numeric"></label>
-            <label class="choice" title="Переходы между ступенями — шахматкой из пикселей двух соседних ступеней, как в пиксель-арте (упорядоченный дизеринг, матрица Байера 4×4). Только там, где свет переходит из ступени в ступень по скруглённой поверхности"><input type="checkbox" name="dither"><span>Дизеринг</span></label>
+            <label data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.label.title"><span data-i18n="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.label.span.text"></span><input type="text" name="steps" inputmode="numeric"></label>
+            <label class="choice" data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.choice.title"><input type="checkbox" name="dither"><span data-i18n="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.choice.span.text"></span></label>
             <div class="render-dither-faces"><div>
-              <label class="choice" title="Шахматкой заливается весь свет между ступенями — и плоская грань целиком, если её освещённость между ними"><input type="checkbox" name="ditherFaces"><span>Грани целиком</span></label>
+              <label class="choice" data-i18n-title="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.render-dither-faces.div.choice.title"><input type="checkbox" name="ditherFaces"><span data-i18n="html.render-mode.render-body.render-settings.render-blend.div.render-steps.div.render-dither-faces.div.choice.span.text"></span></label>
             </div></div>
           </div></div>
         </div></div>
-        <label class="choice" title="Ширина и высота листа — 64, 128, 256…, как требуют многие движки: справа и снизу добавляется прозрачное поле, кадры остаются на своих местах"><input type="checkbox" name="pot"><span>Размер — степень двойки</span></label>
-        <label class="choice" title="Рядом с PNG — JSON с местом и углом каждого кадра (формат TexturePacker / Aseprite)"><input type="checkbox" name="json"><span>JSON с кадрами</span></label>
+        <label class="choice" data-i18n-title="html.render-mode.render-body.render-settings.choice.title"><input type="checkbox" name="pot"><span data-i18n="html.render-mode.render-body.render-settings.choice.span.text"></span></label>
+        <label class="choice" data-i18n-title="html.render-mode.render-body.render-settings.choice.title2"><input type="checkbox" name="json"><span data-i18n="html.render-mode.render-body.render-settings.choice.span.text2"></span></label>
         <div class="form-buttons">
-          <button type="button" data-render="save" title="Сохранить лист в PNG (и JSON с кадрами, если отмечено). С клипами — PNG на каждый клип и направление, SpriteFrames для Godot (.tres) и JSON">Экспорт</button>
+          <button type="button" data-render="save" data-i18n-title="html.render-mode.render-body.render-settings.form-buttons.type-button.title" data-i18n="html.render-mode.render-body.render-settings.form-buttons.type-button.text"></button>
         </div>
       </form>
     </div>

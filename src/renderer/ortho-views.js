@@ -3,6 +3,7 @@ import { NODE_MARK, nodePlaces } from './node-marks.js';
 import { bones, kite } from './node-bones.js';
 import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
+import { t } from './i18n.js';
 
 // The surface as these views (and the window of views, see views-window.js)
 // draw it: lit, painted with the atlases where it is on them, the rest in
@@ -58,9 +59,9 @@ const FIT_ICON = '<i class="fa-solid fa-expand"></i>';
 // axis that reverses then (X stays to the right in the top/bottom pair, Y stays
 // up in the others).
 const VIEWS = [
-  { names: ['Сверху', 'Снизу'], plane: 'XZ', mirror: 'up', axes: 'xz', direction: [0, -1, 0], right: 'x', rightSign: 1, up: 'z', upSign: -1 },
-  { names: ['Спереди', 'Сзади'], plane: 'XY', mirror: 'right', axes: 'xy', direction: [0, 0, -1], right: 'x', rightSign: 1, up: 'y', upSign: 1 },
-  { names: ['Справа', 'Слева'], plane: 'ZY', mirror: 'right', axes: 'yz', direction: [-1, 0, 0], right: 'z', rightSign: -1, up: 'y', upSign: 1 },
+  { names: [t('ortho-views.top'), t('ortho-views.bottom')], plane: 'XZ', mirror: 'up', axes: 'xz', direction: [0, -1, 0], right: 'x', rightSign: 1, up: 'z', upSign: -1 },
+  { names: [t('ortho-views.front'), t('ortho-views.back')], plane: 'XY', mirror: 'right', axes: 'xy', direction: [0, 0, -1], right: 'x', rightSign: 1, up: 'y', upSign: 1 },
+  { names: [t('ortho-views.right'), t('ortho-views.left')], plane: 'ZY', mirror: 'right', axes: 'yz', direction: [-1, 0, 0], right: 'z', rightSign: -1, up: 'y', upSign: 1 },
 ];
 
 // Bottom panel with three orthographic wireframe views of the editor's target object.
@@ -123,10 +124,10 @@ export class OrthoViews {
     header.className = 'ortho-header';
     const label = document.createElement('span');
     const fitButton = document.createElement('button');
-    fitButton.title = 'Центрировать вид';
+    fitButton.title = t('ortho-views.fit');
     fitButton.innerHTML = FIT_ICON;
     const flipButton = document.createElement('button');
-    flipButton.title = 'Инвертировать вид: смотреть с противоположной стороны';
+    flipButton.title = t('ortho-views.flip');
     flipButton.innerHTML = FLIP_ICON;
     // Buttons first: the title changes width when the view is flipped.
     header.append(fitButton, flipButton, label);
@@ -891,7 +892,7 @@ export class OrthoViews {
       context.fillStyle = theme.textDim;
       context.font = '12px "Segoe UI", system-ui, sans-serif';
       context.textAlign = 'center';
-      context.fillText('Нет объекта', width / 2, height / 2 + 4);
+      context.fillText(t('ortho-views.no-object'), width / 2, height / 2 + 4);
       return;
     }
 

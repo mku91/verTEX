@@ -1,4 +1,5 @@
 import { DEFAULT_PALETTE, PALETTE_FILES, readPalette } from './palette.js';
+import { t } from './i18n.js';
 
 // The brush's colour: a button that shows it, and a popup that opens beside
 // the button to choose it in.
@@ -210,7 +211,7 @@ export class ColorPopup {
     try {
       this.setPalette(await readPalette(file.name, new Uint8Array(await file.arrayBuffer())));
     } catch (error) {
-      await this.alert('Не удалось прочитать палитру', `${file.name}\n\n${error.message}`);
+      await this.alert(t('color-popup.read-failed'), `${file.name}\n\n${error.message}`);
     }
   }
 
@@ -232,14 +233,14 @@ export class ColorPopup {
       return button;
     };
     const colors = this.palette.colors.map((color, n) => {
-      const button = swatch(color, `#${hexOf(color)} · правая кнопка убирает цвет из палитры`);
+      const button = swatch(color, t('color-popup.swatch', { hex: hexOf(color) }));
       button.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         this.setPalette({ name: this.palette.name, colors: this.palette.colors.filter((_, k) => k !== n) });
       });
       return button;
     });
-    this.swatches.replaceChildren(swatch(null, 'Без цвета: кисть стирает'), ...colors);
+    this.swatches.replaceChildren(swatch(null, t('color-popup.no-color')), ...colors);
     this.popup.querySelector('.color-palette-name').textContent = `${this.palette.name} · ${this.palette.colors.length}`;
   }
 }

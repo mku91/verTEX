@@ -6,6 +6,7 @@ import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { latinName, freeName } from './names.js';
 import { themeGizmo } from './theme.js';
+import { t } from './i18n.js';
 
 // The collision mode: the objects' collision shapes (see collision-fit.js)
 // shown over the model, picked, added - by hand or fitted by themselves -
@@ -455,8 +456,8 @@ export class CollisionMode {
     // Adding by hand is to one object; fitting, to every object in hand.
     for (const button of this.panel.querySelectorAll('[data-add]')) button.disabled = target === null;
     this.panel.querySelector('.collider-auto').title = hand.length > 1
-      ? `Подобрать фигуру каждому из ${hand.length} объектов: простую, если она плотно облегает объект, иначе выпуклую оболочку. Прежние фигуры заменяются`
-      : 'Подобрать фигуру по объекту: простую (коробку, сферу, капсулу, цилиндр), если она плотно облегает его, иначе выпуклую оболочку. Прежние фигуры заменяются';
+      ? t('collisions.fit.many', { count: hand.length })
+      : t('collisions.fit.one');
 
     // The list: the target's shapes; with several objects, how many they have.
     this.list.replaceChildren();
@@ -464,7 +465,7 @@ export class CollisionMode {
       const count = objects.reduce((sum, object) => sum + (object.colliders?.length ?? 0), 0);
       const line = document.createElement('p');
       line.className = 'collider-empty';
-      line.textContent = `${hand.length} объект(ов), фигур: ${count}`;
+      line.textContent = t('collisions.summary', { count: hand.length, shapes: count });
       this.list.append(line);
     } else {
       const object = editor.mesh.objects[target];
@@ -472,7 +473,7 @@ export class CollisionMode {
       if (shapes.length === 0) {
         const line = document.createElement('p');
         line.className = 'collider-empty';
-        line.textContent = 'Нет фигур';
+        line.textContent = t('collisions.no-shapes');
         this.list.append(line);
       }
       shapes.forEach((shape, k) => {

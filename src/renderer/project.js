@@ -37,6 +37,7 @@ import { soundAnimation } from './animation.js';
 import { tell } from './ask-dialog.js';
 import { ATLAS } from './mesh.js';
 import { START_SIZE } from './unwrap.js';
+import { t } from './i18n.js';
 
 const FORMAT = 'vertex-project';
 const VERSION = 5;
@@ -222,7 +223,7 @@ function worldModel(model) {
   const frames = new Map();
   const frameOf = (object, above = new Set()) => {
     if (frames.has(object.id)) return frames.get(object.id);
-    if (above.has(object.id)) throw new Error('модель повреждена: узел вложен сам в себя');
+    if (above.has(object.id)) throw new Error(t('project.error.cycle'));
     above.add(object.id);
     const own = { origin: new THREE.Vector3(...object.position), quaternion: quaternionOf(object.rotation) };
     const parent = object.parent === null || object.parent === undefined ? null : byId.get(object.parent);
@@ -271,37 +272,37 @@ export async function projectFilesWithTextures(editor) {
 // says what is wrong, rather than let half of it into the editor.
 export function readProject(files) {
   const parse = (name) => {
-    if (typeof files[name] !== 'string') throw new Error(`в файле нет «${name}»`);
+    if (typeof files[name] !== 'string') throw new Error(t('project.error.missing', { name }));
     try {
       return JSON.parse(files[name]);
     } catch {
-      throw new Error(`«${name}» повреждён`);
+      throw new Error(t('project.error.damaged-entry', { name }));
     }
   };
   const manifest = parse('manifest.json');
-  if (manifest.format !== FORMAT) throw new Error('это не проект verTEX');
+  if (manifest.format !== FORMAT) throw new Error(t('project.error.not-project'));
   if (!(manifest.version <= VERSION)) {
-    throw new Error(`файл сохранён более новой версией программы (формат ${manifest.version}, эта читает до ${VERSION})`);
+    throw new Error(t('project.error.newer', { version: manifest.version, supported: VERSION }));
   }
 
   const model = upgradeModel(parse('model.json'), manifest.version);
   const fail = (what) => {
-    throw new Error(`модель повреждена: ${what}`);
+    throw new Error(t('project.error.damaged', { what }));
   };
   const isIndex = (value, count) => Number.isInteger(value) && value >= 0 && value < count;
   for (const key of ['vertices', 'faces', 'wires', 'objects', 'vertexObject']) {
-    if (!Array.isArray(model[key])) fail(`нет списка «${key}»`);
+    if (!Array.isArray(model[key])) fail(t('project.error.no-list', { key }));
   }
   const count = model.vertices.length;
-  if (!model.vertices.every((v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite))) fail('вершины');
-  if (!model.faces.every((f) => Array.isArray(f) && f.length >= 3 && f.every((i) => isIndex(i, count)))) fail('грани');
-  if (!model.wires.every((w) => Array.isArray(w) && w.length === 2 && w.every((i) => isIndex(i, count)))) fail('рёбра');
+  if (!model.vertices.every((v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite))) fail(t('project.part.vertices'));
+  if (!model.faces.every((f) => Array.isArray(f) && f.length >= 3 && f.every((i) => isIndex(i, count)))) fail(t('project.part.faces'));
+  if (!model.wires.every((w) => Array.isArray(w) && w.length === 2 && w.every((i) => isIndex(i, count)))) fail(t('project.part.wires'));
   const axes = (value) => value === undefined || (Array.isArray(value) && value.every((axis) => ['x', 'y', 'z'].includes(axis)));
-  if (!axes(model.mirror)) fail('зеркало');
+  if (!axes(model.mirror)) fail(t('project.part.mirror'));
   if (model.folds !== undefined) {
     const sound = Array.isArray(model.folds) && model.folds.every(([i, fold]) =>
       isIndex(i, count) && fold && typeof fold === 'object' && Object.entries(fold).every(([axis, sign]) => 'xyz'.includes(axis) && [1, -1, 0].includes(sign)));
-    if (!sound) fail('свёрнутые вершины');
+    if (!sound) fail(t('project.part.folds'));
   }
   const ids = new Set();
   const local = manifest.version >= 2; // vertices and transforms in the entries' own frames
@@ -321,17 +322,17 @@ export function readProject(files) {
       (local
         ? triple(object.position) && (object.rotation === undefined || triple(object.rotation))
         : object.pivot === undefined || triple(object.pivot));
-    if (!sound) fail('объекты');
+    if (!sound) fail(t('project.part.objects'));
     ids.add(object.id);
   }
   if (model.uvs !== undefined) {
     const place = (point) => point === null || (Array.isArray(point) && point.length === 2 && point.every(Number.isFinite));
     const sound = Array.isArray(model.uvs) && model.uvs.length === model.faces.length && model.uvs.every((uv, i) =>
       uv === null || (Array.isArray(uv) && uv.length === model.faces[i].length && uv.every(place)));
-    if (!sound) fail('развёртка');
+    if (!sound) fail(t('project.part.uvs'));
   }
-  if (model.shaped !== undefined && !(Array.isArray(model.shaped) && model.shaped.every((i) => isIndex(i, model.faces.length)))) fail('грани с изменённой развёрткой');
-  if (model.pins !== undefined && !(Array.isArray(model.pins) && model.pins.every((i) => isIndex(i, model.faces.length)))) fail('закреплённые грани');
+  if (model.shaped !== undefined && !(Array.isArray(model.shaped) && model.shaped.every((i) => isIndex(i, model.faces.length)))) fail(t('project.part.shaped'));
+  if (model.pins !== undefined && !(Array.isArray(model.pins) && model.pins.every((i) => isIndex(i, model.faces.length)))) fail(t('project.part.pins'));
   const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;
   const atlasIds = new Set();
   const soundAtlas = (atlas) => {
@@ -342,12 +343,12 @@ export function readProject(files) {
     return sound;
   };
   // (one at least - but in a project with several, which begins with none)
-  if (model.multiAtlas !== undefined && typeof model.multiAtlas !== 'boolean') fail('атласы');
-  if (!(Array.isArray(model.atlases) && (model.atlases.length >= 1 || model.multiAtlas) && model.atlases.every(soundAtlas))) fail('атласы');
-  if (model.animations !== undefined && !(Array.isArray(model.animations) && model.animations.every((clip) => soundAnimation(clip, ids)))) fail('анимации');
+  if (model.multiAtlas !== undefined && typeof model.multiAtlas !== 'boolean') fail(t('project.part.atlases'));
+  if (!(Array.isArray(model.atlases) && (model.atlases.length >= 1 || model.multiAtlas) && model.atlases.every(soundAtlas))) fail(t('project.part.atlases'));
+  if (model.animations !== undefined && !(Array.isArray(model.animations) && model.animations.every((clip) => soundAnimation(clip, ids)))) fail(t('project.part.animations'));
   const meshes = new Set(model.objects.filter((object) => object.kind !== 'node').map((object) => object.id));
   if (model.vertexObject.length !== count || !model.vertexObject.every((id) => meshes.has(id))) {
-    fail('принадлежность вершин объектам');
+    fail(t('project.part.vertex-object'));
   }
   if (model.weights !== undefined) {
     // [vertex, [[node id, weight], ...]]: up to four nodes, each once, weights from 0 to 1.
@@ -356,7 +357,7 @@ export function readProject(files) {
       Array.isArray(entry[1]) && entry[1].length >= 1 && entry[1].length <= 4 &&
       new Set(entry[1].map(([node]) => node)).size === entry[1].length &&
       entry[1].every((pair) => Array.isArray(pair) && nodes.has(pair[0]) && Number.isFinite(pair[1]) && pair[1] >= 0 && pair[1] <= 1));
-    if (!sound) fail('веса скина');
+    if (!sound) fail(t('project.part.weights'));
   }
 
   let view = null;
@@ -427,7 +428,7 @@ export class Project extends EventTarget {
   // One command at a time: a second one while a dialog is open is dropped.
   async run(command) {
     if (this.working) return;
-    const restart = 'Сохранение и открытие проектов заработают после перезапуска программы.';
+    const restart = t('project.restart');
     if (!this.api) {
       await tell(restart);
       return;
@@ -469,7 +470,7 @@ export class Project extends EventTarget {
     const result = await this.api.save(elsewhere ? null : this.path, files);
     if (!result) return false;
     if (result.error) {
-      await this.api.alert('Не удалось сохранить проект', result.error);
+      await this.api.alert(t('project.error.save'), result.error);
       return false;
     }
     this.path = result.path;
@@ -504,7 +505,7 @@ export class Project extends EventTarget {
         if (result.error) throw new Error(result.error);
         project = readProject(result.files);
       } catch (error) {
-        await this.api.alert('Не удалось открыть проект', `${result.path}\n\n${error.message}`);
+        await this.api.alert(t('project.error.open'), `${result.path}\n\n${error.message}`);
         return;
       }
       if (!this.editor.loadProject(project)) return;

@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // Names - of objects, nodes, collision shapes, atlases, animations - are in
 // Latin letters only, with no spaces: they go into game engines as nodes'
 // and animations' names and into code that looks them up (Godot's
@@ -12,7 +14,7 @@ export function latinName(text) {
 // A name field that takes Latin letters only: whatever else is typed or
 // pasted is dropped as it comes, and the field shakes to say so.
 export function latinOnly(input) {
-  input.title = 'Только латиница, цифры и _ . - (без пробелов)';
+  input.title = t('names.latin-only');
   input.addEventListener('input', () => {
     const clean = latinName(input.value);
     if (clean === input.value) return;

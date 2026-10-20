@@ -4,6 +4,7 @@ const { registerProjectIo } = require('./project-io.js');
 const { registerAtlasFile } = require('./atlas-file.js');
 const { registerRecent } = require('./recent.js');
 const { registerExportIo } = require('./export-io.js');
+const { registerLocale } = require('./locale.js');
 
 // Development builds open a local debugging port (this machine only), so that
 // the state of a running window can be inspected from outside.
@@ -40,7 +41,7 @@ function createWindow() {
       overrideBrowserWindowOptions: {
         width: 1280,
         height: 860,
-        title: 'verTEX — виды',
+        title: t('window.views.title'),
         autoHideMenuBar: true,
         backgroundColor: '#282a36',
         icon: path.join(__dirname, '../../assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
@@ -62,10 +63,11 @@ ipcMain.on('window:editor', (event, editing) => {
   if (editing && !win.isMaximized() && !win.isFullScreen()) win.maximize();
 });
 
+const t = registerLocale({ ipcMain, file: path.join(app.getPath('userData'), 'locale.json') });
 const recent = registerRecent({ ipcMain, file: path.join(app.getPath('userData'), 'recent.json') });
-const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow, recent });
-registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow });
-registerExportIo({ ipcMain, dialog, BrowserWindow });
+const guardWindow = registerProjectIo({ ipcMain, dialog, BrowserWindow, recent, t });
+registerAtlasFile({ ipcMain, shell, dialog, BrowserWindow, t });
+registerExportIo({ ipcMain, dialog, BrowserWindow, t });
 
 // Menu items talk to the renderer through a single 'menu' channel.
 const send = (action) => (_item, win) => win?.webContents.send('menu', action);
@@ -73,44 +75,44 @@ const send = (action) => (_item, win) => win?.webContents.send('menu', action);
 function buildMenu() {
   return Menu.buildFromTemplate([
     {
-      label: 'Файл',
+      label: t('menu.file'),
       submenu: [
         // The shortcuts are shown here but handled in the renderer, where the
         // user can rebind them (Settings -> Hotkeys).
-        { label: 'Новый проект', accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: send('project-new') },
-        { label: 'Открыть…', accelerator: 'CmdOrCtrl+O', registerAccelerator: false, click: send('project-open') },
+        { label: t('menu.file.new'), accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: send('project-new') },
+        { label: t('menu.file.open'), accelerator: 'CmdOrCtrl+O', registerAccelerator: false, click: send('project-open') },
         { type: 'separator' },
-        { label: 'Сохранить', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
-        { label: 'Сохранить как…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
-        { label: 'Закрыть проект', accelerator: 'CmdOrCtrl+Shift+Q', registerAccelerator: false, click: send('project-close-file') },
+        { label: t('menu.file.save'), accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: send('project-save') },
+        { label: t('menu.file.save-as'), accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: send('project-save-as') },
+        { label: t('menu.file.close'), accelerator: 'CmdOrCtrl+Shift+Q', registerAccelerator: false, click: send('project-close-file') },
         { type: 'separator' },
-        { label: 'Экспорт в glTF…', click: send('export-gltf') },
-        { label: 'Рендер спрайтов…', click: send('render-sprites') },
+        { label: t('menu.file.export-gltf'), click: send('export-gltf') },
+        { label: t('menu.file.render-sprites'), click: send('render-sprites') },
         { type: 'separator' },
-        { label: 'Настройки…', accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
+        { label: t('menu.file.settings'), accelerator: 'CmdOrCtrl+,', registerAccelerator: false, click: send('settings') },
         { type: 'separator' },
         // (Its own key: the one the role may bring, Ctrl+Q, is the cut tool's.)
-        { label: 'Выход', role: 'quit', accelerator: 'Alt+F4' },
+        { label: t('menu.file.quit'), role: 'quit', accelerator: 'Alt+F4' },
       ],
     },
     {
       // Shortcuts are shown but handled in the renderer, so that text fields
       // keep their own Ctrl+Z.
-      label: 'Правка',
+      label: t('menu.edit'),
       submenu: [
-        { label: 'Отменить', accelerator: 'CmdOrCtrl+Z', registerAccelerator: false, click: send('undo') },
-        { label: 'Повторить', accelerator: 'CmdOrCtrl+Y', registerAccelerator: false, click: send('redo') },
+        { label: t('menu.edit.undo'), accelerator: 'CmdOrCtrl+Z', registerAccelerator: false, click: send('undo') },
+        { label: t('menu.edit.redo'), accelerator: 'CmdOrCtrl+Y', registerAccelerator: false, click: send('redo') },
       ],
     },
     {
-      label: 'Вид',
+      label: t('menu.view'),
       submenu: [
-        { label: 'Три вида', accelerator: 'B', registerAccelerator: false, click: send('toggle-views') },
-        { label: 'Показать выделенное', accelerator: 'F', registerAccelerator: false, click: send('frame') },
+        { label: t('menu.view.views'), accelerator: 'B', registerAccelerator: false, click: send('toggle-views') },
+        { label: t('menu.view.frame'), accelerator: 'F', registerAccelerator: false, click: send('frame') },
         { type: 'separator' },
-        { label: 'Перезагрузить', role: 'reload' },
-        { label: 'Инструменты разработчика', role: 'toggleDevTools' },
-        { label: 'Полный экран', role: 'togglefullscreen' },
+        { label: t('menu.view.reload'), role: 'reload' },
+        { label: t('menu.view.devtools'), role: 'toggleDevTools' },
+        { label: t('menu.view.fullscreen'), role: 'togglefullscreen' },
       ],
     },
   ]);

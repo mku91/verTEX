@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GizmoDial } from './gizmo-dial.js';
+import { t } from './i18n.js';
 
 // Colour themes. Every colour in the app comes from the current theme, by role:
 // the interface reads them as CSS variables, the views read `theme` directly.
@@ -46,7 +47,7 @@ export const THEMES = {
     keyScale: '#f1fa8c',
   },
   graphite: {
-    label: 'Графит',
+    label: t('theme.graphite'),
     bg: '#1b1d23',
     bgRaised: '#23262d',
     border: '#14161a',

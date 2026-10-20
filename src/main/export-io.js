@@ -14,12 +14,12 @@ const path = require('node:path');
 //   export:write  { path, bytes, beside } -> {} | { error }
 //                 Writes the file, and next to it every file of `beside`
 //                 ({ name: bytes }) - the texture a model refers to.
-function registerExportIo({ ipcMain, dialog, BrowserWindow }) {
+function registerExportIo({ ipcMain, dialog, BrowserWindow, t = (key) => key }) {
   const windowOf = (event) => BrowserWindow.fromWebContents(event.sender);
 
   ipcMain.handle('export:pick', async (event, { name, kinds }) => {
     const result = await dialog.showSaveDialog(windowOf(event), {
-      title: 'Экспорт',
+      title: t('dialog.export.title'),
       defaultPath: `${name}.${kinds[0].extension}`,
       filters: kinds.map((kind) => ({ name: kind.name, extensions: [kind.extension] })),
     });

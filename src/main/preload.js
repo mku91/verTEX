@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('vertex', {
+  // The interface's language, see locale.js: the catalog at once (the page
+  // needs its words before anything is shown), the choice for the next start.
+  locale: {
+    get: () => ipcRenderer.sendSync('locale:get'),
+    set: (locale) => ipcRenderer.invoke('locale:set', { locale }),
+  },
   onMenu: (callback) => ipcRenderer.on('menu', (_event, action) => callback(action)),
   // The window as the editor wants it (maximized, with its menu bar), or as
   // the welcome screen does (no menu bar).

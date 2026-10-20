@@ -1,6 +1,7 @@
 import { SpriteRenderer, SPRITE_DEFAULTS, sheetJSON, clipsTres, clipsJSON, clipImageName } from './sprite-render.js';
 import { scrubbable } from './scrub.js';
 import { PINGPONG } from './animation.js';
+import { t } from './i18n.js';
 
 // The sprite render: a screen of its own over the editor, where the model is
 // made into a sprite sheet (see sprite-render.js). On the left, one over the
@@ -326,7 +327,7 @@ export class RenderMode {
     const count = this.element.querySelector('.render-count');
     count.classList.toggle('open', this.settings.layout !== 'row');
     count.querySelector('div').inert = this.settings.layout === 'row';
-    count.querySelector('span').textContent = this.settings.layout === 'rows' ? 'Строк, не больше' : 'Столбцов, не больше';
+    count.querySelector('span').textContent = t(this.settings.layout === 'rows' ? 'render.count.rows' : 'render.count.columns');
     // The custom light's own settings, only with it.
     const custom = this.element.querySelector('.render-custom');
     custom.classList.toggle('open', this.settings.light === 'custom');
@@ -391,17 +392,22 @@ export class RenderMode {
         this.sheet = shown ? this.strips(shown) : null;
         const strip = shown?.directions[0];
         size.textContent = shown
-          ? `${clip.name}: ${shown.directions.length} × ${shown.frames} кадр${plural(shown.frames)} по ${settings.width} × ${settings.height} · ` +
-            `${shown.directions.length} PNG по ${strip.width} × ${strip.height} px`
+          ? t('render.size.clip', {
+            name: clip.name, directions: shown.directions.length, frames: t('render.frames', { count: shown.frames }),
+            width: settings.width, height: settings.height, stripWidth: strip.width, stripHeight: strip.height,
+          })
           : '';
         this.element.querySelector('.render-clip-info').textContent = shown
-          ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop === PINGPONG ? ' · пинг-понг' : clip.loop ? ' · цикл' : ''}`
+          ? t('render.clip-info', { frames: t('render.frames', { count: shown.frames }), seconds: (clip.length / clip.fps).toFixed(2) }) +
+            (clip.loop === PINGPONG ? ` · ${t('render.loop.pingpong')}` : clip.loop ? ` · ${t('render.loop.loop')}` : '')
           : '';
       } else {
         this.sheet = empty ? null : made;
         size.textContent = this.sheet
-          ? `${this.sheet.frames.length} кадр${plural(this.sheet.frames.length)} по ${settings.width} × ${settings.height} · ` +
-            `${this.sheet.columns} × ${this.sheet.rows} · лист ${this.sheet.width} × ${this.sheet.height} px`
+          ? t('render.size.sheet', {
+            frames: t('render.frames', { count: this.sheet.frames.length }), width: settings.width, height: settings.height,
+            columns: this.sheet.columns, rows: this.sheet.rows, sheetWidth: this.sheet.width, sheetHeight: this.sheet.height,
+          })
           : '';
       }
       this.element.querySelector('.render-empty').hidden = Boolean(this.sheet);
@@ -647,9 +653,9 @@ export class RenderMode {
     context.drawImage(sheet.canvas, frame.x, frame.y, frame.w, frame.h, x, y, w, h);
     if (sheet.clip) {
       const round = this.round();
-      label.textContent = `${sheet.clip.name} · ${Math.round(frame.angle)}° · кадр ${round.indexOf(this.player.frame) + 1} из ${round.length}`;
+      label.textContent = t('render.player.clip', { name: sheet.clip.name, angle: Math.round(frame.angle), frame: round.indexOf(this.player.frame) + 1, total: round.length });
     } else {
-      label.textContent = `кадр ${this.player.frame + 1} из ${sheet.frames.length} · ${Math.round(frame.angle)}°`;
+      label.textContent = t('render.player.sheet', { frame: this.player.frame + 1, total: sheet.frames.length, angle: Math.round(frame.angle) });
     }
   }
 
@@ -864,7 +870,7 @@ export class RenderMode {
     const { sheet, files } = this;
     if (!sheet || !files.pick || this.exporting) return;
     if (this.clipsOn) return this.saveClips();
-    const target = await files.pick(`${files.name()}_sprites`, [{ name: 'Изображение PNG', extension: 'png' }]);
+    const target = await files.pick(`${files.name()}_sprites`, [{ name: t('render.filter.png'), extension: 'png' }]);
     if (!target) return;
     const settings = structuredClone(this.settings);
     const made = await this.exported(() => this.renderer.render(settings, { png: true }, { cancelled: () => !this.open }));
@@ -875,7 +881,7 @@ export class RenderMode {
       beside[image.replace(/\.png$/i, '.json')] = new TextEncoder().encode(sheetJSON(target.name, image, made, settings));
     }
     const result = await files.write(target.path, made.png, beside);
-    if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
+    if (result?.error) await files.alert(t('render.error.save'), result.error);
   }
 
   // Runs `make` (the sheets for export) with a spinner on the Export button.
@@ -884,7 +890,8 @@ export class RenderMode {
     const text = button.innerHTML;
     this.exporting = true;
     button.disabled = true;
-    button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Экспорт…';
+    button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> ';
+    button.append(t('render.exporting'));
     try {
       return await make();
     } finally {
@@ -911,7 +918,7 @@ export class RenderMode {
     }
     beside[`${target.name}.json`] = encoder.encode(clipsJSON(target.name, sheets, settings));
     const result = await files.write(target.path, encoder.encode(clipsTres(target.name, sheets)), beside);
-    if (result?.error) await files.alert('Не удалось сохранить спрайты', result.error);
+    if (result?.error) await files.alert(t('render.error.save'), result.error);
   }
 }
 
@@ -919,12 +926,4 @@ export class RenderMode {
 // Radians in degrees.
 function degrees(radians) {
   return (radians * 180) / Math.PI;
-}
-
-// The ending of "кадр" after a number: 1 кадр, 2 кадра, 5 кадров.
-function plural(count) {
-  const n = count % 100;
-  if (n >= 11 && n <= 14) return 'ов';
-  if (n % 10 === 1) return '';
-  return n % 10 >= 2 && n % 10 <= 4 ? 'а' : 'ов';
 }

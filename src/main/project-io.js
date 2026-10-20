@@ -2,8 +2,6 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { EXTENSION, pack, unpack } = require('./project-file.js');
 
-const FILTERS = [{ name: 'Проект verTEX', extensions: [EXTENSION] }];
-
 // The renderer's access to project files: dialogs, reading and writing.
 // `ipcMain`, `dialog` and `BrowserWindow` are Electron's (passed in, so that
 // the handlers can be driven without the real ones); `recent` is the list of
@@ -19,7 +17,8 @@ const FILTERS = [{ name: 'Проект verTEX', extensions: [EXTENSION] }];
 //   project:state   { dirty } - the window has unsaved changes or not; a
 //                   window that has them asks before it closes.
 //   project:close   closes the window with no more questions.
-function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
+function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent, t = (key) => key }) {
+  const FILTERS = [{ name: t('dialog.project.filter'), extensions: [EXTENSION] }];
   const dirty = new WeakSet(); // windows with unsaved changes
   const closing = new WeakSet(); // windows told to close regardless
   const windowOf = (event) => BrowserWindow.fromWebContents(event.sender);
@@ -28,7 +27,7 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
     let target = wanted;
     if (!target) {
       const result = await dialog.showSaveDialog(windowOf(event), {
-        title: 'Сохранить проект',
+        title: t('dialog.project.save.title'),
         defaultPath: `Unnamed.${EXTENSION}`,
         filters: FILTERS,
       });
@@ -53,7 +52,7 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
     let source = wanted;
     if (!source) {
       const result = await dialog.showOpenDialog(windowOf(event), {
-        title: 'Открыть проект',
+        title: t('dialog.project.open.title'),
         filters: FILTERS,
         properties: ['openFile'],
       });
@@ -72,9 +71,9 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
   ipcMain.handle('project:confirm', async (event, { name }) => {
     const { response } = await dialog.showMessageBox(windowOf(event), {
       type: 'question',
-      message: `Сохранить изменения в «${name}»?`,
-      detail: 'Если не сохранить, изменения будут потеряны.',
-      buttons: ['Сохранить', 'Не сохранять', 'Отмена'],
+      message: t('dialog.project.confirm.message', { name }),
+      detail: t('dialog.project.confirm.detail'),
+      buttons: [t('dialog.project.confirm.save'), t('dialog.project.confirm.discard'), t('dialog.project.confirm.cancel')],
       defaultId: 0,
       cancelId: 2,
       noLink: true,
@@ -83,7 +82,7 @@ function registerProjectIo({ ipcMain, dialog, BrowserWindow, recent }) {
   });
 
   ipcMain.handle('project:alert', async (event, { message, detail }) => {
-    await dialog.showMessageBox(windowOf(event), { type: 'error', message, detail, buttons: ['Понятно'] });
+    await dialog.showMessageBox(windowOf(event), { type: 'error', message, detail, buttons: [t('dialog.alert.ok')] });
   });
 
   ipcMain.on('project:state', (event, { dirty: unsaved }) => {

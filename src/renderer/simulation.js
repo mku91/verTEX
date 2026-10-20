@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ModelPose } from './pose.js';
+import { t } from './i18n.js';
 
 // The simulation: in the collision mode (see collisions.js), the objects
 // come alive as the bodies their shapes make - the dynamic ones fall, roll
@@ -76,10 +77,10 @@ export class Simulation {
     this.controls.classList.toggle('shown', on);
     this.controls.classList.toggle('running', this.running);
     this.startButton.querySelector('i').className = `fa-solid ${this.running ? 'fa-stop' : 'fa-play'}`;
-    this.startButton.querySelector('span').textContent = this.running ? 'Стоп' : 'Симуляция';
+    this.startButton.querySelector('span').textContent = this.running ? t('simulation.stop') : t('simulation.start');
     this.startButton.title = this.running
-      ? 'Остановить и вернуть всё на места (Esc)'
-      : 'Симуляция: тела оживают — динамические падают и сталкиваются, их можно хватать мышью и бросать. Модель не меняется';
+      ? t('simulation.stop.title')
+      : t('simulation.start.title');
   }
 
   // --- running ----------------------------------------------------------------

@@ -902,5 +902,10 @@
  "theme.graphite": "Graphite",
  "welcome.missing": "file not found",
  "welcome.missing.title": "{path}\n\nThe file is not where it was",
- "welcome.remove": "Remove from the list (the file stays where it is)"
+ "welcome.remove": "Remove from the list (the file stays where it is)",
+ "welcome.trash": "Delete the project: its file goes to the Recycle Bin",
+ "welcome.trash.message": "Delete the project «{name}»?",
+ "welcome.trash.detail": "{path}\n\nThe file goes to the Recycle Bin, from where it can be restored.",
+ "welcome.trash.confirm": "Delete",
+ "welcome.trash.failed": "Couldn't delete the project"
 }

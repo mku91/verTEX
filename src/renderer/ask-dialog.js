@@ -101,7 +101,7 @@ export function confirmIt(title, detail, yes) {
 }
 
 // The unsaved changes of the project `name`: 'save', 'discard' or 'cancel'
-// (as the main process's question was, see project-io.js).
+// (asked when the window is to close too, see src-tauri/src/main.rs).
 export function askSave(name) {
   return ask({
     title: t('ask.save.title', { name }),

@@ -3681,7 +3681,8 @@ input.refused {
   font-size: 12px;
 }
 
-.welcome-remove {
+.welcome-remove,
+.welcome-trash {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -3696,12 +3697,24 @@ input.refused {
   cursor: pointer;
 }
 
-.welcome-card:hover .welcome-remove {
+.welcome-card:hover .welcome-remove,
+.welcome-card:hover .welcome-trash {
   display: block;
 }
 
 .welcome-remove:hover {
   background: var(--hover);
+}
+
+/* Under the cross: the one that throws the file away, red when aimed at. */
+.welcome-trash {
+  top: 36px;
+}
+
+.welcome-trash:hover {
+  border-color: var(--axis-x);
+  background: var(--axis-x);
+  color: var(--bg);
 }
 
 /* A dialog that asks one thing, over the whole window. */

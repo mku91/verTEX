@@ -1,4 +1,4 @@
-// Keeps the atlases as working files on disk (see src/main/atlas-file.js,
+// Keeps the atlases as working files on disk (see atlas-files.js,
 // which says where) - each its own - so that they can be painted in another
 // program while the model is open here: what the painter saves shows on the
 // model at once, and what the unwrap moves is written to the file. With each

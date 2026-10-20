@@ -5,10 +5,11 @@
 // Behind it all a floor of vertices sways (see welcome-backdrop.js), while
 // the screen is there to be seen.
 //
-// `api` is the main process's list of those projects (window.vertex.recent,
-// see src/main/recent.js), absent when the page runs without it.
+// `api` is the window's list of those projects (window.vertex.recent, see
+// host.js), absent when the page runs without it.
 import { WelcomeBackdrop } from './welcome-backdrop.js';
 import { t, locale } from './i18n.js';
+import { ask, tell } from './ask-dialog.js';
 
 export class Welcome {
   constructor(element, project, api) {
@@ -50,7 +51,7 @@ export class Welcome {
     try {
       entries = (await this.api?.list()) ?? [];
     } catch {
-      // The main process is older than this page and has no list: none is shown.
+      // The window is older than this page and has no list: none is shown.
     }
     if (this.open) this.fill(entries);
   }
@@ -97,7 +98,27 @@ export class Welcome {
       this.refresh();
     });
 
+    // The project thrown away: its file goes to the Recycle Bin, after asking.
+    const trash = document.createElement('button');
+    trash.className = 'welcome-trash';
+    trash.title = t('welcome.trash');
+    trash.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+    trash.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const sure = await ask({
+        title: t('welcome.trash.message', { name }),
+        detail: t('welcome.trash.detail', { path }),
+        buttons: [{ label: t('ask.cancel'), value: false, primary: true }, { label: t('welcome.trash.confirm'), value: true, tone: 'lose' }],
+        cancel: false,
+      });
+      if (!sure) return;
+      const result = await this.api.trash(path);
+      if (result?.error) await tell(t('welcome.trash.failed'), result.error);
+      this.refresh();
+    });
+
     card.append(picture, title, note, remove);
+    if (!missing && this.api.trash) card.append(trash);
     if (!missing) card.addEventListener('click', () => this.project.open(path));
     return card;
   }

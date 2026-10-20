@@ -938,5 +938,10 @@
  "theme.graphite": "Графит",
  "welcome.missing": "файл не найден",
  "welcome.missing.title": "{path}\n\nФайла нет на месте",
- "welcome.remove": "Убрать из списка (файл останется на месте)"
+ "welcome.remove": "Убрать из списка (файл останется на месте)",
+ "welcome.trash": "Удалить проект: его файл отправится в Корзину",
+ "welcome.trash.message": "Удалить проект «{name}»?",
+ "welcome.trash.detail": "{path}\n\nФайл отправится в Корзину, оттуда его можно восстановить.",
+ "welcome.trash.confirm": "Удалить",
+ "welcome.trash.failed": "Не удалось удалить проект"
 }

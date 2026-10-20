@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "description": "Low-poly 3D editor focused on vertices",
   "private": true,
-  "main": "src/main/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "node scripts/tauri.mjs dev",
+    "build": "node scripts/tauri.mjs build && node scripts/dist.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
@@ -14,6 +14,6 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
-    "electron": "^44.7.0"
+    "@tauri-apps/cli": "^2.12.3"
   }
 }

@@ -1,6 +1,6 @@
 // The interface's words, in the language chosen in Settings (see
-// src/locales/*.json and main/locale.js). The catalog comes from the main
-// process as the page starts - app.js imports this module first - so that
+// src/locales/*.json and src-tauri/src/locale.rs). The catalog comes from
+// the window as the page starts - app.js imports it right after host.js - so that
 // everything after it finds the markup already in its words. A change of
 // language takes effect on the next start.
 //

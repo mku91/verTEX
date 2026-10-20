@@ -3,21 +3,69 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:">
+        content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:">
   <title>verTEX</title>
   <link rel="stylesheet" href="../fonts/all.css">
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* The splash: what the window shows while the editor loads (see the end
+       of app.js), in the colours of the theme last chosen (see theme.js). */
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background: var(--splash-bg, #282a36);
+      color: var(--splash-text, #f8f8f2);
+      transition: opacity 0.2s;
+    }
+    #splash .logo { font-size: 32px; }
+    #splash .logo b { color: var(--splash-accent, #bd93f9); }
+    /* The spinner only if the loading is long enough to be seen at all. */
+    #splash i {
+      width: 22px;
+      height: 22px;
+      border: 2px solid color-mix(in srgb, var(--splash-text, #f8f8f2) 20%, transparent);
+      border-top-color: var(--splash-accent, #bd93f9);
+      border-radius: 50%;
+      opacity: 0;
+      animation: splash-in 0.2s 0.4s forwards, splash-turn 0.8s linear infinite;
+    }
+    #splash.gone { opacity: 0; pointer-events: none; }
+    @keyframes splash-in { to { opacity: 1; } }
+    @keyframes splash-turn { to { transform: rotate(1turn); } }
+  </style>
   <script type="importmap">
     {
       "imports": {
         "three": "../../node_modules/three/build/three.module.js",
         "three/addons/": "../../node_modules/three/examples/jsm/",
-        "@dimforge/rapier3d-compat": "../../node_modules/@dimforge/rapier3d-compat/dist/rapier.mjs"
+        "@dimforge/rapier3d-compat": "../../node_modules/@dimforge/rapier3d-compat/dist/rapier.mjs",
+        "fflate": "../../node_modules/fflate/esm/browser.js"
       }
     }
   </script>
 </head>
 <body>
+  <div id="splash"><span class="logo">ver<b>TEX</b></span><i></i></div>
+  <script>
+    // The window is kept hidden until it has something to show: the splash,
+    // drawn - so that it does not flash its blank colours as it starts.
+    {
+      const splash = document.getElementById('splash');
+      try {
+        const colors = JSON.parse(localStorage.getItem('vertex.splash'));
+        for (const name of ['bg', 'text', 'accent']) if (colors?.[name]) splash.style.setProperty(`--splash-${name}`, colors[name]);
+      } catch {
+        // (the default theme's, then)
+      }
+      requestAnimationFrame(() => requestAnimationFrame(() => window.__TAURI__?.core.invoke('window_ready')));
+    }
+  </script>
   <div id="app">
     <header id="topbar">
       <span class="logo">ver<b>TEX</b></span>

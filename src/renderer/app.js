@@ -1,4 +1,5 @@
-import { t, locale, languages, localize } from './i18n.js'; // first: the markup gets its words before anything reads them
+import './host.js'; // first: window.vertex, the page's way to the computer
+import { t, locale, languages, localize } from './i18n.js'; // the markup gets its words before anything reads them
 import { Viewport } from './viewport.js';
 import { Editor, MODES, OPERATION_MODES } from './editor.js';
 import { AxisGizmo } from './axis-gizmo.js';
@@ -1150,7 +1151,7 @@ window.vertex?.onMenu((action) => {
 });
 
 // For debugging a running window from outside (see the debugging port in
-// main.js): `vertexDebug.text()` returns the whole project as text, and
+// src-tauri/src/main.rs): `vertexDebug.text()` returns the whole project as text, and
 // `vertexDebug.editor` is the editor itself.
 showHotkeys();
 
@@ -2109,3 +2110,10 @@ function refresh() {
 
 editor.addEventListener('change', refresh);
 refresh();
+
+// Loaded: the splash goes (see index.html).
+{
+  const splash = $('splash');
+  splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+  requestAnimationFrame(() => splash.classList.add('gone'));
+}

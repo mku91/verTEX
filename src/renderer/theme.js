@@ -87,6 +87,7 @@ export const THEMES = {
 
 export const DEFAULT_THEME = 'dracula';
 const STORAGE_KEY = 'vertex.theme';
+const SPLASH_KEY = 'vertex.splash'; // the theme's colours for the splash, see index.html
 
 // Theme colours that the stylesheet uses, by CSS variable.
 const CSS_VARIABLES = {
@@ -126,6 +127,8 @@ export function setTheme(id) {
     document.documentElement.style.setProperty(variable, theme[key]);
   }
   localStorage.setItem(STORAGE_KEY, id);
+  // For the splash, which is shown before this module is loaded (see index.html).
+  localStorage.setItem(SPLASH_KEY, JSON.stringify({ bg: theme.bg, text: theme.text, accent: theme.accent }));
   for (const listener of listeners) listener();
 }
 

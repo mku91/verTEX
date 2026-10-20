@@ -1,8 +1,8 @@
 // Project files: what goes into one, how it is read back, and the editor's
 // dealings with the file on disk (new, open, save, unsaved changes).
 //
-// A project is a zip archive (packed and unpacked by the main process, see
-// src/main/project-file.js) with these entries:
+// A project is a zip archive (packed and unpacked by project-file.js) with
+// these entries:
 //
 //   manifest.json    { format, version, app, saved } - what the file is
 //   model.json       the mesh and the scene tree, see modelOf(); `mirror` is
@@ -383,8 +383,8 @@ export function readProject(files) {
 }
 
 // The project the editor is working on: its file, whether it has unsaved
-// changes, and the commands of the File menu. `api` is the main process's
-// side (window.vertex.project), absent when the page runs without it.
+// changes, and the commands of the File menu. `api` is the window's
+// side (window.vertex.project, see host.js), absent when the page runs without it.
 // Dispatches 'change' when the name or the unsaved mark changes, 'open'
 // when the editor has got another project: a new one, or one from a file -
 // and 'saved' when it has been written.
@@ -437,8 +437,8 @@ export class Project extends EventTarget {
     try {
       await command();
     } catch (error) {
-      // The main process does not answer: it is older than this page (the
-      // page was reloaded after an update, the program was not restarted).
+      // The window does not answer: it is older than this page (the page
+      // was reloaded after an update, the program was not restarted).
       await tell(restart, error.message);
     } finally {
       this.working = false;

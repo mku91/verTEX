@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The editor's window: its commands and the events sent to it.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

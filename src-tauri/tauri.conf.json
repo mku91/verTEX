@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "verTEX",
+  "mainBinaryName": "verTEX",
+  "version": "0.1.0",
+  "identifier": "com.vertex.editor",
+  "build": {
+    "devUrl": "http://127.0.0.1:1430",
+    "beforeDevCommand": "node scripts/serve.mjs",
+    "frontendDist": "../build/web",
+    "beforeBuildCommand": "node scripts/stage.mjs"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": true,
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico", "icons/icon.png"]
+  }
+}

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { keepToFaces } from './mesh.js';
 import { clipValues, posedMatrices, localTransforms, worldFrames } from './pose.js';
-import { spriteFrames } from './animation.js';
+import { spriteFrames, playOrder, PINGPONG } from './animation.js';
 
 // The model drawn into a sprite sheet: one frame for every direction it is
 // looked at from, side by side in a PNG - what a 2D game shows instead of
@@ -666,7 +666,9 @@ export const clipImageName = (stem, clip, direction) => `${stem}_${clipAnimation
 // The clips' sheets as Godot's SpriteFrames, for an AnimatedSprite2D (or
 // 3D): a .tres beside the PNGs, which names them by their paths relative to
 // it. An animation for every clip's direction, its frames regions of its
-// PNG, at the sprite's rate, looping as the clip does.
+// PNG, at the sprite's rate, looping as the clip does - a clip going there
+// and back (which SpriteFrames knows nothing of) a loop of its frames there
+// and then back (see playOrder()), each drawn once on the PNG.
 export function clipsTres(stem, sheets) {
   const external = [];
   const regions = [];
@@ -680,7 +682,8 @@ export function clipsTres(stem, sheets) {
         regions.push(`[sub_resource type="AtlasTexture" id="${region}"]\natlas = ExtResource("${texture}")\nregion = Rect2(${frame.x}, ${frame.y}, ${frame.w}, ${frame.h})`);
         return `{\n"duration": 1.0,\n"texture": SubResource("${region}")\n}`;
       });
-      animations.push(`{\n"frames": [${frames.join(', ')}],\n"loop": ${clip.loop},\n"name": &"${clipAnimationName(clip, direction)}",\n"speed": ${clip.fps.toFixed(1)}\n}`);
+      const played = playOrder(clip, frames.length).map((k) => frames[k]);
+      animations.push(`{\n"frames": [${played.join(', ')}],\n"loop": ${clip.loop !== false},\n"name": &"${clipAnimationName(clip, direction)}",\n"speed": ${clip.fps.toFixed(1)}\n}`);
     }
   }
   return [
@@ -692,7 +695,8 @@ export function clipsTres(stem, sheets) {
 }
 
 // The clips' sheets as JSON: for every clip's direction its PNG, its
-// frames' places, its rate and whether it loops.
+// frames' places in the order they are played (a clip going there and back:
+// there and back, `pingpong` - see playOrder()), its rate and whether it loops.
 export function clipsJSON(stem, sheets, settings) {
   return JSON.stringify({
     meta: {
@@ -708,9 +712,10 @@ export function clipsJSON(stem, sheets, settings) {
       angle: +direction.angle.toFixed(4),
       image: clipImageName(stem, clip, direction),
       size: { w: direction.width, h: direction.height },
-      loop: clip.loop,
+      loop: clip.loop !== false,
+      ...(clip.loop === PINGPONG ? { pingpong: true } : {}),
       fps: clip.fps,
-      frames: direction.frames.map(({ x, y, w, h }) => ({ x, y, w, h })),
+      frames: playOrder(clip, direction.frames.length).map((k) => direction.frames[k]).map(({ x, y, w, h }) => ({ x, y, w, h })),
     }))),
   }, null, 1);
 }

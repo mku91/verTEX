@@ -1,5 +1,5 @@
 import { turnOf } from './pose.js';
-import { sampleTrack } from './animation.js';
+import { sampleTrack, PINGPONG } from './animation.js';
 
 // The animations (see animation.js) as glTF has them, for Godot: a glTF
 // animation for every clip, a channel for every track - on the node of its
@@ -21,7 +21,8 @@ import { sampleTrack } from './animation.js';
 //     (one turned by quaternions already, as it is: never cut, it goes
 //     the short way as glTF's does).
 // A looping clip's name ends in "-loop": Godot loops it, and takes the
-// ending away. A clip longer than its keys gets a last sample at its end,
+// ending away. A clip going there and back is baked into one twice as
+// long, back included, that loops (see pingpongSamples()). A clip longer than its keys gets a last sample at its end,
 // on its every track, so that Godot's clip is as long as it.
 
 export const BAKE_RATE = 60; // samples a second for smooth stretches, at least (Godot imports at 30 unless told otherwise)
@@ -52,6 +53,22 @@ function samplesOf(track, clip) {
   return { steps, frames: [...frames].sort((a, b) => a - b) };
 }
 
+// A track of a clip going there and back (see LOOPS), which glTF and Godot's
+// import know nothing of, as a loop twice as long: its samples there - from
+// the start to the end, both sampled - and then the same backwards, frame
+// f at 2·length - f. A track that only steps holds a key's value until the
+// next; backwards, until the one before: each sample on the way back is
+// what was there just before its frame.
+function pingpongSamples(track, clip, { steps, frames }) {
+  const { length } = clip;
+  const there = [...new Set([0, length, ...frames.filter((frame) => frame <= length)])].sort((a, b) => a - b);
+  const samples = there.map((frame) => ({ time: frame, value: sampleTrack(track, frame) }));
+  for (const frame of there.slice(0, -1).reverse()) {
+    samples.push({ time: 2 * length - frame, value: sampleTrack(track, steps ? Math.max(0, frame - 1e-6) : frame) });
+  }
+  return samples;
+}
+
 // The clips as glTF animations. `nodeOf(id)` is an entry's node (undefined:
 // not exported - hidden); `accessor(array, type, count, extra)` puts the
 // numbers among the file's bytes.
@@ -63,12 +80,15 @@ export function animationsOf(model, nodeOf, accessor) {
     for (const track of clip.tracks) {
       const node = nodeOf(track.object);
       if (node === undefined || !track.keys.length) continue;
-      const { steps, frames } = samplesOf(track, clip);
-      const times = frames.map((frame) => frame / clip.fps);
+      const sampled = samplesOf(track, clip);
+      const { steps } = sampled;
+      const samples = clip.loop === PINGPONG
+        ? pingpongSamples(track, clip, sampled)
+        : sampled.frames.map((frame) => ({ time: frame, value: sampleTrack(track, frame) }));
+      const times = samples.map(({ time }) => time / clip.fps);
       const values = [];
       let last = null;
-      for (const frame of frames) {
-        const value = sampleTrack(track, frame);
+      for (const { value } of samples) {
         if (track.property !== 'rotation') {
           values.push(...value);
           continue;
@@ -79,7 +99,7 @@ export function animationsOf(model, nodeOf, accessor) {
         values.push(q.x, q.y, q.z, q.w);
       }
       const input = accessor(new Float32Array(times), 'SCALAR', times.length, { min: [Math.min(...times)], max: [Math.max(...times)] });
-      const output = accessor(new Float32Array(values), track.property === 'rotation' ? 'VEC4' : 'VEC3', frames.length);
+      const output = accessor(new Float32Array(values), track.property === 'rotation' ? 'VEC4' : 'VEC3', samples.length);
       channels.push({ sampler: samplers.push({ input, output, interpolation: steps ? 'STEP' : 'LINEAR' }) - 1, target: { node, path: PATHS[track.property] } });
     }
     if (channels.length) out.push({ name: clip.loop ? `${clip.name}-loop` : clip.name, samplers, channels });

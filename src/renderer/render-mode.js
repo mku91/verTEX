@@ -1,5 +1,6 @@
 import { SpriteRenderer, SPRITE_DEFAULTS, sheetJSON, clipsTres, clipsJSON, clipImageName } from './sprite-render.js';
 import { scrubbable } from './scrub.js';
+import { PINGPONG } from './animation.js';
 
 // The sprite render: a screen of its own over the editor, where the model is
 // made into a sprite sheet (see sprite-render.js). On the left, one over the
@@ -394,7 +395,7 @@ export class RenderMode {
             `${shown.directions.length} PNG по ${strip.width} × ${strip.height} px`
           : '';
         this.element.querySelector('.render-clip-info').textContent = shown
-          ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop ? ' · цикл' : ''}`
+          ? `${shown.frames} кадр${plural(shown.frames)} на направление · ${(clip.length / clip.fps).toFixed(2)} с${clip.loop === PINGPONG ? ' · пинг-понг' : clip.loop ? ' · цикл' : ''}`
           : '';
       } else {
         this.sheet = empty ? null : made;
@@ -460,6 +461,14 @@ export class RenderMode {
   frameOn(by) {
     const round = this.round();
     const at = Math.max(0, round.indexOf(this.player.frame));
+    // A clip going there and back (see LOOPS): to its last frame and back
+    // to its first, the player's way kept (`back`) - a frame is passed twice.
+    if (this.sheet?.clip?.loop === PINGPONG && round.length > 1) {
+      const span = 2 * (round.length - 1);
+      const phase = ((((this.player.back ? span - at : at) + by) % span) + span) % span;
+      this.player.back = phase >= round.length;
+      return round[phase < round.length ? phase : span - phase];
+    }
     return round[(at + by + round.length) % round.length];
   }
 

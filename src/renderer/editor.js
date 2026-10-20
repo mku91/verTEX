@@ -4674,6 +4674,7 @@ export class Editor extends EventTarget {
   // a drag in progress is in the way.
   loadProject({ model, view }) {
     if (this.busy()) return false;
+    this.setWorkspace('model'); // (another project, or none: begun on the model, whatever mode the last was in)
     this.setOperation(null);
     this.lastPaint = null; // a line is not drawn from another project's pixel
     this.floating = null;

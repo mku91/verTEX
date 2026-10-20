@@ -4,6 +4,7 @@ import { latinOnly, latinName, freeName } from './names.js';
 import {
   MAX_FPS, PROPERTIES, frameOf, keyId, moveKeys, removeKeys, setInterpolation, setKey, copyKeys, pasteKeys,
   EASE_FAMILIES, EASE_DIRECTIONS, easing, easeParts, bezierOf, setEase, stillKeys, sameValue,
+  playedFrame, PINGPONG, LOOPS,
 } from './animation.js';
 
 // The animation mode's panel, at the bottom of the window (see animation.js
@@ -42,6 +43,7 @@ import {
 //                the copy down from the frame looked at
 
 const ROW = 24; // px a row (as .tl-name)
+const STRIPE = 0.5; // how much of the background's shade every other row takes (as .tl-stripe)
 const BEFORE = 1; // frames of room before frame 0, hatched
 const RULER = 26; // px of the frames' ruler
 const SECONDS = 21; // px of the seconds' ruler, under the lanes (and its border)
@@ -59,6 +61,12 @@ const PROPERTY_NAMES = { position: 'Позиция', rotation: 'Поворот',
 const TOOL_OF = { position: 'move', rotation: 'rotate', scale: 'scale' }; // the tool a track's name takes
 const TOOL_NAMES = { position: 'перемещение (W)', rotation: 'поворот (R)', scale: 'масштаб (S)' };
 const NEW_CLIP = { fps: 12, length: 24, loop: true };
+// The loop button as it is for each way of going round (see LOOPS).
+const LOOP_LOOKS = {
+  false: { icon: 'fa-repeat', title: 'Без цикла: клип проигрывается один раз. Нажмите — цикл' },
+  true: { icon: 'fa-repeat', title: 'Цикл: клип проигрывается по кругу, в Godot он получит зацикливание. Нажмите — пинг-понг' },
+  pingpong: { icon: 'fa-right-left', title: 'Пинг-понг: клип проигрывается вперёд, затем назад, и так по кругу. В Godot это цикл вдвое длиннее: обратный ход записывается в него. Нажмите — без цикла' },
+};
 const INTERPOLATION_NAMES = { linear: 'Линейная', step: 'Шаг', smooth: 'Плавная' };
 const KEY_COLORS = { position: 'keyPosition', rotation: 'keyRotation', scale: 'keyScale' }; // theme's, see theme.js
 const PREVIEW_COLOR = '#8be9fd'; // the frame looked at, while a key's curve is previewed
@@ -226,19 +234,25 @@ export class Timeline extends EventTarget {
     if (on) {
       if (this.frame >= clip.length && !clip.loop) this.frame = 0;
       let last = performance.now();
+      // How far it has played (frames, from the start of a round there - on
+      // the way back of a ping-pong, past the end); taken anew from the frame
+      // shown, if that was set meanwhile.
+      let run = this.frame;
+      let shown = this.frame;
       const tick = (time) => {
         if (!this.playing) return;
         const clipNow = this.current();
         if (!clipNow) return this.play(false);
-        let frame = this.frame + ((time - last) / 1000) * clipNow.fps;
+        if (this.frame !== shown) run = this.frame;
+        run += ((time - last) / 1000) * clipNow.fps;
         last = time;
-        if (frame >= clipNow.length) {
-          if (clipNow.loop) frame %= clipNow.length;
-          else {
-            this.setFrame(clipNow.length);
-            return this.play(false);
-          }
+        if (run >= clipNow.length && !clipNow.loop) {
+          this.setFrame(clipNow.length);
+          return this.play(false);
         }
+        const frame = playedFrame(clipNow, run);
+        if (clipNow.loop !== PINGPONG) run = frame;
+        shown = frame;
         this.frame = frame;
         this.showFrame();
         this.dispatchEvent(new Event('frame'));
@@ -332,10 +346,11 @@ export class Timeline extends EventTarget {
     };
     number(fields.fps, 'fps', 1, MAX_FPS);
     number(fields.length, 'length', 1, 100000);
-    // The loop: a button that stays pressed while the clip loops.
+    // The loop: a button that goes round the ways a clip may go round
+    // (see LOOPS) - once, round and round, there and back - pressed but for once.
     fields.loop.addEventListener('click', () => {
       const clip = this.current();
-      if (clip) this.change(clip.name, { loop: !clip.loop });
+      if (clip) this.change(clip.name, { loop: LOOPS[(LOOPS.indexOf(clip.loop) + 1) % LOOPS.length] });
     });
   }
 
@@ -352,6 +367,9 @@ export class Timeline extends EventTarget {
     if (document.activeElement !== fields.fps) fields.fps.value = clip?.fps ?? '';
     if (document.activeElement !== fields.length) fields.length.value = clip?.length ?? '';
     fields.loop.classList.toggle('active', Boolean(clip?.loop));
+    const loop = LOOP_LOOKS[String(clip?.loop ?? false)];
+    fields.loop.firstElementChild.className = `fa-solid ${loop.icon}`;
+    fields.loop.title = loop.title;
     const play = this.section.querySelector('[data-tl="play"]');
     play.firstElementChild.className = `fa-solid ${this.playing ? 'fa-pause' : 'fa-play'}`;
     play.title = this.playing ? 'Пауза (Enter)' : 'Воспроизвести (Enter)';
@@ -461,6 +479,8 @@ export class Timeline extends EventTarget {
       islands.forEach((island, index) => {
         if (island.parentIndex === null) add(index, 0);
       });
+      // (every other row a shade darker, across the names and the lanes, as Godot's: see draw())
+      lines.forEach((line, k) => line.classList.toggle('tl-stripe', k % 2 === 1));
       this.names.replaceChildren(...lines);
       this.rows = rows;
     }
@@ -1480,16 +1500,25 @@ export class Timeline extends EventTarget {
     hatch(lanes, height);
     hatch(ruler, RULER);
     hatch(seconds, SECONDS);
+    // The rows, up to the clip's end: every other one a shade darker (as
+    // the names beside them, see .tl-stripe), a line between the entries'.
+    const rowsStart = Math.max(0, Math.round(this.xOf(0)));
+    const rowsEnd = Math.min(width, Math.round(this.xOf(length)));
     this.rows.forEach((row, k) => {
+      if (k % 2 === 1 && rowsEnd > rowsStart) {
+        lanes.save();
+        lanes.globalAlpha = STRIPE;
+        lanes.fillStyle = colors.bg;
+        lanes.fillRect(rowsStart, k * ROW, rowsEnd - rowsStart, ROW);
+        lanes.restore();
+      }
       if (row.property) return;
       lanes.fillStyle = colors.border;
-      lanes.fillRect(0, k * ROW, width, 1);
+      lanes.fillRect(0, k * ROW, rowsEnd + 1, 1);
     });
-    const fine = this.frameWidth >= 6 ? 1 : step;
-    for (let frame = Math.max(0, first - (first % fine)); frame <= Math.min(lastShown, length); frame += fine) {
-      lanes.fillStyle = frame % step === 0 ? colors.border : `${colors.border}88`;
-      lanes.fillRect(Math.round(this.xOf(frame)), 0, 1, height);
-    }
+    // A line where the clip begins and one where it ends; none between.
+    lanes.fillStyle = colors.border;
+    for (const frame of [0, length]) lanes.fillRect(Math.round(this.xOf(frame)), 0, 1, height);
     // The keys of the clip: shaped and coloured by what they key, on
     // their tracks' rows; on the entry's row, an outline for every frame with
     // any. Between two keys of a track, a line says how the first goes on to

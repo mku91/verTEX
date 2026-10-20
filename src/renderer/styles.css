@@ -1097,6 +1097,11 @@ body {
   cursor: pointer;
 }
 
+/* Every other row a shade darker, as its lane is (see Timeline.draw()). */
+.tl-name.tl-stripe {
+  background: color-mix(in srgb, var(--bg) 50%, transparent);
+}
+
 .tl-name:hover {
   background: var(--hover);
 }

@@ -70,7 +70,7 @@ export function soundAnimation(clip, ids) {
   if (typeof clip.name !== 'string' || !NAME.test(clip.name)) return false;
   if (!(Number.isInteger(clip.fps) && clip.fps >= 1 && clip.fps <= MAX_FPS)) return false;
   if (!(Number.isInteger(clip.length) && clip.length >= 1)) return false;
-  if (typeof clip.loop !== 'boolean' || !Array.isArray(clip.tracks)) return false;
+  if (!LOOPS.includes(clip.loop) || !Array.isArray(clip.tracks)) return false;
   return clip.tracks.every((track) =>
     track && ids.has(track.object) && PROPERTIES.includes(track.property) &&
     Array.isArray(track.keys) && track.keys.length > 0 &&
@@ -230,14 +230,41 @@ export function sampleTrack(track, frame) {
   return a.value.length === 4 ? slerp(a.value, b.value, eased) : lerp(a.value, b.value, eased);
 }
 
+// How a clip goes round (clip.loop), as Godot's loop modes: false - once,
+// stopping at its end; true - round and round, its end its start again;
+// 'pingpong' - on to its end, back to its start, on again: the way back is
+// the way there, backwards, the ends not twice.
+export const PINGPONG = 'pingpong';
+export const LOOPS = [false, true, PINGPONG];
+
+// Where a clip is `run` frames into playing it (from its start, going on):
+// its frame, round and round, or there and back.
+export function playedFrame(clip, run) {
+  const { length } = clip;
+  if (!clip.loop || length <= 0) return Math.min(run, length);
+  if (clip.loop !== PINGPONG) return run % length;
+  const phase = run % (2 * length);
+  return phase <= length ? phase : 2 * length - phase;
+}
+
 // The frames of a clip a sprite takes (see sprite-render.js), at `fps` of
 // its own: as many as the clip's time makes at that rate, evenly over it -
 // (fractional) frames of the clip, from 0. A looping clip leaves out its
-// end, which is its start again; one that does not loop ends on it.
+// end, which is its start again; one that does not loop ends on it, as does
+// one going there and back - whose way back is these frames again,
+// backwards (see playOrder()).
 export function spriteFrames(clip, fps) {
   const count = Math.max(1, Math.round((clip.length / clip.fps) * fps));
-  const frames = Array.from({ length: clip.loop ? count : count + 1 }, (_, i) => (i * clip.length) / count);
+  const frames = Array.from({ length: clip.loop === true ? count : count + 1 }, (_, i) => (i * clip.length) / count);
   return clip.length > 0 ? frames : [0];
+}
+
+// The order a sprite's `count` frames (see spriteFrames()) are played in:
+// one after another - and for a clip going there and back, back again to
+// the second (the first comes after, round again).
+export function playOrder(clip, count) {
+  const there = Array.from({ length: count }, (_, i) => i);
+  return clip.loop === PINGPONG ? [...there, ...there.slice(1, -1).reverse()] : there;
 }
 
 // The pose a clip puts the entries in at a frame: Map id -> { position?,

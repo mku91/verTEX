@@ -32,6 +32,8 @@ import { PosePreview } from './pose-preview.js';
 import { SkinHeat } from './skin-heat.js';
 import { NodeMarks } from './node-marks.js';
 import { NodeBones } from './node-bones.js';
+import { latinOnly, freeName } from './names.js';
+import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -970,10 +972,35 @@ function pickMode(mode) {
 // A new project is asked about first: how it is textured. Resolves to the
 // options for Editor.newProject(), or to null if the user thinks better of it.
 const NEW_PPU_KEY = 'vertex.newProjectPPU';
+// The pixels per unit are the one atlas': with several, each is given its
+// own when it is made (see openAtlasPopup()) - the field is off then.
+function showNewProjectPPU() {
+  const multi = $('new-project-dialog').querySelector('[name="atlases"]:checked').value === 'multi';
+  const field = $('new-project-dialog').querySelector('.ppu-label').closest('.field');
+  field.classList.toggle('off', multi);
+  const input = field.querySelector('input');
+  input.disabled = multi;
+  if (multi) input.setSelectionRange(0, 0); // (not shown picked while off)
+}
+for (const radio of $('new-project-dialog').querySelectorAll('[name="atlases"]')) radio.addEventListener('change', showNewProjectPPU);
+// A card is chosen by a press anywhere on it - its field too, when that is off.
+for (const card of $('new-project-dialog').querySelectorAll('.choice-card')) {
+  card.addEventListener('click', (event) => {
+    const radio = card.querySelector('[type="radio"]');
+    if (radio.checked) return;
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+  });
+}
+{
+  const field = $('new-project-dialog').querySelector('form').elements.ppu;
+  scrubbable(field, { read: () => parseInt(field.value, 10), write: (value) => { field.value = value; }, whole: true, min: 1, max: 128 });
+}
 function askNewProject() {
   const dialog = $('new-project-dialog');
   const form = dialog.querySelector('form');
   form.elements.ppu.value = parseInt(localStorage.getItem(NEW_PPU_KEY), 10) || 16;
+  showNewProjectPPU();
   dialog.hidden = false;
   form.elements.ppu.focus();
   form.elements.ppu.select();
@@ -988,13 +1015,17 @@ function askNewProject() {
     const submit = (event) => {
       event.preventDefault();
       const ppu = parseInt(form.elements.ppu.value, 10);
+      if (form.elements.atlases.value === 'multi') {
+        done({ multiAtlas: true });
+        return;
+      }
       if (!(ppu >= 1 && ppu <= 128)) {
         form.elements.ppu.focus();
         form.elements.ppu.select();
         return;
       }
       localStorage.setItem(NEW_PPU_KEY, ppu);
-      done({ ppu });
+      done({ ppu, multiAtlas: form.elements.atlases.value === 'multi' });
     };
     const cancel = () => done(null);
     const escape = (event) => {
@@ -1284,6 +1315,395 @@ const renderMode = new RenderMode($('render-mode'), editor, {
   });
 }
 const atlasLink = new AtlasLink(editor, project, window.vertex?.atlas);
+
+// --- the atlases (a project made with several, see Editor.atlases) ------------------
+
+// The texture section: one atlas' figures - or, with several, a row for each
+// (the one worked on marked: a click on another makes it so; a double click
+// on its name renames it), a button for another, and the pixels per unit of
+// the one worked on to be set. The UV editor's choice of atlas with them.
+function showAtlases() {
+  const multi = editor.multiAtlas;
+  const { atlas } = editor;
+  // (with several, there may be none yet: the list and its button alone)
+  const none = atlas === editor.noAtlas;
+  $('ppu-line').hidden = multi; // (with several, each row says its own - given when it is made)
+  $('atlas-size').closest('.texture-line').hidden = none;
+  for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) $(id).disabled = none;
+  $('ppu-value').textContent = atlas.ppu;
+  $('atlas-size').textContent = `${atlas.width} × ${atlas.height}`;
+  const list = $('atlas-list');
+  list.hidden = !multi;
+  const uv = $('uv-atlas');
+  uv.hidden = !multi || none;
+  $('uv-atlas-new').hidden = !multi;
+  if (!multi) return;
+  const shown = JSON.stringify([editor.atlasId, editor.atlases.map((one) => [one.id, one.name, one.ppu, one.width, one.height])]);
+  if (list.dataset.shown !== shown && !list.querySelector('input')) {
+    list.dataset.shown = shown;
+    list.replaceChildren(
+      ...editor.atlases.map((one) => {
+        const row = document.createElement('div');
+        row.className = 'atlas-row';
+        row.classList.toggle('current', one.id === editor.atlasId);
+        row.dataset.atlas = one.id;
+        row.title = `Атлас «${one.name}»: ${one.ppu} пикс. на единицу, ${one.width} × ${one.height}. Щелчок — работать с ним, двойной щелчок по имени — переименовать`;
+        const name = document.createElement('span');
+        name.className = 'atlas-name';
+        name.textContent = one.name;
+        const figures = document.createElement('small');
+        figures.textContent = `${one.ppu} · ${one.width}×${one.height}`;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.dataset.remove = one.id;
+        remove.title = 'Удалить атлас: его объекты останутся без текстуры (можно отменить)';
+        remove.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+        remove.disabled = false; // (with several, the last too: the project may have none)
+        row.append(name, figures, remove);
+        return row;
+      }),
+      Object.assign(document.createElement('button'), {
+        type: 'button',
+        className: 'atlas-add',
+        title: 'Новый атлас: пустой, со своим размером пикселя. На него переносятся объекты — в их свойствах или кнопкой в UV-редакторе',
+        innerHTML: '<i class="fa-solid fa-plus"></i><span>Атлас</span>',
+      }),
+    );
+  }
+  // (a button of its own with the value in it, so that a long name is cut short: see select selectedcontent)
+  const face = document.createElement('button');
+  face.append(document.createElement('selectedcontent'));
+  uv.replaceChildren(face, ...editor.atlases.map((one) => new Option(one.name, one.id, false, one.id === editor.atlasId)));
+}
+
+$('atlas-list').addEventListener('click', async (event) => {
+  if (event.target.closest('input')) return;
+  const remove = event.target.closest('[data-remove]');
+  if (remove) {
+    const atlas = editor.atlasById(remove.dataset.remove);
+    const count = editor.mesh.objects.filter((object) => object.atlas === atlas?.id).length;
+    const detail = count
+      ? `${count} ${['объект останется', 'объекта останутся', 'объектов останутся'][vertexForm(count)]} без текстуры, нарисованное на атласе пропадёт. Действие можно отменить.`
+      : 'Нарисованное на нём пропадёт. Действие можно отменить.';
+    if (atlas && (await confirmIt(`Удалить атлас «${atlas.name}»?`, detail, 'Удалить'))) editor.removeAtlas(atlas.id);
+    return;
+  }
+  const add = event.target.closest('.atlas-add');
+  if (add) {
+    openAtlasPopup(add);
+    return;
+  }
+  const row = event.target.closest('.atlas-row');
+  if (row) editor.useAtlas(row.dataset.atlas);
+});
+// A double click on a name: renamed in place - Enter or leaving the field takes it, Esc not.
+$('atlas-list').addEventListener('dblclick', (event) => {
+  const name = event.target.closest('.atlas-name');
+  const row = name?.closest('.atlas-row');
+  if (!row || name.tagName === 'INPUT') return;
+  const input = document.createElement('input');
+  input.className = 'atlas-name';
+  input.value = name.textContent;
+  input.spellcheck = false;
+  latinOnly(input);
+  name.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (take) => {
+    if (done) return;
+    done = true;
+    if (take) editor.renameAtlas(row.dataset.atlas, input.value.trim());
+    input.remove();
+    $('atlas-list').dataset.shown = '';
+    showAtlases();
+  };
+  input.addEventListener('keydown', (key) => {
+    key.stopPropagation();
+    if (key.key === 'Enter') finish(true);
+    if (key.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+});
+$('uv-atlas').addEventListener('change', () => editor.useAtlas($('uv-atlas').value));
+
+// "Искажение" (see retro.js, Editor.beginRetro()): a popup by its button,
+// the atlas - or the pixels picked - shown made retro as the settings are
+// turned (a moment after, not at every step); «Применить» or Enter keeps
+// it, «Отмена» or Esc puts the picture back. The settings are kept for the
+// next time. Meanwhile the model may be looked at from all sides: a press
+// elsewhere leaves the popup open.
+const RETRO_KEY = 'vertex.retro';
+const retro = {
+  popup: $('retro-popup'),
+  settings: (() => {
+    try {
+      return { ...RETRO_DEFAULTS, ...JSON.parse(localStorage.getItem(RETRO_KEY)) };
+    } catch {
+      return { ...RETRO_DEFAULTS };
+    }
+  })(),
+  auto: 8,
+  timer: 0,
+};
+{
+  const { popup } = retro;
+  const field = (name) => popup.elements[name];
+  const numbers = {
+    brightness: [-100, 100, true], contrast: [-100, 100, true], saturation: [-100, 100, true], gamma: [0.2, 5, false],
+    noise: [0, 100, true], grain: [1, 16, true], levels: [0, 32, true], strength: [0, 100, true], auto: [2, 64, true],
+  };
+  const read = (name) => {
+    const [min, max, whole] = numbers[name];
+    const value = parseFloat(field(name).value);
+    if (!Number.isFinite(value)) return null;
+    return Math.min(max, Math.max(min, whole ? Math.round(value) : +value.toFixed(2)));
+  };
+  // The settings from the fields, then shown (a moment later, as they are being turned).
+  const take = () => {
+    for (const name of Object.keys(numbers)) {
+      const value = read(name);
+      if (value === null) continue;
+      if (name === 'auto') retro.auto = value;
+      else retro.settings[name] = value;
+    }
+    retro.settings.mono = field('mono').checked;
+    retro.settings.palette = field('palette').checked;
+    retro.settings.dither = field('dither').value;
+    try { localStorage.setItem(RETRO_KEY, JSON.stringify(retro.settings)); } catch { /* not kept: fine */ }
+    showRetroPalette();
+    clearTimeout(retro.timer);
+    retro.timer = setTimeout(() => editor.previewRetro(retro.settings), 40);
+  };
+  const fill = () => {
+    for (const name of Object.keys(numbers)) if (document.activeElement !== field(name)) field(name).value = name === 'auto' ? retro.auto : retro.settings[name];
+    field('mono').checked = retro.settings.mono;
+    field('palette').checked = retro.settings.palette;
+    field('dither').value = retro.settings.dither;
+    showRetroPalette();
+  };
+  field('dither').replaceChildren(...Object.entries(DITHERS).map(([value, label]) => new Option(label, value)));
+  for (const name of Object.keys(numbers)) {
+    const input = field(name);
+    const [min, max, whole] = numbers[name];
+    scrubbable(input, { read: () => read(name) ?? 0, write: (value) => { input.value = value; take(); }, whole, min, max, step: whole ? 1 : 0.1 });
+    input.addEventListener('input', take);
+  }
+  for (const name of ['mono', 'palette', 'dither']) field(name).addEventListener('change', take);
+  // The palette: a preset's colours, the brush's colour added, a colour taken out, or the picture's own found.
+  const presets = () => {
+    const brush = colorPopup.palette;
+    return { ...PALETTES, ...(brush?.colors?.length ? { [`Палитра кисти: ${brush.name}`]: brush.colors.map((color) => hexOf(color)) } : {}) };
+  };
+  field('preset').addEventListener('change', () => {
+    const colors = presets()[field('preset').value];
+    if (colors) {
+      retro.settings.colors = [...colors];
+      retro.settings.palette = true;
+      fill();
+      take();
+    }
+  });
+  popup.querySelector('.retro-swatches').addEventListener('click', (event) => {
+    const swatch = event.target.closest('[data-color]');
+    if (!swatch) return;
+    retro.settings.colors.splice(Number(swatch.dataset.color), 1);
+    take();
+  });
+  popup.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-retro]');
+    if (!button) return;
+    const what = button.dataset.retro;
+    if (what === 'seed') retro.settings.seed = 1 + Math.floor(Math.random() * 1e6);
+    else if (what === 'add-color') {
+      const hex = hexOf(editor.paintColor);
+      if (!retro.settings.colors.includes(hex)) retro.settings.colors.push(hex);
+      retro.settings.palette = true;
+    } else if (what === 'auto') {
+      retro.settings.colors = editor.retroPalette(retro.auto);
+      retro.settings.palette = true;
+    } else if (what === 'reset') retro.settings = { ...RETRO_DEFAULTS, colors: [] };
+    else if (what === 'cancel') return closeRetro(false);
+    else return;
+    fill();
+    take();
+  });
+  popup.addEventListener('submit', (event) => {
+    event.preventDefault();
+    closeRetro(true);
+  });
+  popup.addEventListener('keydown', (event) => {
+    event.stopPropagation(); // (typed figures are not the editor's shortcuts)
+    if (event.key === 'Escape') closeRetro(false);
+    if (event.key === 'Enter' && event.target.tagName !== 'BUTTON') {
+      event.preventDefault();
+      closeRetro(true);
+    }
+  });
+  // (Esc and Enter heard anywhere while it is open: it is what is being done)
+  window.addEventListener('keydown', (event) => {
+    if (popup.hidden || popup.contains(event.target)) return;
+    if (event.key === 'Escape' || event.key === 'Enter') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeRetro(event.key === 'Enter');
+    }
+  }, true);
+  retro.fill = fill;
+  retro.take = take;
+  retro.presets = presets;
+}
+
+function showRetroPalette() {
+  const { popup, settings } = retro;
+  popup.querySelector('.retro-palette').hidden = !settings.palette;
+  popup.elements.levels.closest('.retro-row').classList.toggle('off', settings.palette);
+  const preset = popup.elements.preset;
+  const names = Object.keys(retro.presets?.() ?? PALETTES);
+  const same = names.find((name) => JSON.stringify((retro.presets?.() ?? PALETTES)[name]) === JSON.stringify(settings.colors));
+  preset.replaceChildren(new Option(same ? same : settings.colors.length ? `Своя: ${settings.colors.length} цв.` : 'Готовая палитра…', '', true, true), ...names.filter((name) => name !== same).map((name) => new Option(name, name)));
+  popup.querySelector('.retro-swatches').replaceChildren(...settings.colors.map((color, k) => {
+    const swatch = document.createElement('i');
+    swatch.className = 'retro-swatch';
+    swatch.style.background = color;
+    swatch.dataset.color = k;
+    swatch.title = `${color} — щелчок убирает из палитры`;
+    return swatch;
+  }));
+}
+
+function openRetro(anchor) {
+  // (what it works on: the pixels picked, else the charts picked in the UV editor, else the whole atlas)
+  if (!retro.popup.hidden || !editor.beginRetro(uvEditor.pickedCharts())) return;
+  const { popup } = retro;
+  const { rect, atlas, scope, charts } = editor.retro;
+  popup.querySelector('.retro-scope').textContent = scope === 'marquee'
+    ? `выделение ${rect.w}×${rect.h}`
+    : scope === 'charts'
+      ? charts === 1 ? `лоскут ${rect.w}×${rect.h}` : `лоскутов: ${charts}`
+      : `атлас ${atlas.name} ${rect.w}×${rect.h}`;
+  popup.hidden = false;
+  retro.fill();
+  // In the middle of the window (it may be dragged elsewhere by its title, see below).
+  const { width, height } = popup.getBoundingClientRect();
+  popup.style.left = `${Math.max(6, (window.innerWidth - width) / 2)}px`;
+  popup.style.top = `${Math.max(6, (window.innerHeight - height) / 2)}px`;
+  editor.previewRetro(retro.settings);
+}
+
+function closeRetro(keep) {
+  if (retro.popup.hidden) return;
+  clearTimeout(retro.timer);
+  retro.popup.hidden = true;
+  if (keep) {
+    editor.previewRetro(retro.settings); // (what is kept is what the settings are now)
+    editor.applyRetro();
+  } else editor.cancelRetro();
+}
+
+uvEditor.onRetro = () => openRetro(document.querySelector('[data-uv="retro"]'));
+// Dragged by its grip (as the key popup is, see timeline.js), kept within the window.
+{
+  const { popup } = retro;
+  const title = popup.querySelector('.kp-grip');
+  let grab = null;
+  title.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const at = popup.getBoundingClientRect();
+    grab = { dx: event.clientX - at.left, dy: event.clientY - at.top, pointer: event.pointerId };
+    title.setPointerCapture(event.pointerId);
+    popup.classList.add('dragging');
+    event.preventDefault();
+  });
+  title.addEventListener('pointermove', (event) => {
+    if (!grab) return;
+    const { width, height } = popup.getBoundingClientRect();
+    popup.style.left = `${Math.min(Math.max(0, event.clientX - grab.dx), window.innerWidth - width)}px`;
+    popup.style.top = `${Math.min(Math.max(0, event.clientY - grab.dy), window.innerHeight - Math.min(height, 40))}px`;
+  });
+  const drop = () => {
+    grab = null;
+    popup.classList.remove('dragging');
+  };
+  title.addEventListener('pointerup', drop);
+  title.addEventListener('pointercancel', drop);
+}
+
+// A new atlas: a popup by the button pressed asks its pixels per unit first
+// (the last given, at first) - Enter or «Создать» makes it, Esc or a press
+// elsewhere lets it be. Each atlas' pixels are its own: nothing is taken
+// from the others.
+const NEW_ATLAS_PPU_KEY = 'vertex.newAtlasPPU';
+function openAtlasPopup(anchor) {
+  const popup = $('atlas-popup');
+  const input = popup.elements.name;
+  input.value = '';
+  popup.elements.ppu.value = parseInt(localStorage.getItem(NEW_ATLAS_PPU_KEY), 10) || 16;
+  // (the name a new one would get, shown greyed while none is typed)
+  input.placeholder = freeName('atlas', new Set(editor.atlases.map((atlas) => atlas.name)));
+  popup.hidden = false;
+  // Under the button, or over it where there is no room below; within the window.
+  const at = anchor.getBoundingClientRect();
+  const { width, height } = popup.getBoundingClientRect();
+  const below = at.bottom + 6 + height <= window.innerHeight;
+  popup.style.top = `${below ? at.bottom + 6 : at.top - 6 - height}px`;
+  popup.style.left = `${Math.max(6, Math.min(at.left, window.innerWidth - width - 6))}px`;
+  input.focus();
+  input.select();
+}
+function closeAtlasPopup() {
+  const popup = $('atlas-popup');
+  if (popup.hidden) return false;
+  popup.hidden = true;
+  return true;
+}
+latinOnly($('atlas-popup').elements.name);
+{
+  const field = $('atlas-popup').elements.ppu;
+  scrubbable(field, { read: () => parseInt(field.value, 10), write: (value) => { field.value = value; }, whole: true, min: 1, max: 256 });
+}
+$('uv-atlas-new').addEventListener('click', () => ($('atlas-popup').hidden ? openAtlasPopup($('uv-atlas-new')) : closeAtlasPopup()));
+$('uv-atlas-new').addEventListener('mousedown', (event) => event.preventDefault());
+$('atlas-popup').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const { name, ppu: field } = $('atlas-popup').elements;
+  const ppu = parseInt(field.value, 10);
+  if (!(ppu >= 1 && ppu <= 256)) {
+    field.focus();
+    field.select();
+    return;
+  }
+  localStorage.setItem(NEW_ATLAS_PPU_KEY, ppu);
+  closeAtlasPopup();
+  editor.createAtlas(name.value.trim() || 'atlas', ppu);
+});
+$('atlas-popup').addEventListener('keydown', (event) => {
+  event.stopPropagation(); // (typed figures are not the editor's shortcuts)
+  if (event.key === 'Escape') closeAtlasPopup();
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    $('atlas-popup').requestSubmit();
+  }
+});
+window.addEventListener('pointerdown', (event) => {
+  if (!event.target.closest?.('#atlas-popup, #uv-atlas-new, .atlas-add')) closeAtlasPopup();
+}, true);
+$('object-atlas').addEventListener('change', () => {
+  const value = $('object-atlas').value;
+  if (value !== '*') editor.setObjectsAtlas(editor.objectsInHand(), value || null);
+});
+// The atlas worked on follows the objects picked - theirs, when they are on
+// one - as they are picked: another chosen meanwhile stays.
+let handFollowed = '';
+editor.addEventListener('change', () => {
+  if (!editor.multiAtlas || editor.painting) return;
+  const hand = editor.objectsInHand();
+  const key = hand.join();
+  if (key === handFollowed) return;
+  handFollowed = key;
+  const ids = new Set(hand.map((index) => editor.mesh.objects[index]?.atlas).filter(Boolean));
+  if (ids.size === 1) editor.useAtlas([...ids][0]);
+});
 $('atlas-open').addEventListener('click', () => atlasLink.open());
 $('atlas-reveal').addEventListener('click', () => atlasLink.reveal());
 $('atlas-repack').addEventListener('click', async () => {
@@ -1598,6 +2018,17 @@ function refresh() {
   // half-ticked when they differ.
   const owners = picked.size ? editor.objectsInHand().map((index) => mesh.objects[index]).filter(Boolean) : [];
   $('object-props').hidden = owners.length === 0;
+  // Its atlas, in a project with several: one for all, or a blank where they differ.
+  $('object-atlas-line').hidden = !editor.multiAtlas || owners.length === 0;
+  if (editor.multiAtlas && owners.length) {
+    const ids = new Set(owners.map((object) => object.atlas ?? ''));
+    const select = $('object-atlas');
+    select.replaceChildren(
+      ...(ids.size > 1 ? [new Option('—', '*', true, true)] : []),
+      new Option('нет', '', false, ids.size === 1 && ids.has('')),
+      ...editor.atlases.map((atlas) => new Option(atlas.name, atlas.id, false, ids.size === 1 && ids.has(atlas.id))),
+    );
+  }
   const oneSided = owners.filter((object) => object.oneSided).length;
   $('back-faces').checked = oneSided === 0;
   $('back-faces').indeterminate = oneSided > 0 && oneSided < owners.length;
@@ -1632,8 +2063,7 @@ function refresh() {
   $('snap-toggle').classList.toggle('active', editor.snapGrid.enabled);
   $('local-toggle').classList.toggle('active', editor.localAxes);
   // Texturing.
-  $('ppu-value').textContent = editor.ppu; // chosen when the project was made
-  $('atlas-size').textContent = `${editor.atlas.width} × ${editor.atlas.height}`;
+  showAtlases();
   // Undo and redo: lit while there is a step to take.
   $('undo-button').disabled = editor.history.undoStack.length === 0;
   $('redo-button').disabled = editor.history.redoStack.length === 0;

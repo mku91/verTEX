@@ -54,13 +54,12 @@ const REVEAL_MARGIN = 8; // px left over the entry's rows, or under them
 const WHEEL_PX = 0.6; // px the frames go by for a pixel of the wheel's travel (a notch: ~60 px)
 const MAX_FRAME_WIDTH = 60;
 const NAMES_WIDTH_KEY = 'vertex.timelineNames';
-const NODES_ONLY_KEY = 'vertex.timelineNodesOnly';
 const NAMES_WIDTH = 220; // px, at first
 const NAMES_MIN = 120;
 const PROPERTY_NAMES = { position: 'Позиция', rotation: 'Поворот', scale: 'Масштаб' };
 const TOOL_OF = { position: 'move', rotation: 'rotate', scale: 'scale' }; // the tool a track's name takes
 const TOOL_NAMES = { position: 'перемещение (W)', rotation: 'поворот (R)', scale: 'масштаб (S)' };
-const NEW_CLIP = { fps: 12, length: 24, loop: true };
+const NEW_CLIP = { fps: 12, length: 24, loop: false }; // (going round, or there and back, when asked: see LOOPS)
 // The loop button as it is for each way of going round (see LOOPS).
 const LOOP_LOOKS = {
   false: { icon: 'fa-repeat', title: 'Без цикла: клип проигрывается один раз. Нажмите — цикл' },
@@ -98,15 +97,16 @@ export class Timeline extends EventTarget {
     this.copiedFrom = null; // where they were copied from: { clip (its name), ids } - marked by a wave (see draw())
     this.born = new Map(); // key id -> when it was set, while it pops in (see popKeys())
     // Only the nodes: their rows alone, and only they keyed and posed (see
-    // setNodesOnly()). Kept between runs.
-    let nodesOnly = false;
-    try { nodesOnly = (localStorage.getItem(NODES_ONLY_KEY) ?? localStorage.getItem('vertex.timelineGroupsOnly')) === '1'; } catch { /* off */ } // (the key it had before nodes were called so)
-    this.nodesOnly = nodesOnly;
-    editor.animationNodesOnly = nodesOnly;
+    // setNodesOnly()). The project's, as its view is (Editor.animationNodesOnly,
+    // see project.js): off in a new one; followed when another is opened.
+    this.nodesOnly = Boolean(editor.animationNodesOnly);
+    editor.addEventListener('change', () => {
+      if (Boolean(editor.animationNodesOnly) !== this.nodesOnly) this.setNodesOnly(Boolean(editor.animationNodesOnly));
+    });
 
     const $ = (selector) => section.querySelector(selector);
     this.select = $('.clip-select');
-    this.fields = { name: $('[name="clip-name"]'), fps: $('[name="clip-fps"]'), length: $('[name="clip-length"]'), loop: $('.tl-loop') };
+    this.fields = { fps: $('[name="clip-fps"]'), length: $('[name="clip-length"]'), loop: $('.tl-loop') };
     this.frameLabel = $('.tl-frame');
     this.names = $('.tl-names');
     this.ruler = $('.tl-ruler');
@@ -137,7 +137,6 @@ export class Timeline extends EventTarget {
     this.nodesOnly = on;
     this.editor.animationNodesOnly = on;
     this.section.querySelector('.tl-nodes-only').classList.toggle('active', on);
-    try { localStorage.setItem(NODES_ONLY_KEY, on ? '1' : '0'); } catch { /* not kept: fine */ }
     this.showNames();
     this.dispatchEvent(new Event('nodesonly'));
   }
@@ -183,11 +182,13 @@ export class Timeline extends EventTarget {
     this.editor.setAnimations(this.clips.map((clip) => (clip.name === name ? { ...clip, ...changes } : clip)), record);
   }
 
-  addClip(from = null) {
+  // A new clip - a copy of `from`, or an empty one named `name` (made
+  // unique; idle, by default) and `length` frames long - worked on from then on.
+  addClip(from = null, { name = 'idle', length = NEW_CLIP.length } = {}) {
     const names = new Set(this.clips.map((clip) => clip.name));
     const clip = from
       ? { ...structuredClone(from), name: freeName(from.name, names) }
-      : { name: freeName('idle', names), ...NEW_CLIP, tracks: [] };
+      : { name: freeName(name, names), ...NEW_CLIP, length, tracks: [] };
     this.clip = clip.name;
     this.frame = 0;
     this.editor.setAnimations([...this.clips, clip]);
@@ -202,13 +203,83 @@ export class Timeline extends EventTarget {
     this.editor.setAnimations(rest);
   }
 
-  rename(name) {
+  // The clip worked on named anew (Latin, unique among the clips) and made
+  // `length` frames long: one undo step.
+  editClip(name, length) {
     const clip = this.current();
-    name = name.trim();
-    if (!clip || !name || latinName(name) !== name || name === clip.name) return this.showBar();
-    const unique = freeName(name, new Set(this.clips.filter((other) => other !== clip).map((other) => other.name)));
+    if (!clip) return;
+    name = latinName(name.trim()) || clip.name;
+    const unique = name === clip.name ? name : freeName(name, new Set(this.clips.filter((other) => other !== clip).map((other) => other.name)));
+    const changes = {
+      ...(unique !== clip.name ? { name: unique } : {}),
+      ...(Number.isFinite(length) && length !== clip.length ? { length } : {}),
+    };
+    if (Object.keys(changes).length === 0) return;
     this.clip = unique;
-    this.change(clip.name, { name: unique });
+    this.change(clip.name, changes);
+    if (changes.length !== undefined && this.frame > changes.length) this.setFrame(changes.length);
+  }
+
+  // The popup a clip's name and length are given in, by the button pressed:
+  // for a new clip (`clip` null - its name to come, idle by default, and its
+  // length), or for the one worked on (as they are). Enter or its button
+  // takes them; Esc or a press elsewhere lets it be.
+  openClipPopup(clip) {
+    const popup = this.clipPopup;
+    const { name, frames: length } = popup.elements; // (`frames`: a form's `length` is how many fields it has)
+    popup.querySelector('.grid-popup-title').textContent = clip ? 'Анимация' : 'Новая анимация';
+    popup.querySelector('[type="submit"]').textContent = clip ? 'Сохранить' : 'Создать';
+    name.value = clip?.name ?? '';
+    name.placeholder = clip ? '' : freeName('idle', new Set(this.clips.map((other) => other.name)));
+    length.value = clip?.length ?? NEW_CLIP.length;
+    popup.editing = clip?.name ?? null;
+    popup.hidden = false;
+    const anchor = this.section.querySelector(`[data-tl="${clip ? 'edit' : 'add'}"]`);
+    const at = anchor.getBoundingClientRect();
+    const { width, height } = popup.getBoundingClientRect();
+    const below = at.bottom + 6 + height <= window.innerHeight;
+    popup.style.top = `${below ? at.bottom + 6 : at.top - 6 - height}px`;
+    popup.style.left = `${Math.max(6, Math.min(at.left, window.innerWidth - width - 6))}px`;
+    name.focus();
+    name.select();
+  }
+
+  closeClipPopup() {
+    if (this.clipPopup.hidden) return false;
+    this.clipPopup.hidden = true;
+    return true;
+  }
+
+  bindClipPopup() {
+    const popup = (this.clipPopup = document.getElementById('clip-popup'));
+    const { name, frames: length } = popup.elements;
+    latinOnly(name);
+    const readLength = () => parseInt(length.value, 10);
+    scrubbable(length, { read: readLength, write: (value) => { length.value = value; }, whole: true, min: 1, max: 100000 });
+    popup.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const frames = readLength();
+      if (!(frames >= 1 && frames <= 100000)) {
+        length.focus();
+        length.select();
+        return;
+      }
+      const editing = popup.editing;
+      this.closeClipPopup();
+      if (editing !== null && this.current()?.name === editing) this.editClip(name.value, frames);
+      else if (editing === null) this.addClip(null, { name: latinName(name.value.trim()) || 'idle', length: frames });
+    });
+    popup.addEventListener('keydown', (event) => {
+      event.stopPropagation(); // (typed, not the editor's shortcuts)
+      if (event.key === 'Escape') this.closeClipPopup();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        popup.requestSubmit();
+      }
+    });
+    window.addEventListener('pointerdown', (event) => {
+      if (!event.target.closest?.('#clip-popup, [data-tl="add"], [data-tl="edit"]')) this.closeClipPopup();
+    }, true);
   }
 
   // --- the frame looked at ---------------------------------------------------------
@@ -273,7 +344,8 @@ export class Timeline extends EventTarget {
     const { section, fields } = this;
     for (const button of section.querySelectorAll('button')) button.addEventListener('mousedown', (event) => event.preventDefault());
     const commands = {
-      add: () => this.addClip(),
+      add: () => this.openClipPopup(null),
+      edit: () => this.current() && this.openClipPopup(this.current()),
       keyall: () => this.dispatchEvent(new Event('keyall')), // (see AnimationMode.keyAll())
       nodesonly: () => this.setNodesOnly(!this.nodesOnly),
       duplicate: () => this.current() && this.addClip(this.current()),
@@ -307,9 +379,8 @@ export class Timeline extends EventTarget {
       this.dispatchEvent(new Event('frame'));
     });
 
-    latinOnly(fields.name);
-    fields.name.addEventListener('change', () => this.rename(fields.name.value));
-    for (const input of [fields.name, fields.fps, fields.length]) {
+    this.bindClipPopup();
+    for (const input of [fields.fps, fields.length]) {
       input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === 'Escape') input.blur();
         event.stopPropagation(); // the keys are the field's, not the shortcuts'
@@ -362,8 +433,7 @@ export class Timeline extends EventTarget {
     for (const button of this.section.querySelectorAll('[data-tl]')) {
       if (button.dataset.tl !== 'add' && button.dataset.tl !== 'key' && button.dataset.tl !== 'autokey') button.disabled = !clip;
     }
-    for (const input of [fields.name, fields.fps, fields.length, fields.loop]) input.disabled = !clip;
-    if (document.activeElement !== fields.name) fields.name.value = clip?.name ?? '';
+    for (const input of [fields.fps, fields.length, fields.loop]) input.disabled = !clip;
     if (document.activeElement !== fields.fps) fields.fps.value = clip?.fps ?? '';
     if (document.activeElement !== fields.length) fields.length.value = clip?.length ?? '';
     fields.loop.classList.toggle('active', Boolean(clip?.loop));

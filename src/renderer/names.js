@@ -1,8 +1,9 @@
-// Names in the scene tree - of objects, nodes, collision shapes - are in
-// Latin letters only: they go into game engines as nodes' names and into
-// code that looks them up (Godot's get_node("Door/Box")), where anything
-// else is trouble. Digits, spaces and _ . - are let through.
-const NOT_ALLOWED = /[^A-Za-z0-9 _.\-]/g;
+// Names - of objects, nodes, collision shapes, atlases, animations - are in
+// Latin letters only, with no spaces: they go into game engines as nodes'
+// and animations' names and into code that looks them up (Godot's
+// get_node("Door/Box")), where anything else is trouble. Digits and _ . -
+// are let through. (Names given before spaces were barred keep theirs.)
+const NOT_ALLOWED = /[^A-Za-z0-9_.\-]/g;
 
 export function latinName(text) {
   return text.replace(NOT_ALLOWED, '');
@@ -11,7 +12,7 @@ export function latinName(text) {
 // A name field that takes Latin letters only: whatever else is typed or
 // pasted is dropped as it comes, and the field shakes to say so.
 export function latinOnly(input) {
-  input.title = 'Только латиница, цифры, пробел и _ . -';
+  input.title = 'Только латиница, цифры и _ . - (без пробелов)';
   input.addEventListener('input', () => {
     const clean = latinName(input.value);
     if (clean === input.value) return;

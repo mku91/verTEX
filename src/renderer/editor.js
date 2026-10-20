@@ -12,7 +12,8 @@ import { theme, onThemeChange, themeGizmo } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
 import { unwrap as nearAngles } from './animation.js';
-import { latinName } from './names.js';
+import { latinName, freeName } from './names.js';
+import { retrofy, paletteOf } from './retro.js';
 import { weightsOf } from './skin.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
@@ -140,6 +141,21 @@ function buildPrimitive(mesh, kind, options) {
 }
 
 // Editor state: mesh, selection, selection mode, active tool. Dispatches 'change' on any update.
+// A picture made `w` × `h` pixels, each the nearest of the original's (no
+// smoothing: pixel art stays pixel art).
+function scaledImage(image, w, h) {
+  const out = new ImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const from = Math.min(image.height - 1, Math.floor(((y + 0.5) * image.height) / h));
+    for (let x = 0; x < w; x++) {
+      const column = Math.min(image.width - 1, Math.floor(((x + 0.5) * image.width) / w));
+      const a = (from * image.width + column) * 4;
+      out.data.set(image.data.subarray(a, a + 4), (y * w + x) * 4);
+    }
+  }
+  return out;
+}
+
 export class Editor extends EventTarget {
   constructor(viewport) {
     super();
@@ -173,6 +189,7 @@ export class Editor extends EventTarget {
     // piece of picture that floats over the rest while it is moved about.
     this.marquee = null; // { x, y, w, h }, in the atlas' pixels
     this.floating = null; // see liftMarquee()
+    this.retro = null; // "Искажение" being tried, see beginRetro()
     this.pixelClipboard = null; // { image, x, y }
     this.focus = false; // the focus look, see setFocus()
     // Modal operation, 'cut', 'extrude' or 'pencil': a state with its own look
@@ -188,8 +205,6 @@ export class Editor extends EventTarget {
     // The move and rotate gizmos stand along the axes of the object they move
     // (see setLocalAxes()) rather than the world's.
     this.localAxes = false;
-    // Texturing (see unwrap.js): the project's pixels per unit of length, and its atlas.
-    this.ppu = 16;
     this.uvLook = false; // the UV editor is open, see setUVLook()
     this.preview = false; // the model alone is shown, see setPreview()
     // What the editor works on (see setWorkspace()): the model itself, or
@@ -204,8 +219,19 @@ export class Editor extends EventTarget {
     this.workspacePress = {};
     this.modeDragging = false; // such a mode's gizmo is being dragged
     this.simulating = false; // the simulation runs (see simulation.js): the model is its, not to be edited
-    this.atlas = new Atlas();
-    this.atlas.addEventListener('change', () => this.viewport.requestRender());
+    // Texturing (see unwrap.js): the atlases the objects are painted with -
+    // one, or several in a project made so (`multiAtlas`, chosen when it is
+    // made) - each its own picture, at its own pixels per unit of length. The
+    // UV editor and the brush work on one of them at a time (`atlasId`,
+    // see the `atlas` getter); `ppu` is that one's.
+    // A project with several begins with none: each is made, its pixels per
+    // unit given, when it is wanted. While there are none, `atlas` is a
+    // stand-in (`noAtlas`): empty, of no project, never painted on.
+    this.atlases = [];
+    this.multiAtlas = false;
+    this.atlasId = ATLAS;
+    this.noAtlas = new Atlas({ id: null, name: '' });
+    this.addAtlas(new Atlas());
     // The place tool: what is being placed (see beginPlace()), and the side it lies on.
     this.place = null;
     this.placeSide = '-y';
@@ -221,7 +247,7 @@ export class Editor extends EventTarget {
     this.mesh.addCube();
     this.mirror = new Mirror(this); // mirror modeling, see mirror.js
     this.view = new MeshView(this.mesh);
-    this.view.atlas = this.atlas;
+    this.view.atlases = this.atlases;
     viewport.scene.add(this.view.group);
     // The vertex dots are hidden by the surface through a depth map of it.
     viewport.depthPass = {
@@ -1064,15 +1090,164 @@ export class Editor extends EventTarget {
 
   // --- texturing (see unwrap.js, atlas.js) ---------------------------------------
 
-  // Lays the faces out on the atlas as the model is now: every face gets its
-  // place, or keeps the one it has. Returns whether anything is where it was
-  // not. `repack` forgets the places and lays everything out anew. What no
-  // face shows any more stays, until the atlas is cleaned (see cleanAtlas()).
-  layOut(repack = false) {
-    const result = unwrap(this.mesh, { ppu: this.ppu, width: this.atlas.width, height: this.atlas.height, repack });
-    const resized = result.width !== this.atlas.width || result.height !== this.atlas.height;
-    this.atlas.apply(result, this.mesh);
-    return result.changed || resized;
+  // The atlas worked on (see the constructor), and its pixels per unit of length.
+  get atlas() {
+    return this.atlases.find((atlas) => atlas.id === this.atlasId) ?? this.atlases[0] ?? this.noAtlas;
+  }
+
+  get ppu() {
+    return this.atlas.ppu;
+  }
+
+  // The atlas with the id; undefined if there is none.
+  atlasById(id) {
+    return this.atlases.find((atlas) => atlas.id === id);
+  }
+
+  // The atlas the UV editor and the brush work on (see the constructor), by
+  // its id. Not an undo step: a way of looking, as the selection mode. What
+  // floats on the one worked on so far is put down there, its marquee let go.
+  useAtlas(id) {
+    if (id === this.atlasId || !this.atlasById(id)) return;
+    this.commitFloating();
+    this.marquee = null;
+    this.atlasId = id;
+    this.lastPaint = null;
+    this.setPaintHover(null);
+    this.emitChange();
+  }
+
+  // A new atlas, empty, at `ppu` pixels per unit of length - its own, as
+  // every atlas' is, whatever the others' - named `name` (Latin, as the
+  // scene's names; made unique), and worked on from then on. One undo step.
+  // Returns its id, or null.
+  createAtlas(name = 'atlas', ppu = 16) {
+    ppu = Math.round(ppu);
+    if (!(ppu >= 1 && ppu <= 256)) return null;
+    if (!this.multiAtlas || this.busy()) return null;
+    // (its id names its picture's file: letters, digits, _ and - only)
+    const latin = latinName(name ?? '').trim() || 'atlas';
+    const id = freeName(latin.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 56), new Set(this.atlases.map((atlas) => atlas.id)));
+    const label = freeName(latin, new Set(this.atlases.map((atlas) => atlas.name)));
+    this.history.push(this.snapshot());
+    this.addAtlas(new Atlas({ id, name: label, ppu }));
+    this.atlasId = id;
+    this.rebuildView();
+    this.emitChange();
+    return id;
+  }
+
+  // An atlas named anew (Latin, unique among the atlases). One undo step.
+  // Its id - its picture's file in the project - stays.
+  renameAtlas(id, name) {
+    const atlas = this.atlasById(id);
+    const taken = new Set(this.atlases.filter((other) => other !== atlas).map((other) => other.name));
+    const next = latinName(name ?? '');
+    if (!atlas || !next || next === atlas.name || this.busy()) return false;
+    this.history.push(this.snapshot());
+    atlas.name = freeName(next, taken);
+    this.emitChange();
+    return true;
+  }
+
+  // An atlas taken away - the last one only in a project with several, which
+  // may have none: its objects are on none from then on (their faces lose
+  // their places; see setObjectsAtlas()). One undo step.
+  removeAtlas(id) {
+    const atlas = this.atlasById(id);
+    if (!atlas || (this.atlases.length < 2 && !this.multiAtlas) || this.busy()) return false;
+    this.history.push(this.snapshot());
+    for (const object of this.mesh.objects) {
+      if (object.atlas !== id) continue;
+      this.forgetPlaces(object.id);
+      delete object.atlas;
+    }
+    this.setAtlases(this.atlases.filter((other) => other !== atlas).map(({ id: other, name, ppu }) => ({ id: other, name, ppu })));
+    if (this.atlasId === id) this.atlasId = this.atlases[0]?.id ?? null;
+    this.marquee = null;
+    this.floating = null;
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
+    return true;
+  }
+
+  // Puts objects (entries of the objects list) on the atlas `id`, or on none
+  // (null): their faces lose their places on the one they were on, and get
+  // new ones on this one (see layOut()) - what was painted for them stays
+  // behind there, until it is cleaned. One undo step. Returns whether any moved.
+  setObjectsAtlas(entries, id) {
+    if (id !== null && !this.atlasById(id)) return false;
+    const objects = entries.map((index) => this.mesh.objects[index]).filter((object) => object && object.kind !== 'node' && (object.atlas ?? null) !== id);
+    if (objects.length === 0 || this.busy()) return false;
+    this.history.push(this.snapshot());
+    for (const object of objects) {
+      this.forgetPlaces(object.id);
+      if (id === null) delete object.atlas;
+      else object.atlas = id;
+    }
+    if (id !== null) this.atlasId = id;
+    this.rebuildView(); // lays the atlases out, and draws the faces with their pictures
+    this.placeGizmo();
+    this.emitChange();
+    return true;
+  }
+
+  // The faces of an object (by id) lose their places on the atlas.
+  forgetPlaces(id) {
+    for (const face of this.mesh.faces) {
+      if (this.mesh.vertexObject[face[0]] !== id) continue;
+      delete face.uv;
+      delete face.pin;
+      delete face.shaped;
+    }
+  }
+
+  // The atlases as `list` has them ([{ id, name, ppu, pixels? }], in order):
+  // those of the same ids kept (their pictures replaced by `pixels`, if
+  // given), the rest made or let go.
+  setAtlases(list) {
+    const kept = new Map(this.atlases.map((atlas) => [atlas.id, atlas]));
+    const next = list.map(({ id, name, ppu, pixels }) => {
+      const atlas = kept.get(id) ?? this.addAtlas(new Atlas({ id, name, ppu }), false);
+      atlas.name = name ?? id;
+      atlas.ppu = ppu ?? atlas.ppu;
+      if (pixels) atlas.setPixels(pixels);
+      return atlas;
+    });
+    for (const atlas of this.atlases) if (!next.includes(atlas)) atlas.texture.dispose();
+    this.atlases.splice(0, this.atlases.length, ...next); // (the same list: the view has it)
+  }
+
+  // Takes an atlas among the project's (see the constructor) - at their end,
+  // or (`listed` false) only made one of theirs, for setAtlases() to place.
+  // What befalls any of them is told by the editor too: 'atlaschange' and
+  // 'atlaslayout', the atlas and what it told (see Atlas) as the detail.
+  addAtlas(atlas, listed = true) {
+    atlas.addEventListener('change', (event) => {
+      this.viewport.requestRender();
+      this.dispatchEvent(new CustomEvent('atlaschange', { detail: { atlas, ...event.detail } }));
+    });
+    atlas.addEventListener('layout', () => this.dispatchEvent(new CustomEvent('atlaslayout', { detail: { atlas } })));
+    if (listed) this.atlases.push(atlas);
+    return atlas;
+  }
+
+  // Lays the faces out on the atlases as the model is now - each atlas its
+  // objects', at its pixels per unit: every face gets its place, or keeps
+  // the one it has. Returns whether anything is where it was not. `repack`
+  // forgets the places and lays everything out anew - on the atlas `only`
+  // (an id), or on all. What no face shows any more stays, until the atlas
+  // is cleaned (see cleanAtlas()).
+  layOut(repack = false, only = null) {
+    let changed = false;
+    for (const atlas of this.atlases) {
+      const result = unwrap(this.mesh, { atlas: atlas.id, ppu: atlas.ppu, width: atlas.width, height: atlas.height, repack: repack && (only === null || only === atlas.id) });
+      const resized = result.width !== atlas.width || result.height !== atlas.height;
+      atlas.apply(result, this.mesh);
+      changed ||= result.changed || resized;
+    }
+    return changed;
   }
 
   // The objects in hand, as entries of the objects list (nodes left out): in
@@ -1097,7 +1272,7 @@ export class Editor extends EventTarget {
     if (objects.every((object) => Boolean(object.atlas) === on) || this.busy()) return false;
     const before = this.snapshot();
     for (const object of objects) {
-      if (on) object.atlas = ATLAS;
+      if (on) object.atlas = this.atlas.id;
       else delete object.atlas;
     }
     this.history.push(before);
@@ -1280,9 +1455,10 @@ export class Editor extends EventTarget {
       const normal = this.mesh.faceNormal(index);
       if (normal.lengthSq() < 0.5) return;
       const heights = face.map((i) => normal.dot(vertices[i]));
-      // Out of its plane by more than a tenth of a pixel.
-      if ((Math.max(...heights) - Math.min(...heights)) * this.ppu <= 0.1) return;
+      // Out of its plane by more than a tenth of a pixel (of its atlas).
       const owner = vertexObject[face[0]];
+      const ppu = this.atlasById(objects.find((object) => object.id === owner)?.atlas)?.ppu ?? this.atlases[0]?.ppu ?? 16;
+      if ((Math.max(...heights) - Math.min(...heights)) * ppu <= 0.1) return;
       bent.set(owner, (bent.get(owner) ?? 0) + 1);
     });
     const plural = (count) => {
@@ -1295,14 +1471,17 @@ export class Editor extends EventTarget {
     }));
   }
 
-  // Takes a new picture for the atlas from the bytes of an image file - the
-  // painter's work, done outside. One undo step. Returns false if the bytes
-  // are no picture.
-  async paintAtlas(bytes) {
+  // Takes a new picture for an atlas (by id; the one worked on, if none is
+  // given) from the bytes of an image file - the painter's work, done
+  // outside. One undo step. Returns false if the bytes are no picture.
+  async paintAtlas(bytes, id = this.atlas.id) {
+    const atlas = this.atlasById(id);
+    if (!atlas) return false;
     const before = this.snapshot();
-    if (!(await this.atlas.load(bytes, true))) return false;
-    const now = this.atlas.pixels().data;
-    if (now.length === before.atlas.data.length && now.every((value, i) => value === before.atlas.data[i])) return true;
+    if (!(await atlas.load(bytes, true))) return false;
+    const now = atlas.pixels().data;
+    const was = before.atlases.find((entry) => entry.id === id).pixels.data;
+    if (now.length === was.length && now.every((value, i) => value === was[i])) return true;
     this.history.push(before);
     this.emitChange();
     return true;
@@ -1322,22 +1501,22 @@ export class Editor extends EventTarget {
     return true;
   }
 
-  // The project's pixels per unit of length: the whole model is laid out anew at it.
+  // The atlas' pixels per unit of length: its objects are laid out anew at it.
   setPPU(ppu) {
     ppu = Math.round(ppu);
     if (!(ppu >= 1 && ppu <= 256) || ppu === this.ppu || this.busy()) return;
     this.history.push(this.snapshot());
-    this.ppu = ppu;
+    this.atlas.ppu = ppu;
     this.repackAtlas(false);
   }
 
-  // Lays the whole model out on the atlas from scratch, as tightly as it
-  // goes. What was painted is lost: the places are new.
+  // Lays the atlas' objects out on it from scratch, as tightly as they go.
+  // What was painted is lost: the places are new.
   repackAtlas(record = true) {
     if (this.busy()) return;
     if (record) this.history.push(this.snapshot());
     this.atlas.reset(START_SIZE, START_SIZE);
-    this.layOut(true);
+    this.layOut(true, this.atlas.id);
     this.view.updateUVs();
     this.viewport.requestRender();
     this.emitChange();
@@ -1880,19 +2059,23 @@ export class Editor extends EventTarget {
     return this.tool === 'pipette' || this.altHeld;
   }
 
-  // Where on the atlas the pointer is: { pixel: { x, y }, face } - the face of
-  // the model it is on, by its number; null where it is not on a face that is
-  // on the atlas.
-  paintHitAt(clientX, clientY) {
+  // Where on an atlas the pointer is: { pixel: { x, y, atlas }, face, atlas }
+  // - the face of the model it is on, by its number, and the id of the atlas
+  // it is on; null where it is not on a face that is on one. A stroke keeps
+  // to the atlas it was begun on (see pressPaint()): while one goes on - but
+  // the pipette's - a face on another is as none (`any` false).
+  paintHitAt(clientX, clientY, any = !this.stroke || Boolean(this.stroke.pick)) {
     this.pointerRay(clientX, clientY);
     const [hit] = this.raycaster.intersectObject(this.view.solid, false);
-    // (The surface is drawn in parts, see MeshView.rebuild(): the even ones are what is on the atlas.)
-    if (!hit?.uv || hit.face.materialIndex % 2 !== 0) return null;
+    if (!hit?.uv) return null;
+    // (The surface is drawn in parts, see MeshView.syncParts(): a part says which atlas its faces are on.)
+    const atlas = this.atlasById(this.view.parts[hit.face.materialIndex]?.atlas);
+    if (!atlas || (!any && atlas !== this.atlas)) return null;
     const index = this.view.triangleFaces[hit.faceIndex];
-    const pixel = this.facePixelAt(index, hit.uv.x * this.atlas.width, (1 - hit.uv.y) * this.atlas.height);
+    const pixel = this.facePixelAt(index, hit.uv.x * atlas.width, (1 - hit.uv.y) * atlas.height);
     if (!pixel) return null;
     // Where on the surface, in the world, and in which of the view's triangles (see surfacePath()).
-    return { pixel, face: index, point: hit.point, triangle: hit.faceIndex };
+    return { pixel: { ...pixel, atlas: atlas.id }, face: index, point: hit.point, triangle: hit.faceIndex, atlas: atlas.id };
   }
 
   // The pixel of a face at a place on the atlas (x, y in its pixels, y down);
@@ -1929,6 +2112,7 @@ export class Editor extends EventTarget {
     if (this.busy() || this.tool === 'marquee') return false; // the marquee works in the UV editor only
     const hit = this.paintHitAt(event.clientX, event.clientY);
     if (!hit) return false;
+    if (hit.atlas !== this.atlas.id) this.useAtlas(hit.atlas); // (the face's atlas is the one painted on)
     const kept = this.tool === 'paint' ? null : this.paintMask(hit.face);
     const line = event.shiftKey ? { x: event.clientX, y: event.clientY } : null;
     if (this.paintPress(hit.pixel, kept, event.altKey, { at: hit, line })) {
@@ -1949,7 +2133,7 @@ export class Editor extends EventTarget {
   // linePath()) the brush first paints a straight line there from its last
   // pixel, and the stroke goes on from its end.
   paintPress(pixel, mask, alt, { at = null, line = null } = {}) {
-    if (this.busy() || !this.painting || this.tool === 'marquee') return false;
+    if (this.busy() || !this.painting || this.tool === 'marquee' || this.atlas === this.noAtlas) return false;
     if (alt || this.tool === 'pipette') {
       this.stroke = { pick: true, changed: false };
       this.pickColor(pixel);
@@ -1962,7 +2146,8 @@ export class Editor extends EventTarget {
       // the model within their charts, as the fill keeps to, in the UV editor anywhere.
       for (const image of this.mirroredPixels(pixel.x, pixel.y, at)) {
         const kept = mask ? this.paintMask(image.face) : null;
-        if (this.atlas.paintPixels(this.atlas.floodPixels(image.x, image.y, kept), this.paintColor)) this.stroke.changed = true;
+        const atlas = this.atlasById(image.atlas); // (the image may be on another atlas)
+        if (atlas.paintPixels(atlas.floodPixels(image.x, image.y, kept), this.paintColor)) this.stroke.changed = true;
       }
       this.endPaint();
       return false;
@@ -1987,10 +2172,11 @@ export class Editor extends EventTarget {
     if (this.atlas.paintPixel(x, y, this.paintColor)) stroke.changed = true;
     // With the mirror on, its images as well (see mirroredPixels()).
     for (const image of this.mirroredPixels(x, y, at)) {
-      if (this.atlas.paintPixel(image.x, image.y, this.paintColor)) stroke.changed = true;
+      if (this.atlasById(image.atlas).paintPixel(image.x, image.y, this.paintColor)) stroke.changed = true;
     }
     this.lastPaint = {
       pixel: { x, y },
+      atlas: this.atlas.id,
       // (The view's triangles are numbered anew whenever it is rebuilt: `rebuilds` tells whether these still hold.)
       at: at ? { point: at.point.clone(), triangle: at.triangle, rebuilds: this.view.rebuilds } : null,
       width: this.atlas.width,
@@ -2004,8 +2190,9 @@ export class Editor extends EventTarget {
   // pixel's middle on a face's piece of the atlas) is mirrored to, across
   // the planes its object's edits are mirrored across, every one of them
   // and every pair and three of them; and where that is on the model, a
-  // face of it there (see surfacePlace()), and where that is on the atlas.
-  // As [{ x, y, face }]; [] with the mirror off, or nothing there.
+  // face of it there (see surfacePlace()), and where that is on its atlas -
+  // which may be another than this pixel's: the face's object's.
+  // As [{ x, y, face, atlas }]; [] with the mirror off, or nothing there.
   mirroredPixels(x, y, at = null) {
     if (!this.mirror.active()) return [];
     const place = at?.point ? { point: at.point, face: this.view.triangleFaces[at.triangle] } : this.placeOfPixel(x, y);
@@ -2018,21 +2205,23 @@ export class Editor extends EventTarget {
       const found = this.surfacePlace(image);
       if (!found) continue;
       const spot = this.atlasPlaceAt(found.triangle, image);
-      const pixel = spot && this.facePixelAt(this.view.triangleFaces[found.triangle], spot.x, spot.y);
-      if (pixel) pixels.push({ ...pixel, face: this.view.triangleFaces[found.triangle] });
+      const face = this.view.triangleFaces[found.triangle];
+      const pixel = spot && this.facePixelAt(face, spot.x, spot.y);
+      const atlas = this.view.atlasOfFace(this.mesh.faces[face]);
+      if (pixel && atlas !== null) pixels.push({ ...pixel, face, atlas });
     }
     return pixels;
   }
 
-  // Where on the model a pixel of the atlas is: the middle of it on the
-  // first face whose piece of the atlas holds it - { point, face } - or null.
+  // Where on the model a pixel of the atlas worked on is: the middle of it on
+  // the first face whose piece of the atlas holds it - { point, face } - or null.
   placeOfPixel(x, y) {
     const { faces, vertices } = this.mesh;
     const { triangleIndices, triangleFaces } = this.view;
     const middle = new THREE.Vector3(x + 0.5, y + 0.5, 0);
     for (let t = 0; t < triangleFaces.length; t++) {
       const face = faces[triangleFaces[t]];
-      if (!face?.uv?.every(Boolean)) continue;
+      if (!face?.uv?.every(Boolean) || this.view.atlasOfFace(face) !== this.atlas.id) continue;
       const corners = triangleIndices.slice(t * 3, t * 3 + 3);
       const places = corners.map((vertex) => new THREE.Vector3(...face.uv[face.indexOf(vertex)], 0));
       const flat = new THREE.Triangle(...places);
@@ -2081,7 +2270,7 @@ export class Editor extends EventTarget {
   //   - Otherwise straight across the atlas, pixel by pixel (Bresenham's).
   linePath(target) {
     const from = this.lastPaint;
-    if (!from || from.width !== this.atlas.width || from.height !== this.atlas.height) return [];
+    if (!from || from.atlas !== this.atlas.id || from.width !== this.atlas.width || from.height !== this.atlas.height) return [];
     const path = [];
     const seen = new Set();
     const add = (pixel, at) => {
@@ -2185,14 +2374,14 @@ export class Editor extends EventTarget {
     if (path.length < 2) path = []; // the pointer on the last pixel itself: no line
     if (!this.linePreview && path.length === 0) return;
     this.linePreview = path.length ? path : null;
-    this.view.setPaintLine(path.map((step) => step.pixel), this.paintColor);
+    this.view.setPaintLine(path.map((step) => step.pixel), this.paintColor, this.atlas.id);
     this.viewport.requestRender();
     this.dispatchEvent(new Event('painthover'));
   }
 
   // The pipette takes the colour of a pixel.
   pickColor(pixel) {
-    if (pixel) this.setPaintColor(this.atlas.colorAt(pixel.x, pixel.y));
+    if (pixel) this.setPaintColor((this.atlasById(pixel.atlas) ?? this.atlas).colorAt(pixel.x, pixel.y));
   }
 
   // A shape being drawn out reaches to a pixel: it is drawn anew, from the
@@ -2245,9 +2434,11 @@ export class Editor extends EventTarget {
   // The pixel the tool is on, wherever it is looked at from - the model
   // frames it, the UV editor too. Tells of it with a 'painthover' event.
   setPaintHover(pixel) {
-    if ((pixel?.x ?? -1) === (this.paintHover?.x ?? -1) && (pixel?.y ?? -1) === (this.paintHover?.y ?? -1)) return;
-    this.paintHover = pixel ? { ...pixel } : null;
-    this.view.setTexelHover(this.paintHover);
+    // (`atlas`: the pixel's, if not the one worked on - a face of another, under the brush)
+    const atlas = pixel?.atlas ?? this.atlas.id;
+    if ((pixel?.x ?? -1) === (this.paintHover?.x ?? -1) && (pixel?.y ?? -1) === (this.paintHover?.y ?? -1) && atlas === this.paintHover?.atlas) return;
+    this.paintHover = pixel ? { ...pixel, atlas } : null;
+    this.view.setTexelHover(this.paintHover, atlas);
     this.viewport.requestRender();
     this.dispatchEvent(new Event('painthover'));
   }
@@ -2277,7 +2468,12 @@ export class Editor extends EventTarget {
   // outside it or another tool, or sent back (cancelFloating()) by Esc or
   // Ctrl+Z. All that is done to a piece between its lifting and its putting
   // down is one undo step.
-  //   - A pasted picture floats too, where it was copied from.
+  //   - A pasted picture floats too, where it was copied from; one from the
+  //     system's clipboard (pasteImage()) at the top left, the atlas grown
+  //     for it if it is larger.
+  //   - What floats may be made larger or smaller (resizeFloating()), pixel
+  //     by pixel - nearest, as pixel art wants - from what was lifted or
+  //     pasted, however often: it is never made from its own resized self.
   //   - Quarter turns and turning over only: any other angle would make the
   //     pixels anew, and pixel art does not survive that.
   // What is moved off the faces stays there, until the atlas is cleaned
@@ -2309,7 +2505,7 @@ export class Editor extends EventTarget {
     const original = this.atlas.taken();
     const image = this.atlas.region(this.marquee);
     const changed = copy ? false : this.atlas.clearRegion(this.marquee);
-    this.floating = { before, original, base: this.atlas.taken(), image, x: this.marquee.x, y: this.marquee.y, changed };
+    this.floating = { before, original, base: this.atlas.taken(), image, source: image, x: this.marquee.x, y: this.marquee.y, changed };
     this.emitChange();
     return true;
   }
@@ -2364,7 +2560,8 @@ export class Editor extends EventTarget {
       const { before, base } = this.floating;
       this.floating = null;
       this.atlas.putBack(base); // the hole it left, or the picture as it was if it was a copy
-      if (this.atlas.pixels().data.some((value, i) => value !== before.atlas.data[i])) this.history.push(before);
+      const was = before.atlases.find((atlas) => atlas.id === this.atlas.id).pixels.data;
+      if (this.atlas.pixels().data.some((value, i) => value !== was[i])) this.history.push(before);
     } else if (this.marquee) {
       if (this.busy()) return false;
       const before = this.snapshot();
@@ -2422,6 +2619,129 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // Pastes a picture (an ImageData - from the system's clipboard, say): it
+  // floats at the top left of the atlas worked on, to be moved, resized and
+  // put down - the atlas grown first, doubling a side at a time (as an
+  // unwrap grows it, see unwrap.js) up to 4096, if the picture is larger.
+  // All one undo step with its putting down. Returns whether it was pasted.
+  pasteImage(image) {
+    if (!image?.width || !image?.height || this.atlas === this.noAtlas) return false;
+    this.commitFloating();
+    if (this.busy()) return false;
+    if (this.tool !== 'marquee') this.setTool('marquee'); // (the tool what floats is moved and resized with - taken first: another tool puts it down)
+    const before = this.snapshot();
+    let { width, height } = this.atlas;
+    while (width < image.width && width < 4096) width *= 2;
+    while (height < image.height && height < 4096) height *= 2;
+    if (width !== this.atlas.width || height !== this.atlas.height) {
+      this.atlas.resize(width, height);
+      this.atlas.touch();
+    }
+    const original = this.atlas.taken();
+    this.floating = { before, original, base: original, image, source: image, x: 0, y: 0, changed: true };
+    this.showFloating();
+    this.view.updateUVs(); // (the atlas may be larger: the faces' places are fractions of it)
+    this.emitChange();
+    return true;
+  }
+
+  // What floats, made to fill the rectangle `rect` ({ x, y, w, h }, pixels of
+  // the atlas): from what was lifted or pasted, nearest pixel by pixel.
+  resizeFloating(rect) {
+    const floating = this.floating;
+    if (!floating) return;
+    const w = Math.max(1, Math.round(rect.w));
+    const h = Math.max(1, Math.round(rect.h));
+    if (w !== floating.image.width || h !== floating.image.height) floating.image = scaledImage(floating.source ?? floating.image, w, h);
+    floating.x = Math.round(rect.x);
+    floating.y = Math.round(rect.y);
+    floating.changed = true;
+    this.showFloating();
+    this.emitChange();
+  }
+
+  // --- "Искажение": the picture made retro (see retro.js) ----------------------
+  //
+  // Tried first, then kept or not: beginRetro() takes the picture as it is -
+  // the rectangle picked; or else the charts picked (`charts`, see
+  // chartsOfFaces()), their pixels alone; or else the whole atlas worked on - previewRetro()
+  // shows it made retro by the settings given, again and again as they
+  // change, and applyRetro() keeps the last (one undo step) or cancelRetro()
+  // puts the picture back. Meanwhile the editor is busy: nothing else is done.
+
+  beginRetro(charts = []) {
+    if (this.atlas === this.noAtlas) return false;
+    this.commitFloating();
+    if (this.busy()) return false;
+    const { atlas } = this;
+    let rect = this.marquee ? { ...this.marquee } : { x: 0, y: 0, w: atlas.width, h: atlas.height };
+    // The charts picked: the rectangle round their pixels, and which of its pixels are theirs (`mask`).
+    let mask = null;
+    const picked = this.marquee ? [] : charts.filter((chart) => chart.pixels?.size);
+    if (picked.length) {
+      const places = picked.flatMap((chart) => [...chart.pixels].map((key) => key.split(',').map(Number)));
+      const xs = places.map(([x]) => x);
+      const ys = places.map(([, y]) => y);
+      const left = Math.max(0, Math.min(...xs));
+      const top = Math.max(0, Math.min(...ys));
+      rect = { x: left, y: top, w: Math.min(atlas.width, Math.max(...xs) + 1) - left, h: Math.min(atlas.height, Math.max(...ys) + 1) - top };
+      mask = new Uint8Array(rect.w * rect.h);
+      for (const [x, y] of places) if (x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h) mask[(y - rect.y) * rect.w + (x - rect.x)] = 1;
+    }
+    // Whose chart each pixel of it is (0: none): the error is handed on within a chart only.
+    const regions = new Int32Array(rect.w * rect.h);
+    atlas.charts.forEach((chart, k) => {
+      for (const key of chart.pixels ?? []) {
+        const [x, y] = key.split(',').map(Number);
+        if (x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h) regions[(y - rect.y) * rect.w + (x - rect.x)] = k + 1;
+      }
+    });
+    const scope = this.marquee ? 'marquee' : mask ? 'charts' : 'atlas';
+    this.retro = { before: this.snapshot(), original: atlas.taken(), source: atlas.region(rect), rect, regions, mask, scope, charts: picked.length, atlas, changed: false };
+    this.emitChange();
+    return true;
+  }
+
+  // The picture shown made retro by `settings` (see retrofy()).
+  previewRetro(settings) {
+    const retro = this.retro;
+    if (!retro) return;
+    const made = retrofy(retro.source, settings, { origin: retro.rect, regions: retro.regions });
+    // (only the charts picked: the rest of the rectangle as it was)
+    if (retro.mask) {
+      for (let i = 0; i < retro.mask.length; i++) if (!retro.mask[i]) made.data.set(retro.source.data.subarray(i * 4, i * 4 + 4), i * 4);
+    }
+    retro.atlas.putBack(retro.original);
+    retro.atlas.context.putImageData(made, retro.rect.x, retro.rect.y);
+    retro.atlas.touch();
+    retro.changed = made.data.some((value, i) => value !== retro.source.data[i]);
+  }
+
+  // What is shown kept: one undo step, if anything changed.
+  applyRetro() {
+    const retro = this.retro;
+    if (!retro) return false;
+    this.retro = null;
+    if (retro.changed) this.history.push(retro.before);
+    this.emitChange();
+    return retro.changed;
+  }
+
+  cancelRetro() {
+    const retro = this.retro;
+    if (!retro) return false;
+    this.retro = null;
+    retro.atlas.putBack(retro.original);
+    this.emitChange();
+    return true;
+  }
+
+  // The colours of what "Искажение" works on, brought down to `count` (see paletteOf()).
+  retroPalette(count) {
+    const source = this.retro?.source ?? (this.atlas === this.noAtlas ? null : this.atlas.region(this.marquee ?? { x: 0, y: 0, w: this.atlas.width, h: this.atlas.height }));
+    return source ? paletteOf(source, count) : [];
+  }
+
   // Turns what is picked a quarter turn (`turn` 1 clockwise, -1 back) or
   // over (`flip` 'h' or 'v'), about its middle. It floats from then on.
   turnPixels(how) {
@@ -2429,6 +2749,7 @@ export class Editor extends EventTarget {
     const floating = this.floating;
     const { width, height } = floating.image;
     floating.image = turnedImage(floating.image, how);
+    floating.source = floating.image; // (resized from as it is turned now)
     if (how.turn) {
       // About the middle, kept on the atlas.
       floating.x = Math.max(0, Math.min(floating.x + Math.floor((width - height) / 2), this.atlas.width - floating.image.width));
@@ -4371,8 +4692,10 @@ export class Editor extends EventTarget {
         mesh.mergeObjects(into, image);
         leaving.add(image);
       }
-      // What is on the atlas stays there.
+      // What is on the atlas stays there - on the joined object's: the faces
+      // that were on another are laid out on it anew.
       if (object.atlas && !kept.atlas) kept.atlas = object.atlas;
+      if (object.atlas && object.atlas !== kept.atlas) this.forgetPlaces(object.id);
       mesh.mergeObjects(kept.id, object.id);
     }
     this.rebuildView();
@@ -4694,6 +5017,10 @@ export class Editor extends EventTarget {
     mesh.wires = model.wires.map((wire) => [...wire]);
     // A project from before objects were put on the atlas one by one has every
     // object there that has places on it.
+    // The atlases (see the constructor): those the model names - one, `main`,
+    // in a project from before there could be more (see project.js).
+    const atlases = model.atlases ?? [{ id: ATLAS, ppu: model.ppu, width: model.atlas?.width, height: model.atlas?.height }];
+    const atlasOf = (atlas) => (atlases.some((entry) => entry.id === atlas) ? atlas : atlases[0]?.id);
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
@@ -4706,7 +5033,7 @@ export class Editor extends EventTarget {
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(typeof color === 'string' ? { color } : {}),
-      ...(atlas || placedObjects?.has(id) ? { atlas: ATLAS } : {}),
+      ...((atlas || placedObjects?.has(id)) && atlasOf(atlas) ? { atlas: atlasOf(atlas) } : {}),
       ...(mirror?.length ? { mirror: [...mirror] } : {}),
       ...(oneSided ? { oneSided: true } : {}),
       ...(smooth ? { smooth } : {}),
@@ -4722,10 +5049,12 @@ export class Editor extends EventTarget {
     mesh.folds = new Map((model.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
     mesh.weights = new Map((model.weights ?? []).map(([i, weights]) => [i, weights.map(([node, weight]) => [node, weight])]));
     this.animations = structuredClone(model.animations ?? []);
-    // Its texturing: the density, and an atlas of its size - empty until the
-    // picture is loaded into it (a project without one gets the template).
-    this.ppu = model.ppu ?? 16;
-    this.atlas.reset(model.atlas?.width ?? START_SIZE, model.atlas?.height ?? START_SIZE);
+    // Its texturing: the atlases, each at its density and of its size -
+    // empty until its picture is loaded into it (one without gets the template).
+    this.multiAtlas = Boolean(model.multiAtlas);
+    this.setAtlases(atlases.map(({ id, name, ppu }) => ({ id, name: name ?? id, ppu: ppu ?? 16 })));
+    for (const { id, width, height } of atlases) this.atlasById(id).reset(width ?? START_SIZE, height ?? START_SIZE);
+    this.atlasId = this.atlases[0]?.id ?? null;
 
     this.history = new History();
     this.clipboard = null;
@@ -4737,12 +5066,14 @@ export class Editor extends EventTarget {
     // The first object is the one being edited, as after a start.
     const first = this.topology.islands.find((island) => island.kind !== 'node' && !island.hidden);
     this.target = new Set(first?.vertices ?? []);
-    if (view) {
+    if (view?.camera) {
       const { camera, orbit } = this.viewport;
       camera.position.fromArray(view.camera.position);
       orbit.target.fromArray(view.camera.target);
       orbit.update();
     }
+    // The timeline's "only the nodes" (see Timeline.setNodesOnly()): the project's own, off unless it says so.
+    this.animationNodesOnly = Boolean(view?.timeline?.nodesOnly);
     this.placeGizmo();
     this.emitChange();
     return true;
@@ -4750,7 +5081,7 @@ export class Editor extends EventTarget {
 
   // A fresh project: the starting cube and an empty history.
   // `ppu` is the new project's pixels per unit of length.
-  newProject({ ppu = 16 } = {}) {
+  newProject({ ppu = 16, multiAtlas = false } = {}) {
     const draft = new EditableMesh();
     draft.autoAtlas = this.mesh.autoAtlas;
     draft.addCube();
@@ -4762,7 +5093,8 @@ export class Editor extends EventTarget {
         objects: draft.objects,
         vertexObject: draft.vertexObject,
         nextObjectId: draft.nextObjectId,
-        ppu,
+        atlases: multiAtlas ? [] : [{ id: ATLAS, name: ATLAS, ppu }], // (several: each made when wanted)
+        multiAtlas,
       },
       view: { camera: { position: [3.5, 3, 4.5], target: [0, 0.5, 0] } },
     });
@@ -4848,6 +5180,7 @@ export class Editor extends EventTarget {
       Boolean(this.drag?.start) ||
       Boolean(this.stroke) ||
       Boolean(this.floating) ||
+      Boolean(this.retro) ||
       Boolean(this.pivotDrag?.before) ||
       this.gizmo.dragging ||
       this.modeDragging ||
@@ -4871,8 +5204,9 @@ export class Editor extends EventTarget {
       selection: [...this.selection],
       target: [...this.target],
       mirror: [...this.mirror.globalAxes],
-      ppu: this.ppu,
-      atlas: this.atlas.pixels(), // the picture is part of the document
+      // The atlases' pictures are part of the document.
+      atlases: this.atlases.map(({ id, name, ppu }) => ({ id, name, ppu, pixels: this.atlasById(id).pixels() })),
+      atlasId: this.atlasId,
       animations: structuredClone(this.animations), // and so are the animations
     };
   }
@@ -4887,8 +5221,8 @@ export class Editor extends EventTarget {
     this.mesh.vertexObject = [...(state.vertexObject ?? [])];
     this.mesh.nextObjectId = Math.max(this.mesh.nextObjectId, state.nextObjectId ?? 1);
     this.mirror.globalAxes = new Set(state.mirror ?? []);
-    this.ppu = state.ppu ?? this.ppu;
-    if (state.atlas) this.atlas.setPixels(state.atlas);
+    if (state.atlases) this.setAtlases(state.atlases);
+    this.atlasId = this.atlasById(state.atlasId) ? state.atlasId : this.atlases[0]?.id ?? null;
     this.mesh.folds = new Map((state.folds ?? []).map(([i, fold]) => [i, { ...fold }]));
     this.mesh.weights = new Map((state.weights ?? []).map(([i, weights]) => [i, weights.map(([node, weight]) => [node, weight])]));
     this.animations = structuredClone(state.animations ?? []);

@@ -1277,8 +1277,9 @@ body {
 }
 
 /* The grip the popup is dragged by: nine dots, three by three, in the colour
-   of the key's track. */
-.key-popup .kp-grip {
+   of the key's track. (The same on the popup of "Искажение".) */
+.key-popup .kp-grip,
+#retro-popup .kp-grip {
   flex: none;
   width: 14px;
   height: 14px;
@@ -1289,7 +1290,8 @@ body {
   cursor: grab;
 }
 
-.key-popup.dragged .kp-grip {
+.key-popup.dragged .kp-grip,
+#retro-popup.dragging .kp-grip {
   cursor: grabbing;
 }
 
@@ -1813,6 +1815,362 @@ body {
 .texture-buttons i {
   width: auto;
   font-size: 12px;
+}
+
+/* The atlases of a project that has several: a row each - the one worked
+   on marked - its name (renamed by a double click), its pixels per unit
+   and size; a button to make another under them. */
+#atlas-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.atlas-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.atlas-row:hover {
+  background: var(--hover);
+}
+
+.atlas-row.current {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.atlas-row .atlas-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-row input.atlas-name {
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  font: inherit;
+}
+
+.atlas-row small {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.atlas-row button,
+.atlas-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.atlas-row button:hover,
+.atlas-add:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.atlas-row button:disabled {
+  visibility: hidden;
+}
+
+.atlas-add {
+  gap: 6px;
+  align-self: flex-start;
+  height: 24px;
+}
+
+/* An object's atlas, in a project with several. */
+.object-atlas {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+}
+
+.object-atlas select {
+  flex: 1;
+  min-width: 0;
+  max-width: 160px;
+}
+
+/* The atlas shown: as wide whatever its name (a long one cut short, see select selectedcontent). */
+#uv-atlas {
+  flex: none;
+  width: 180px;
+  height: 22px;
+}
+
+/* (its own button, the value shown in it: see showAtlases()) */
+#uv-atlas > button {
+  all: unset;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+/* "Искажение": a tall popup by its button, its settings in sections. */
+#retro-popup {
+  position: fixed;
+  z-index: 40;
+  width: 420px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  gap: 7px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.45);
+}
+
+/* Its title: the grip it is dragged by first (as the key popup's, see timeline.js). */
+#retro-popup .grid-popup-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+#retro-popup .kp-grip {
+  margin: 0;
+  color: var(--accent);
+}
+
+#retro-popup .retro-scope {
+  margin-left: 6px;
+  color: var(--text-dim);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+#retro-popup .retro-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#retro-popup .retro-row,
+#retro-popup .retro-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+#retro-popup .retro-row span {
+  white-space: nowrap;
+}
+
+#retro-popup .retro-row .scrub-field,
+#retro-popup .retro-row select {
+  flex: none;
+  width: 170px;
+}
+
+#retro-popup .retro-row {
+  min-height: 26px;
+}
+
+#retro-popup input[type="text"] {
+  width: 100%;
+  height: 26px;
+  padding: 0 38px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+#retro-popup input[name="auto"] {
+  width: 44px;
+  padding-right: 6px;
+}
+
+#retro-popup .retro-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+#retro-popup .retro-check input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#retro-popup .retro-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#retro-popup .retro-palette[hidden] {
+  display: none;
+}
+
+#retro-popup .retro-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+#retro-popup .retro-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* (a press takes the colour out of the palette: a cross says so) */
+#retro-popup .retro-swatch:hover::after {
+  content: '×';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #f8f8f2;
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: 0 0 2px #000, 0 0 2px #000;
+}
+
+#retro-popup button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+#retro-popup button:hover {
+  background: var(--hover);
+}
+
+#retro-popup .retro-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+#retro-popup .retro-buttons button:first-child {
+  margin-right: auto;
+}
+
+#retro-popup button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+/* A new atlas' pixels per unit, asked under (or over) the button pressed;
+   a clip's name and length, the same way (see timeline.js). */
+:is(#atlas-popup, #clip-popup) {
+  position: fixed;
+  z-index: 40;
+  width: 240px;
+}
+
+:is(#atlas-popup, #clip-popup) label span {
+  white-space: nowrap;
+}
+
+:is(#atlas-popup, #clip-popup) input[name="name"] {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+:is(#atlas-popup, #clip-popup) input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+:is(#atlas-popup, #clip-popup) label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+:is(#atlas-popup, #clip-popup) .scrub-field {
+  flex: none;
+  width: 88px;
+}
+
+:is(#atlas-popup, #clip-popup) input {
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+:is(#atlas-popup, #clip-popup) .scrub-field input {
+  padding-right: 38px; /* (room for the handle, see scrubbable()) */
+}
+
+:is(#atlas-popup, #clip-popup) input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+:is(#atlas-popup, #clip-popup) button {
+  height: 26px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:is(#atlas-popup, #clip-popup) button:hover {
+  filter: brightness(1.1);
 }
 
 /* The statistics sit at the bottom of the panel. */
@@ -4981,4 +5339,69 @@ option::checkmark {
 #skin-panel .skin-pose.active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 28%, var(--bg));
+}
+
+/* Whose the new project's pixels per unit are, on one line. */
+#new-project-dialog .ppu-label {
+  white-space: nowrap;
+}
+
+#new-project-dialog .field .scrub-field {
+  flex: none;
+  width: 130px;
+}
+
+#new-project-dialog .field .scrub-field input {
+  width: 100%;
+}
+
+/* (shown or not by the attribute, whatever their display: see showAtlases(), showNewProjectPPU()) */
+#atlas-list[hidden],
+#uv-atlas[hidden],
+#uv-atlas-new[hidden],
+.object-atlas[hidden],
+.texture-line[hidden],
+.modal .field[hidden],
+.scrub-field[hidden] {
+  display: none;
+}
+
+/* The new project's ways of texturing, each a card: the one chosen lit. */
+.modal .choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: -4px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+
+.modal .choice-card:hover {
+  background: color-mix(in srgb, var(--hover) 50%, transparent);
+}
+
+.modal .choice-card:has(input[type="radio"]:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.modal .choice-card .field {
+  margin: 0 0 0 21px;
+}
+
+/* The one atlas' pixels per unit, while several are chosen: there, but off. */
+.modal .field.off {
+  opacity: 0.45;
+}
+
+.modal .field.off input {
+  pointer-events: none;
+}
+
+/* (levels do nothing while a palette is on) */
+#retro-popup .retro-row.off {
+  opacity: 0.45;
 }

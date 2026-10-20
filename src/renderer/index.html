@@ -259,11 +259,10 @@
       <div class="uv-bar tl-bar">
         <b>АНИМАЦИЯ</b>
         <select class="clip-select" title="Клип, с которым работаете"></select>
-        <button data-tl="add" title="Новый клип"><i class="fa-solid fa-plus"></i></button>
+        <button data-tl="add" title="Новый клип: имя и длина спрашиваются"><i class="fa-solid fa-plus"></i></button>
+        <button data-tl="edit" title="Имя и длина клипа"><i class="fa-solid fa-pen"></i></button>
         <button data-tl="duplicate" title="Дублировать клип"><i class="fa-regular fa-clone"></i></button>
         <button data-tl="delete" title="Удалить клип (можно отменить)"><i class="fa-solid fa-trash-can"></i></button>
-        <i class="uv-divider"></i>
-        <label class="tl-field" title="Имя клипа — латиницей: так он будет называться в Godot">Имя<input type="text" name="clip-name" spellcheck="false"></label>
         <i class="uv-divider"></i>
         <button data-tl="first" title="В начало"><i class="fa-solid fa-backward-step"></i></button>
         <button data-tl="prev" title="Кадр назад"><i class="fa-solid fa-caret-left"></i></button>
@@ -300,6 +299,8 @@
     <section id="uv-editor" hidden>
       <div class="uv-bar">
         <b>UV</b>
+        <button id="uv-atlas-new" title="Новый атлас: пустой, со своим размером пикселя" hidden><i class="fa-solid fa-file-circle-plus"></i></button>
+        <select id="uv-atlas" title="Атлас, который показан здесь и на котором рисует кисть" hidden></select>
         <button data-uv="add" class="worded" title="Положить выбранные объекты на атлас: их грани получат место на картинке">
           <i class="fa-solid fa-plus"></i><span>Создать атлас</span>
         </button>
@@ -330,6 +331,14 @@
         </button>
         <button data-uv="fit" title="Показать атлас целиком">
           <i class="fa-solid fa-expand"></i>
+        </button>
+        <i class="uv-divider"></i>
+        <button data-uv="paste" title="Вставить картинку из буфера обмена: она ляжет поверх атласа в левый верхний угол (атлас при нужде вырастет). Её можно перетащить и потянуть за уголки, чтобы изменить размер (Shift — с теми же пропорциями). Enter или щелчок мимо — положить, Esc — отменить">
+          <i class="fa-solid fa-paste"></i>
+        </button>
+        <i class="uv-divider"></i>
+        <button data-uv="retro" title="Искажение: подогнать текстуру под палитру, добавить дизеринг, шум, поправить цвета — «ретрофикация». Действует на выделенные пиксели, а без выделения на весь атлас; результат виден сразу, «Применить» записывает его одним шагом отмены">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
         </button>
         <span class="uv-status"></span>
       </div>
@@ -471,6 +480,10 @@
         <div class="properties-header">
           <p>Свойства</p>
         </div>
+        <label class="object-atlas" id="object-atlas-line" title="Атлас, картинкой которого красится объект. При переносе на другой атлас грани раскладываются на нём заново; нарисованное на прежнем остаётся там, пока его не очистить" hidden>
+          <span>Атлас</span>
+          <select id="object-atlas"></select>
+        </label>
         <label class="flag" title="Снято — грани видны только с лицевой стороны, как их рисует большинство игровых движков: изнутри замкнутого объекта сквозь него видно то, что за ним. Уходит и в экспорт">
           <input type="checkbox" id="back-faces">
           <span>Изнанка граней</span>
@@ -505,7 +518,8 @@
       </section>
       <section id="texture-section">
         <h2>Текстура</h2>
-        <div class="texture-line" title="Сколько пикселей текстуры приходится на единицу длины. Задаётся при создании проекта, одно значение на весь проект">
+        <div id="atlas-list" hidden></div>
+        <div class="texture-line" id="ppu-line" title="Сколько пикселей текстуры приходится на единицу длины. Задаётся при создании проекта, одно значение на весь проект">
           <span>Пикселей на единицу</span><b id="ppu-value"></b>
         </div>
         <div class="texture-line" title="Размер атласа: он растёт сам, когда граням не хватает места">
@@ -571,24 +585,93 @@
     <form class="dialog">
       <h2>Новый проект</h2>
       <h3>Текстуры</h3>
-      <label class="choice">
-        <input type="radio" name="atlases" value="single" checked>
-        <span>Один атлас на проект<small>Вся модель красится одной картинкой, пиксель везде одного размера</small></span>
-      </label>
-      <label class="field" title="Сколько пикселей текстуры приходится на единицу длины. Потом можно поменять, но развёртка тогда строится заново">
-        <span>Пикселей на единицу</span>
-        <input name="ppu" type="text" inputmode="numeric" spellcheck="false" value="16">
-      </label>
-      <label class="choice unavailable" title="В программе этого пока нет">
-        <input type="radio" name="atlases" value="multi" disabled>
-        <span>Несколько атласов<small>пока нет</small></span>
-      </label>
+      <div class="choice-card">
+        <label class="choice">
+          <input type="radio" name="atlases" value="single" checked>
+          <span>Один атлас на проект<small>Вся модель красится одной картинкой, пиксель везде одного размера</small></span>
+        </label>
+        <label class="field" title="Сколько пикселей текстуры приходится на единицу длины. Потом можно поменять, но развёртка тогда строится заново">
+          <span class="ppu-label">Пикселей на единицу</span>
+          <input name="ppu" type="text" inputmode="numeric" spellcheck="false" value="16">
+        </label>
+      </div>
+      <div class="choice-card">
+        <label class="choice">
+          <input type="radio" name="atlases" value="multi">
+          <span>Несколько атласов<small>Каждый объект красится картинкой своего атласа, у каждого атласа свой размер пикселя. Атласы создаются в проекте, размер пикселя задаётся при создании</small></span>
+        </label>
+      </div>
       <div class="form-buttons">
         <button type="button" data-cancel>Отмена</button>
         <button type="submit">Создать</button>
       </div>
     </form>
   </div>
+
+  <!-- A clip's name and length: asked for a new one, changed for the one worked on (see timeline.js). -->
+  <form id="clip-popup" class="grid-popup" hidden>
+    <div class="grid-popup-title"></div>
+    <label title="Имя клипа — латиницей: так он будет называться в Godot. Пусто — имя дастся само">
+      <span>Имя</span>
+      <input name="name" type="text" spellcheck="false" autocomplete="off">
+    </label>
+    <label title="Длина клипа в кадрах (при его FPS)">
+      <span>Длина, кадров</span>
+      <input name="frames" type="text" inputmode="numeric" spellcheck="false">
+    </label>
+    <button type="submit"></button>
+  </form>
+
+  <!-- A new atlas: its pixels per unit asked first (see app.js). -->
+  <form id="atlas-popup" class="grid-popup" hidden>
+    <div class="grid-popup-title">Новый атлас</div>
+    <label title="Имя атласа, латиницей. Пусто — имя дастся само">
+      <span>Название</span>
+      <input name="name" type="text" spellcheck="false" placeholder="atlas" autocomplete="off">
+    </label>
+    <label title="Сколько пикселей текстуры приходится на единицу длины на этом атласе. У каждого атласа свой размер пикселя">
+      <span>Пикселей на единицу</span>
+      <input name="ppu" type="text" inputmode="numeric" spellcheck="false">
+    </label>
+    <button type="submit">Создать</button>
+  </form>
+
+  <!-- "Искажение": the atlas made retro, tried as it is set (see retro.js, app.js). -->
+  <form id="retro-popup" class="grid-popup" hidden>
+    <div class="grid-popup-title"><i class="kp-grip" title="Потяните, чтобы переставить окно"></i>Искажение <small class="retro-scope"></small></div>
+    <div class="retro-section">Цвет</div>
+    <label class="retro-row"><span>Яркость</span><input name="brightness" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span>Контраст</span><input name="contrast" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span>Насыщенность</span><input name="saturation" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row"><span>Гамма</span><input name="gamma" type="text" inputmode="decimal" spellcheck="false"></label>
+    <div class="retro-section">Шум</div>
+    <label class="retro-row"><span>Сила</span><input name="noise" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-row" title="Размер зерна шума, в пикселях атласа"><span>Зерно, px</span><input name="grain" type="text" inputmode="numeric" spellcheck="false"></label>
+    <div class="retro-line">
+      <label class="retro-check" title="Снято — у каждого канала свой шум, цветной"><input name="mono" type="checkbox"><span>Одноцветный</span></label>
+      <button type="button" data-retro="seed" title="Другой узор шума"><i class="fa-solid fa-dice"></i></button>
+    </div>
+    <div class="retro-section">Цвета</div>
+    <label class="retro-row" title="Без палитры: свести каждый канал к стольким уровням (постеризация). 0 — выкл."><span>Уровней на канал</span><input name="levels" type="text" inputmode="numeric" spellcheck="false"></label>
+    <label class="retro-check" title="Свести цвета к палитре: каждый пиксель берёт ближайший её цвет (ближайший на глаз). Уровни тогда не действуют"><input name="palette" type="checkbox"><span>Палитра</span></label>
+    <div class="retro-palette">
+      <select name="preset" title="Готовая палитра: заменяет цвета ниже"></select>
+      <div class="retro-swatches"></div>
+      <div class="retro-line">
+        <button type="button" data-retro="add-color" title="Добавить в палитру текущий цвет кисти"><i class="fa-solid fa-plus"></i><span>Цвет кисти</span></button>
+        <button type="button" data-retro="auto" title="Подобрать палитру по самой картинке: столько цветов, сколько указано">Подобрать</button>
+        <input name="auto" type="text" inputmode="numeric" spellcheck="false" title="Сколько цветов подобрать">
+      </div>
+    </div>
+    <div class="retro-section">Дизеринг</div>
+    <label class="retro-row"><span>Способ</span><select name="dither"></select></label>
+    <label class="retro-row" title="Насколько сильно дизеринг размывает переход между цветами"><span>Сила, %</span><input name="strength" type="text" inputmode="numeric" spellcheck="false"></label>
+    <div class="retro-buttons">
+      <button type="button" data-retro="reset" title="Вернуть все настройки к исходным">Сброс</button>
+      <button type="button" data-retro="cancel">Отмена</button>
+      <button type="submit" class="primary">Применить</button>
+    </div>
+  </form>
 
   <div id="color-popup" hidden>
     <div class="color-field" title="Оттенок: левее — бледнее, ниже — темнее"><i></i></div>

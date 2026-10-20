@@ -97,8 +97,8 @@ export function lightDirection(azimuth, elevation) {
 export class SpriteRenderer {
   constructor(editor) {
     this.editor = editor;
-    this.atlasSize = new THREE.Vector2(1, 1);
-    this.materials = new Map(); // light -> the four parts' materials (see MeshView.rebuild())
+    this.atlasSizes = new Map(); // atlas id -> its size, as its materials have it (see keepToFaces())
+    this.materials = new Map(); // light and parts -> the parts' materials (see MeshView.syncParts())
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera();
     this.scene.add(this.camera);
@@ -118,21 +118,26 @@ export class SpriteRenderer {
   }
 
   // The materials for the settings' light and blend, in the order of the
-  // surface's parts: on the atlas from both sides, off it from both sides,
-  // on it from the front only, off it from the front only.
+  // surface's parts (see MeshView.syncParts()): each atlas' from both sides
+  // and those on none, then the same from the front only.
   materialsFor(settings) {
     const stepped = settings.light !== 'none' && settings.blend === 'steps';
     const dither = settings.dither ? (settings.ditherFaces ? 'faces' : 'bounds') : null;
-    const key = settings.light === 'none' ? 'none' : stepped ? `steps ${settings.steps} ${dither}` : 'smooth';
+    const { parts } = this.editor.view;
+    const textures = this.editor.atlases.map((atlas) => `${atlas.id}:${atlas.texture.id}`).join(',');
+    const key = `${settings.light === 'none' ? 'none' : stepped ? `steps ${settings.steps} ${dither}` : 'smooth'}|${textures}`;
     if (!this.materials.has(key)) {
-      this.materials.set(key, [0, 1, 2, 3].map((part) => {
-        const onAtlas = part % 2 === 0;
+      for (const list of this.materials.values()) for (const material of list) material.dispose();
+      this.materials.clear();
+      this.materials.set(key, parts.map(({ atlas: id, front }) => {
+        const atlas = this.editor.atlasById(id);
         const Kind = settings.light === 'none' ? THREE.MeshBasicMaterial : THREE.MeshLambertMaterial;
-        const material = new Kind({ vertexColors: true, side: part >= 2 ? THREE.FrontSide : THREE.DoubleSide });
-        if (onAtlas) {
-          material.map = this.editor.atlas.texture;
+        const material = new Kind({ vertexColors: true, side: front ? THREE.FrontSide : THREE.DoubleSide });
+        if (atlas) {
+          if (!this.atlasSizes.has(id)) this.atlasSizes.set(id, new THREE.Vector2(1, 1));
+          material.map = atlas.texture;
           material.alphaTest = 0.5;
-          keepToFaces(material, this.atlasSize);
+          keepToFaces(material, this.atlasSizes.get(id));
         }
         if (stepped) inSteps(material, settings.steps, dither);
         return material;
@@ -157,7 +162,7 @@ export class SpriteRenderer {
 
   // The pixels of the sprite to a unit of length.
   pixelsPerUnit(settings) {
-    return this.editor.ppu * settings.scale;
+    return (this.editor.atlases[0]?.ppu ?? 16) * settings.scale; // (the first atlas': the others' pixels are as big as theirs come out)
   }
 
   // Points the camera at the model for direction k (see the top), a frame
@@ -471,8 +476,10 @@ export class SpriteRenderer {
 
   async draw(settings, { clips, drawn, png }, cancelled, progress) {
     const { renderer } = this.editor.viewport;
-    const { atlas } = this.editor;
-    this.atlasSize.set(atlas.width, atlas.height);
+    for (const atlas of this.editor.atlases) {
+      if (!this.atlasSizes.has(atlas.id)) this.atlasSizes.set(atlas.id, new THREE.Vector2(1, 1));
+      this.atlasSizes.get(atlas.id).set(atlas.width, atlas.height);
+    }
     const geometry = this.surface(Boolean(clips));
     const job = (this.jobs = (this.jobs ?? 0) + 1);
     const worker = this.worker();

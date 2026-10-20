@@ -25,7 +25,7 @@ export const PROPERTIES = ['position', 'rotation', 'scale'];
 export const INTERPOLATIONS = ['linear', 'step', 'smooth'];
 export const MAX_FPS = 120;
 
-const NAME = /^[A-Za-z0-9 _.\-]+$/;
+const NAME = /^[A-Za-z0-9 _.\-]+$/; // (a space too: clips named before spaces were barred, see names.js)
 const isTriple = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
 // (A key may stand between frames - dragged there with Ctrl - to a hundredth.)
 const isFrame = (value) => Number.isFinite(value) && value >= 0;

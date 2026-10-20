@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { edgeKey } from './mesh.js';
+import { edgeKey, ATLAS } from './mesh.js';
 import { quaternionOf } from './frames.js';
 
 // The unwrap: where every face is on the texture atlas.
@@ -38,12 +38,12 @@ const tidy = (value) => (Math.abs(value - Math.round(value)) < 1e-6 ? Math.round
 // The charts of a mesh's faces that are still to be placed, each { faces, object, normal, flat } - `flat` a Map
 // from a vertex of the chart to its place [x, y] in pixels, and `width`,
 // `height` the chart's extent. Faces without a surface are in no chart.
-export function chartsOf(mesh, ppu) {
+export function chartsOf(mesh, ppu, atlas = ATLAS) {
   const { faces, vertices, vertexObject, objects } = mesh;
   const normals = faces.map((_, i) => mesh.faceNormal(i));
   const offsets = faces.map((face, i) => normals[i].dot(vertices[face[0]]));
-  // Only the objects the user has put on the atlas are laid out on it.
-  const onAtlas = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
+  // Only the objects the user has put on this atlas are laid out on it.
+  const onAtlas = new Set(objects.filter((object) => object.atlas === atlas).map((object) => object.id));
   // (A face that has places keeps them: see keptCharts().)
   const sound = (i) => normals[i].lengthSq() > 0.5 && onAtlas.has(vertexObject[faces[i][0]]) && !faces[i].uv;
 
@@ -108,15 +108,19 @@ export function chartsOf(mesh, ppu) {
 // together in there, by edges whose ends have the same places in both faces -
 // each { faces, rect, pinned, shaped }. They are kept as they are. A corner
 // that has no place (the face was cut since) gets one between its
-// neighbours'; a face whose object is off the atlas, or none of whose corners
-// has a place, has none.
-function keptCharts(mesh) {
+// neighbours'; a face whose object is on no atlas, or none of whose corners
+// has a place, has none. The faces of the objects on other atlases than
+// `atlas` are left as they are: they are those atlases' to keep.
+function keptCharts(mesh, atlas = ATLAS) {
   const { faces, vertices, vertexObject, objects } = mesh;
-  const onAtlas = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
+  const onAny = new Set(objects.filter((object) => object.atlas).map((object) => object.id));
+  const onAtlas = new Set(objects.filter((object) => object.atlas === atlas).map((object) => object.id));
   const members = [];
   faces.forEach((face, i) => {
     if (!face.uv) return;
-    if (!face.uv.some(Boolean) || face.uv.length !== face.length || !onAtlas.has(vertexObject[face[0]])) {
+    const owner = vertexObject[face[0]];
+    if (onAny.has(owner) && !onAtlas.has(owner)) return;
+    if (!face.uv.some(Boolean) || face.uv.length !== face.length || !onAtlas.has(owner)) {
       delete face.uv;
       delete face.pin;
       delete face.shaped;
@@ -250,7 +254,8 @@ class Room {
   }
 }
 
-// Gives every face of the objects on the atlas a place there that has none,
+// Gives every face of the objects on the atlas `atlas` (an id, see
+// object.atlas; each atlas is laid out on its own, at its own `ppu`) a place there that has none,
 // on an atlas of the given size, and writes it into the face's `uv`. Faces
 // that have places keep them, whatever has become of the faces since.
 // Returns what the atlas has to do about it:
@@ -258,11 +263,13 @@ class Room {
 //   charts         all the charts, each with its `rect` { x, y, w, h } and `faces`
 //   fresh          the rects given to the charts laid out now: to be cleared
 //   changed        whether any face's places are not what they were
-// `repack` forgets every place first: the whole model is laid out anew.
-export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, repack = false }) {
+// `repack` forgets every place on it first: its objects are laid out anew.
+export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = START_SIZE, repack = false }) {
   let changed = false;
   if (repack) {
+    const own = new Set(mesh.objects.filter((object) => object.atlas === atlas).map((object) => object.id));
     for (const face of mesh.faces) {
+      if (!own.has(mesh.vertexObject[face[0]])) continue;
       if (face.uv) changed = true;
       delete face.uv;
       delete face.pin;
@@ -271,7 +278,7 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
   }
   const had = mesh.faces.map((face) => face.uv);
   // What is there stays there, and the rest keeps off its room.
-  const kept = keptCharts(mesh);
+  const kept = keptCharts(mesh, atlas);
   mesh.faces.forEach((face, i) => {
     if (face.uv !== had[i]) changed = true; // a corner was given a place, or the face lost its places
   });
@@ -279,7 +286,7 @@ export function unwrap(mesh, { ppu, width = START_SIZE, height = START_SIZE, rep
   for (const { rect } of kept) room.take(rect.x, rect.y, rect.w, rect.h);
 
   // The faces without places, in charts, each laid flat and given free room.
-  const charts = chartsOf(mesh, ppu);
+  const charts = chartsOf(mesh, ppu, atlas);
   const fresh = [];
   for (const chart of charts) {
     const w = Math.max(1, Math.ceil(chart.width - 1e-6));

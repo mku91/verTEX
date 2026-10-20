@@ -9,7 +9,7 @@
 //                    the global mirror's axes, an object's `mirror` its own
 //   view.json        { camera: { position, target } }
 //   materials.json   [] - materials, none yet
-//   textures/        atlas.png - the texture atlas, see atlas.js
+//   textures/        <atlas id>.png - the texture atlases' pictures, see atlas.js
 //   preview.png      a small picture of the model, shown on the welcome screen
 //
 // A newer program may add entries and fields; this one reads what it knows.
@@ -21,9 +21,13 @@
 // pivot points in world coordinates, and no rotation.) The editor itself
 // works in world coordinates: modelOf() and worldModel() go between the two.
 //
-// Since version 3 the model is textured: `ppu` is the project's pixels per
-// unit of length, `atlas` the size of its texture atlas, and `uvs` where each
-// face's corners are on it, in pixels (see unwrap.js).
+// Since version 3 the model is textured: `uvs` is where each face's corners
+// are on its object's atlas, in pixels (see unwrap.js). Since version 5 a
+// project may have several atlases (`multiAtlas`, chosen when it is made):
+// `atlases` is [{ id, name, ppu, width, height }] - each one's pixels per
+// unit of length and size - and an object's `atlas` the id of the one it is
+// on. (Up to version 4 there was one: `ppu` and `atlas` { width, height }
+// were its, and textures/atlas.png its picture.)
 
 import * as THREE from 'three';
 import { quaternionOf, rotationOf, toLocal, toWorld } from './frames.js';
@@ -31,9 +35,11 @@ import { cloneCollider } from './collision-fit.js';
 import { localTransforms, worldFrames } from './pose.js';
 import { soundAnimation } from './animation.js';
 import { tell } from './ask-dialog.js';
+import { ATLAS } from './mesh.js';
+import { START_SIZE } from './unwrap.js';
 
 const FORMAT = 'vertex-project';
-const VERSION = 4;
+const VERSION = 5;
 
 // How a model written in an older version of the format is brought up to the
 // next one: applied in turn, from the file's own version up to VERSION, before
@@ -45,6 +51,11 @@ const MIGRATIONS = {
   3: (model) => ({
     ...model,
     objects: Array.isArray(model.objects) ? model.objects.map((object) => (object?.kind === 'group' ? { ...object, kind: 'node' } : object)) : model.objects,
+  }),
+  // 4 -> 5: the one atlas there was is the first of a list, `main`.
+  4: ({ ppu, atlas, ...model }) => ({
+    ...model,
+    atlases: [{ id: ATLAS, name: ATLAS, ppu: ppu ?? 16, width: atlas?.width ?? START_SIZE, height: atlas?.height ?? START_SIZE }],
   }),
 };
 
@@ -127,8 +138,9 @@ export function modelOf(editor) {
     vertexObject: [...mesh.vertexObject],
     nextObjectId: mesh.nextObjectId,
     mirror: [...editor.mirror.globalAxes],
-    ppu: editor.ppu,
-    atlas: { width: editor.atlas.width, height: editor.atlas.height },
+    // The atlases (see the top), and whether the project may have several.
+    atlases: editor.atlases.map(({ id, name, ppu, width, height }) => ({ id, name, ppu, width, height })),
+    ...(editor.multiAtlas ? { multiAtlas: true } : {}),
     // Vertices scaled flat and the sides they came from, see Editor.scaleFlat().
     folds: [...mesh.folds].map(([i, fold]) => [i, { ...fold }]),
     // The skin: the nodes the vertices bend with, and how much (see skin.js).
@@ -190,11 +202,18 @@ export function projectFiles(editor) {
   return {
     'manifest.json': json({ format: FORMAT, version: VERSION, app: 'verTEX', saved: new Date().toISOString() }),
     'model.json': json(modelOf(editor)),
-    'view.json': json({ camera: { position: camera.position.toArray().map(round), target: orbit.target.toArray().map(round) } }),
+    'view.json': json({
+      camera: { position: camera.position.toArray().map(round), target: orbit.target.toArray().map(round) },
+      // How the timeline shows the scene: only its nodes, or all.
+      timeline: { nodesOnly: Boolean(editor.animationNodesOnly) },
+    }),
     'materials.json': json([]),
     'textures/': '',
   };
 }
+
+// An atlas' id, as it may be: a file's name in textures/.
+const ATLAS_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 // A version 2 model, as the editor wants it: vertices and pivot points in
 // world coordinates, `rotation` the entry's turn in the world.
@@ -240,9 +259,11 @@ function worldModel(model) {
   };
 }
 
-// The same with the picture of the atlas, which takes a moment to pack.
+// The same with the pictures of the atlases, which take a moment to pack.
 export async function projectFilesWithTextures(editor) {
-  return { ...projectFiles(editor), 'textures/atlas.png': await editor.atlas.png() };
+  const files = projectFiles(editor);
+  for (const atlas of editor.atlases) files[`textures/${atlas.id}.png`] = await atlas.png();
+  return files;
 }
 
 // Reads the entries of a project file back: { model, view, atlas }, checked - a
@@ -311,9 +332,18 @@ export function readProject(files) {
   }
   if (model.shaped !== undefined && !(Array.isArray(model.shaped) && model.shaped.every((i) => isIndex(i, model.faces.length)))) fail('грани с изменённой развёрткой');
   if (model.pins !== undefined && !(Array.isArray(model.pins) && model.pins.every((i) => isIndex(i, model.faces.length)))) fail('закреплённые грани');
-  if (model.ppu !== undefined && !(Number.isInteger(model.ppu) && model.ppu >= 1 && model.ppu <= 256)) fail('плотность пикселей');
   const size = (value) => Number.isInteger(value) && value >= 1 && value <= 4096;
-  if (model.atlas !== undefined && !(model.atlas && size(model.atlas.width) && size(model.atlas.height))) fail('размер атласа');
+  const atlasIds = new Set();
+  const soundAtlas = (atlas) => {
+    const sound = atlas && typeof atlas.id === 'string' && ATLAS_ID.test(atlas.id) && !atlasIds.has(atlas.id) &&
+      (atlas.name === undefined || typeof atlas.name === 'string') &&
+      Number.isInteger(atlas.ppu) && atlas.ppu >= 1 && atlas.ppu <= 256 && size(atlas.width) && size(atlas.height);
+    if (sound) atlasIds.add(atlas.id);
+    return sound;
+  };
+  // (one at least - but in a project with several, which begins with none)
+  if (model.multiAtlas !== undefined && typeof model.multiAtlas !== 'boolean') fail('атласы');
+  if (!(Array.isArray(model.atlases) && (model.atlases.length >= 1 || model.multiAtlas) && model.atlases.every(soundAtlas))) fail('атласы');
   if (model.animations !== undefined && !(Array.isArray(model.animations) && model.animations.every((clip) => soundAnimation(clip, ids)))) fail('анимации');
   const meshes = new Set(model.objects.filter((object) => object.kind !== 'node').map((object) => object.id));
   if (model.vertexObject.length !== count || !model.vertexObject.every((id) => meshes.has(id))) {
@@ -331,15 +361,24 @@ export function readProject(files) {
 
   let view = null;
   try {
-    const { camera } = parse('view.json');
+    const { camera, timeline } = parse('view.json');
     const point = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
-    if (point(camera?.position) && point(camera?.target)) view = { camera };
+    view = {
+      ...(point(camera?.position) && point(camera?.target) ? { camera } : {}),
+      ...(typeof timeline?.nodesOnly === 'boolean' ? { timeline: { nodesOnly: timeline.nodesOnly } } : {}),
+    };
   } catch {
-    // The view is a convenience: without it the camera stays where it is.
+    // The view is a convenience: without it the camera stays where it is, and the timeline shows all.
   }
-  // The picture of the atlas, as the bytes of its file; a project from before there was one has none.
-  const atlas = files['textures/atlas.png'] instanceof Uint8Array && files['textures/atlas.png'].length ? files['textures/atlas.png'] : null;
-  return { model: local ? worldModel(model) : model, view, atlas };
+  // The pictures of the atlases, as the bytes of their files, by id (one of
+  // a project from before there were several is textures/atlas.png; a
+  // project from before there was one has none).
+  const pictures = new Map();
+  for (const { id } of model.atlases) {
+    const bytes = files[`textures/${id}.png`] ?? (manifest.version < 5 && id === ATLAS ? files['textures/atlas.png'] : undefined);
+    if (bytes instanceof Uint8Array && bytes.length) pictures.set(id, bytes);
+  }
+  return { model: local ? worldModel(model) : model, view, pictures };
 }
 
 // The project the editor is working on: its file, whether it has unsaved
@@ -464,7 +503,7 @@ export class Project extends EventTarget {
         return;
       }
       if (!this.editor.loadProject(project)) return;
-      if (project.atlas) await this.editor.atlas.load(project.atlas);
+      for (const [id, bytes] of project.pictures) await this.editor.atlasById(id)?.load(bytes);
       this.path = result.path;
       this.savedState = this.editor.history.id;
       this.report();

@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { START_SIZE, PADDING } from './unwrap.js';
+import { ATLAS } from './mesh.js';
 
-// The texture atlas: the one picture a project's model is painted with.
+// A texture atlas: a picture the model's objects are painted with - those
+// whose `atlas` is its id. A project has one, or several (see Editor.atlases),
+// each with its own pixels per unit of length (`ppu`) and its own layout of
+// the faces on it (see unwrap()).
 //
 // It is pixel art: shown with its pixels as they are (no smoothing, no
 // smaller copies for the distance), and see-through pixels are holes. The
@@ -160,8 +164,11 @@ function tint(rect) {
 }
 
 export class Atlas extends EventTarget {
-  constructor() {
+  constructor({ id = ATLAS, name = id, ppu = 16 } = {}) {
     super();
+    this.id = id;
+    this.name = name; // (Latin, as the scene's names: it names the picture's file)
+    this.ppu = ppu;
     this.canvas = document.createElement('canvas');
     this.context = this.canvas.getContext('2d', { willReadFrequently: true });
     this.texture = new THREE.CanvasTexture(this.canvas);

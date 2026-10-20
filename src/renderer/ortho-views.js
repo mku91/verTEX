@@ -5,18 +5,20 @@ import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
 
 // The surface as these views (and the window of views, see views-window.js)
-// draw it: lit, painted with the atlas where it is on it, the rest in their
-// objects' colours - materials of their own for the editor's surface
-// materials (`source`), made again only when those or the atlas change
-// (`cache`: what this gave the last time).
+// draw it: lit, painted with the atlases where it is on them, the rest in
+// their objects' colours - materials of their own for the editor's surface
+// materials (`source`), made again only when those or the atlases' pictures
+// change (`cache`: what this gave the last time).
 export function paintedMaterials(editor, source, cache = null) {
-  const { view, atlas } = editor;
-  if (cache && cache.key[0] === source && cache.key[1] === atlas.texture) return cache;
+  const textures = editor.atlases.map((atlas) => atlas.texture);
+  if (cache && cache.key[0] === source && cache.key[1].length === textures.length && cache.key[1].every((texture, i) => texture === textures[i])) return cache;
   for (const material of cache?.all ?? []) material.dispose();
   const made = (material) => {
-    const painted = (material === view.surface || material === view.surfaceFront) && Boolean(atlas.texture);
+    // (an atlas' material says which, see MeshView.syncParts())
+    const texture = editor.atlasById(material.userData.atlas)?.texture ?? null;
+    const painted = Boolean(texture);
     return new THREE.MeshLambertMaterial({
-      map: painted ? atlas.texture : null,
+      map: texture,
       vertexColors: !painted, // (the rest in their objects' colours)
       side: material.side,
       alphaTest: painted ? 0.5 : 0,
@@ -24,7 +26,7 @@ export function paintedMaterials(editor, source, cache = null) {
     });
   };
   const list = Array.isArray(source) ? source.map(made) : made(source);
-  return { key: [source, atlas.texture], list, all: Array.isArray(list) ? list : [list] };
+  return { key: [source, textures], list, all: Array.isArray(list) ? list : [list] };
 }
 
 const FIT_MARGIN = 0.25; // share of a view kept free on each side when framing

@@ -205,6 +205,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     const joints = [];
     const weights = [];
     const textured = Boolean(object.atlas) && Boolean(picture);
+    const size = model.atlases.find((atlas) => atlas.id === object.atlas) ?? model.atlases[0]; // (its atlas')
     const positions = [];
     const normals = [];
     const places = [];
@@ -217,7 +218,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
         positions.push(...model.vertices[vertex]);
         normals.push(normal.x, normal.y, normal.z);
         const place = model.uvs?.[i]?.[corner];
-        places.push(place ? place[0] / model.atlas.width : 0, place ? place[1] / model.atlas.height : 0);
+        places.push(place ? place[0] / size.width : 0, place ? place[1] / size.height : 0);
         if (skin) {
           // (the four greatest; four at most there are, see EditableMesh.setWeights())
           const entries = [...skin.weights.get(vertex)].sort((a, b) => b[1] - a[1]).slice(0, 4);

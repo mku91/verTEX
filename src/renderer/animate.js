@@ -456,7 +456,7 @@ export class AnimationMode {
     let clips = editor.animations;
     let clip = timeline.current();
     if (!clip) {
-      clip = { name: freeName('idle', new Set(clips.map((other) => other.name))), fps: 12, length: 24, loop: true, tracks: [] };
+      clip = { name: freeName('idle', new Set(clips.map((other) => other.name))), fps: 12, length: 24, loop: false, tracks: [] };
       clips = [...clips, clip];
       timeline.clip = clip.name;
     }

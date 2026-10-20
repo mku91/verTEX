@@ -25,7 +25,7 @@ export class PipetteLoupe {
     }, { capture: true, passive: true });
     editor.addEventListener('change', () => this.update());
     editor.addEventListener('painthover', () => this.update());
-    editor.atlas.addEventListener('change', () => this.update());
+    editor.addEventListener('atlaschange', () => this.update());
   }
 
   update() {
@@ -38,7 +38,7 @@ export class PipetteLoupe {
     const x = pointer.x + GAP + SIZE > window.innerWidth ? pointer.x - GAP - SIZE : pointer.x + GAP;
     const y = pointer.y + GAP + SIZE > window.innerHeight ? pointer.y - GAP - SIZE : pointer.y + GAP;
     element.style.transform = `translate(${x}px, ${y}px)`;
-    show(this.under, editor.atlas.colorAt(pixel.x, pixel.y));
+    show(this.under, (editor.atlasById(pixel.atlas) ?? editor.atlas).colorAt(pixel.x, pixel.y));
     show(this.current, editor.paintColor);
   }
 }

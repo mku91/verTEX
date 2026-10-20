@@ -24,12 +24,13 @@ export class AtlasLink extends EventTarget {
     if (!this.api) return;
 
     // Our own changes go to the file; the painter's came from it.
-    editor.atlas.addEventListener('change', (event) => this.queue(!event.detail.byUser, true));
-    editor.atlas.addEventListener('layout', () => this.queue(false, true));
+    // (the first atlas' - one picture a project, for now)
+    editor.addEventListener('atlaschange', ({ detail }) => detail.atlas === editor.atlases[0] && this.queue(!detail.byUser, true));
+    editor.addEventListener('atlaslayout', ({ detail }) => detail.atlas === editor.atlases[0] && this.queue(false, true));
     project.addEventListener('change', () => this.follow());
     // Unsaved changes thrown away: the picture painted and not saved goes with them.
     project.addEventListener('discard', () => this.api.discard());
-    this.api.onChanged((bytes) => editor.paintAtlas(bytes));
+    this.api.onChanged((bytes) => editor.atlases[0] && editor.paintAtlas(bytes, editor.atlases[0].id));
     this.follow();
   }
 
@@ -48,7 +49,7 @@ export class AtlasLink extends EventTarget {
     if (this.linked !== path) return; // it has moved on meanwhile
     this.path = link.path;
     // A picture saved after the project was is the painter's latest work.
-    if (link.bytes && link.newer) await this.editor.paintAtlas(link.bytes);
+    if (link.bytes && link.newer && this.editor.atlases[0]) await this.editor.paintAtlas(link.bytes, this.editor.atlases[0].id);
     // What is in the editor is what the files say from here on.
     this.queue(true, true);
     this.dispatchEvent(new Event('change'));
@@ -67,7 +68,8 @@ export class AtlasLink extends EventTarget {
     const pending = this.pending;
     this.pending = null;
     if (!pending || !this.path) return;
-    const { atlas } = this.editor;
+    const [atlas] = this.editor.atlases;
+    if (!atlas) return;
     await this.api.write({
       png: pending.picture ? await atlas.png() : null,
       guide: pending.guide ? await atlas.png(atlas.guide()) : null,

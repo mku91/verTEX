@@ -1355,36 +1355,31 @@ export class MeshView {
     // colour and back sides in another. They share the surface's geometry and
     // depth offset, so they cover it exactly; the surface itself stays as it is
     // for picking.
-    // The surface is drawn in parts (see rebuild()): the faces that are on
-    // the atlas with `surface`, which the textured look gives the atlas'
-    // picture, and the rest with a material that never has one - each of the
-    // two seen from both sides, or, for the objects that are `oneSided`, from
-    // the front only (`surfaceFront`, `plainFront`). The material's side is
-    // what picking rays keep to as well: a face not drawn is not hit.
+    // The surface is drawn in parts (see syncParts(), buildSurface()): the
+    // faces that are on an atlas, each atlas' with a material of its own -
+    // `surface`, which the textured look gives that atlas' picture - and the
+    // rest with a material that never has one (`plain`); each seen from both
+    // sides, or, for the objects that are `oneSided`, from the front only
+    // (`surfaceFront`, `plainFront`). The material's side is what picking
+    // rays keep to as well: a face not drawn is not hit.
     // (The same goes for the depth the dots are tested against.)
     // In the light preview it casts shadows, on itself as well (see Viewport.setLit()).
     this.solid.castShadow = this.solid.receiveShadow = true;
-    this.surface = this.solid.material;
-    this.plain = this.surface.clone();
-    this.surfaceFront = this.surface.clone();
+    this.base = this.solid.material; // (what the parts' materials are made from)
+    this.plain = this.base.clone();
     this.plainFront = this.plain.clone();
-    this.surfaceFront.side = this.plainFront.side = THREE.FrontSide;
-    this.solid.material = [this.surface, this.plain, this.surfaceFront, this.plainFront];
-    const depthFront = this.depthMesh.material.clone();
-    depthFront.side = THREE.FrontSide;
-    this.depthMesh.material = [this.depthMesh.material, this.depthMesh.material, depthFront, depthFront];
-    // What the brush is shown by on the surface, see keepInsideFaces().
-    this.texels = {
-      atlasSize: { value: new THREE.Vector2(1, 1) },
-      texelGrid: { value: 0 },
-      texelHover: { value: new THREE.Vector2(-1, -1) },
-      lineMask: { value: lineMask(1, 1) },
-      lineColor: { value: new THREE.Vector4() },
-    };
-    keepInsideFaces(this.surface, this.texels);
-    keepInsideFaces(this.surfaceFront, this.texels);
+    this.plainFront.side = THREE.FrontSide;
+    this.depthBoth = this.depthMesh.material;
+    this.depthFront = this.depthBoth.clone();
+    this.depthFront.side = THREE.FrontSide;
+    // Every atlas' materials, by its id: { surface, surfaceFront, texels } -
+    // `texels` what the brush is shown by on its faces, see keepInsideFaces().
+    this.atlasLooks = new Map();
+    this.atlases = []; // (the editor's: see Editor.atlases)
+    this.texelGridOn = false;
+    this.syncParts();
     const tint = (side) => {
-      const mesh = new THREE.Mesh(this.solid.geometry, this.surface.clone());
+      const mesh = new THREE.Mesh(this.solid.geometry, this.base.clone());
       mesh.material.side = side;
       mesh.renderOrder = 0.5;
       mesh.visible = false;
@@ -1510,6 +1505,66 @@ export class MeshView {
     this.updateColors(new Set(), -1);
   }
 
+  // The parts the surface is drawn in, for the atlases there are now (see
+  // the constructor): `parts` [{ atlas (an id, or null: not on one), front
+  // (seen from the front only) }], a part's number its material's in the
+  // surface's list - those seen from both sides first, each atlas' and then
+  // the plain one's, then those seen from the front only, so. (With one
+  // atlas: on it, off it, on it from the front, off it from the front.)
+  // Returns whether they are other parts now.
+  syncParts() {
+    const ids = this.atlases.map((atlas) => atlas.id);
+    const key = ids.join('|');
+    if (key === this.partsKey) return false;
+    this.partsKey = key;
+    for (const [id, look] of this.atlasLooks) {
+      if (ids.includes(id)) continue;
+      look.surface.dispose();
+      look.surfaceFront.dispose();
+      look.texels.lineMask.value.dispose();
+      this.atlasLooks.delete(id);
+    }
+    for (const id of ids) {
+      if (this.atlasLooks.has(id)) continue;
+      const texels = {
+        atlasSize: { value: new THREE.Vector2(1, 1) },
+        texelGrid: { value: this.texelGridOn ? 1 : 0 },
+        texelHover: { value: new THREE.Vector2(-1, -1) },
+        lineMask: { value: lineMask(1, 1) },
+        lineColor: { value: new THREE.Vector4() },
+      };
+      const surface = this.base.clone();
+      const surfaceFront = this.base.clone();
+      surfaceFront.side = THREE.FrontSide;
+      for (const material of [surface, surfaceFront]) {
+        material.userData.atlas = id;
+        keepInsideFaces(material, texels);
+      }
+      this.atlasLooks.set(id, { surface, surfaceFront, texels });
+    }
+    this.parts = [false, true].flatMap((front) => [...ids, null].map((atlas) => ({ atlas, front })));
+    this.solid.material = this.parts.map(({ atlas, front }) => {
+      const look = this.atlasLooks.get(atlas);
+      return look ? (front ? look.surfaceFront : look.surface) : front ? this.plainFront : this.plain;
+    });
+    this.depthMesh.material = this.parts.map(({ front }) => (front ? this.depthFront : this.depthBoth));
+    this.lookShown = null; // (the new materials are to be given the look, see applyLook())
+    return true;
+  }
+
+  // The atlas a face is drawn with: its object's, if it has a place there; null if none.
+  atlasOfFace(face) {
+    if (!face.uv) return null;
+    this.atlasOfObject ??= new Map();
+    const id = this.atlasOfObject.get(this.mesh.vertexObject[face[0]]);
+    return id !== undefined && this.atlasLooks.has(id) ? id : null;
+  }
+
+  // The atlas (an Atlas) with the id.
+  atlasById(id) {
+    return this.atlases.find((atlas) => atlas.id === id);
+  }
+
   // The surface's triangles, in the parts they are drawn in (see below) -
   // a part of rebuild(), and done again on its own when a face comes onto
   // the atlas or goes off it while nothing else changes (see updateUVs()).
@@ -1520,40 +1575,43 @@ export class MeshView {
     this.triangleIndices = [];
     this.triangleFaces = []; // triangle index -> face index, for picking
     this.faceTriangles = faces.map((_, faceIndex) => this.mesh.triangulate(faceIndex));
-    // In four parts, each drawn with its own material (see the constructor):
-    // the faces that are on the atlas, then those that are not - of the
-    // objects seen from both sides, then of those seen from the front only.
-    // A part's material is its number: on the atlas or not is the lower bit.
+    // In parts, each drawn with its own material (see syncParts()): the
+    // faces on each atlas, then those on none - of the objects seen from
+    // both sides, then of those seen from the front only.
     const { objects, vertexObject } = this.mesh;
+    this.syncParts();
+    if (this.tints) this.applyLook(); // (new materials, or new pictures: the look given to them)
+    this.atlasOfObject = new Map(objects.filter((object) => object.atlas).map((object) => [object.id, object.atlas]));
     const oneSided = new Set(objects.filter((object) => object.oneSided).map((object) => object.id));
-    const parts = [];
-    for (const front of [false, true]) {
-      for (const onAtlas of [true, false]) {
-        const start = this.triangleFaces.length;
-        this.faceTriangles.forEach((triangles, faceIndex) => {
-          const face = faces[faceIndex];
-          if (hidden.has(face[0]) || Boolean(face.uv) !== onAtlas || oneSided.has(vertexObject[face[0]]) !== front) return;
-          for (const triangle of triangles) {
-            this.triangleIndices.push(...triangle);
-            this.triangleFaces.push(faceIndex);
-          }
-        });
-        parts.push([start, this.triangleFaces.length - start]);
-      }
+    const ranges = [];
+    for (const { atlas, front } of this.parts) {
+      const start = this.triangleFaces.length;
+      this.faceTriangles.forEach((triangles, faceIndex) => {
+        const face = faces[faceIndex];
+        if (hidden.has(face[0]) || this.atlasOfFace(face) !== atlas || oneSided.has(vertexObject[face[0]]) !== front) return;
+        for (const triangle of triangles) {
+          this.triangleIndices.push(...triangle);
+          this.triangleFaces.push(faceIndex);
+        }
+      });
+      ranges.push([start, this.triangleFaces.length - start]);
     }
     this.setPositions(this.solid, this.triangleIndices.length);
     this.solid.geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(this.triangleIndices.length * 3), 3));
-    parts.forEach(([start, count], material) => this.solid.geometry.addGroup(start * 3, count * 3, material));
+    ranges.forEach(([start, count], material) => this.solid.geometry.addGroup(start * 3, count * 3, material));
     for (const tint of Object.values(this.tints)) tint.geometry = this.solid.geometry;
-    // Which faces were on the atlas when the parts were made, see partsStale().
-    this.partsOnAtlas = faces.map((face) => Boolean(face.uv));
+    // Which atlas each face was drawn with when the parts were made, see partsStale().
+    this.partsOnAtlas = faces.map((face) => this.atlasOfFace(face));
   }
 
-  // Whether some face has come onto the atlas, or gone off it, since the
-  // surface's parts were made - or faces have come or gone.
+  // Whether some face has come onto an atlas, gone off it or to another,
+  // since the surface's parts were made - or faces have come or gone, or
+  // atlases.
   partsStale() {
-    const { faces } = this.mesh;
-    return !this.partsOnAtlas || this.partsOnAtlas.length !== faces.length || faces.some((face, i) => Boolean(face.uv) !== this.partsOnAtlas[i]);
+    const { faces, objects } = this.mesh;
+    if (!this.partsOnAtlas || this.partsOnAtlas.length !== faces.length || this.atlases.map((atlas) => atlas.id).join('|') !== this.partsKey) return true;
+    this.atlasOfObject = new Map(objects.filter((object) => object.atlas).map((object) => [object.id, object.atlas]));
+    return faces.some((face, i) => this.atlasOfFace(face) !== this.partsOnAtlas[i]);
   }
 
   // Paints the surface: every object in its marker colour (see
@@ -1561,14 +1619,14 @@ export class MeshView {
   // after an object's colour changes; rebuild() and applyTheme() do it themselves.
   updateSurfaceColors() {
     const { faces, objects, vertexObject } = this.mesh;
-    const painted = Boolean(this.surface.map); // the atlas is the colour then - of the faces that are on it
+    const painted = Boolean(this.painted); // the atlas is the colour then - of the faces that are on one (see applyLook())
     const tints = new Map(objects.map((object) => {
       const hex = markerColor(object.color);
       return [object.id, hex ? new THREE.Color(hex) : COLOR_SURFACE];
     }));
     const colors = new Float32Array(this.triangleFaces.length * 9);
     this.triangleFaces.forEach((face, triangle) => {
-      const tint = painted && faces[face].uv ? COLOR_WHITE : tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
+      const tint = painted && this.atlasOfFace(faces[face]) !== null ? COLOR_WHITE : tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
       for (let corner = 0; corner < 3; corner++) tint.toArray(colors, triangle * 9 + corner * 3);
     });
     this.solid.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -1590,9 +1648,15 @@ export class MeshView {
       this.updatePositions();
     }
     const { faces } = this.mesh;
-    const width = this.atlas?.width || 1;
-    const height = this.atlas?.height || 1;
-    this.texels.atlasSize.value.set(width, height);
+    // (each face's places as fractions of its own atlas)
+    const sizes = new Map();
+    for (const [id, look] of this.atlasLooks) {
+      const atlas = this.atlasById(id);
+      look.texels.atlasSize.value.set(atlas?.width || 1, atlas?.height || 1);
+      sizes.set(id, look.texels.atlasSize.value);
+    }
+    let width = 1;
+    let height = 1;
     const uvs = new Float32Array(this.triangleFaces.length * 6);
     const boxes = new Float32Array(this.triangleFaces.length * 12);
     // From `low` to `high` (pixels), half a pixel in; of less than a pixel, its middle.
@@ -1612,7 +1676,9 @@ export class MeshView {
     };
     this.triangleFaces.forEach((faceIndex, triangle) => {
       const face = faces[faceIndex];
-      if (!face.uv) return;
+      const size = sizes.get(this.atlasOfFace(face));
+      if (!size) return;
+      ({ x: width, y: height } = size);
       for (let corner = 0; corner < 3; corner++) {
         boxes.set(bounds(face), triangle * 12 + corner * 4);
         const place = face.uv[face.indexOf(this.triangleIndices[triangle * 3 + corner])];
@@ -1721,14 +1787,19 @@ export class MeshView {
     this.applyLook();
   }
 
-  // The lines between the atlas' pixels, drawn on the painted surface or not.
+  // The lines between the atlases' pixels, drawn on the painted surface or not.
   setTexelGrid(on) {
-    this.texels.texelGrid.value = on ? 1 : 0;
+    this.texelGridOn = on;
+    for (const { texels } of this.atlasLooks.values()) texels.texelGrid.value = on ? 1 : 0;
   }
 
-  // The pixel of the atlas ({ x, y }) that is framed on the surface; null for none.
-  setTexelHover(pixel) {
-    this.texels.texelHover.value.set(pixel ? pixel.x : -1, pixel ? pixel.y : -1);
+  // The pixel ({ x, y }) of the atlas `atlas` (an id; the first, if none is
+  // given) that is framed on the surface; null for none.
+  setTexelHover(pixel, atlas = this.atlases[0]?.id) {
+    for (const [id, { texels }] of this.atlasLooks) {
+      const shown = pixel && id === atlas;
+      texels.texelHover.value.set(shown ? pixel.x : -1, shown ? pixel.y : -1);
+    }
   }
 
   applyLook() {
@@ -1739,11 +1810,12 @@ export class MeshView {
     // does not take part in the depth. Its front sides only: the back ones
     // would lie over them and make a muddle of both. The faces that are not
     // on the atlas are not drawn, as in the wireframe.
-    const xray = wireframe && this.focus && this.shading === 'textured' && Boolean(this.atlas);
+    const xray = wireframe && this.focus && this.shading === 'textured' && this.atlases.length > 0;
     this.xray = xray;
     this.solid.visible = !wireframe || xray; // still hit by picking rays when not drawn
-    for (const material of [this.surface, this.surfaceFront]) {
-      const side = material === this.surface && !xray ? THREE.DoubleSide : THREE.FrontSide;
+    const surfaces = [...this.atlasLooks.values()].flatMap(({ surface, surfaceFront }) => [[surface, false], [surfaceFront, true]]);
+    for (const [material, front] of surfaces) {
+      const side = !front && !xray ? THREE.DoubleSide : THREE.FrontSide;
       if (material.transparent === xray && material.side === side) continue;
       material.transparent = xray;
       material.opacity = xray ? XRAY_OPACITY : 1;
@@ -1754,14 +1826,20 @@ export class MeshView {
     this.plain.visible = this.plainFront.visible = !xray;
     this.wire.visible = !this.bare;
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
-    const map = (this.bare || this.shading === 'textured') && this.atlas ? this.atlas.texture : null;
-    if (this.surface.map !== map) {
-      for (const material of [this.surface, this.surfaceFront]) {
+    const painted = Boolean(this.bare || this.shading === 'textured');
+    const shown = `${painted}|${this.atlases.map((atlas) => `${atlas.id}:${atlas.texture.id}`).join(',')}`;
+    if (this.lookShown !== shown) {
+      this.lookShown = shown;
+      for (const [material] of surfaces) {
+        const map = painted ? this.atlasById(material.userData.atlas)?.texture ?? null : null;
         material.map = map;
         material.alphaTest = map ? 0.5 : 0;
         material.needsUpdate = true;
       }
-      this.updateSurfaceColors(); // the marker colours give way to the picture
+      if (this.painted !== painted) {
+        this.painted = painted;
+        this.updateSurfaceColors(); // the marker colours give way to the picture
+      }
     }
     for (const tint of Object.values(this.tints)) {
       tint.visible = !this.bare && !this.focus && this.shading === 'orientation';
@@ -1770,10 +1848,20 @@ export class MeshView {
   }
 
   // Shows the line the brush would paint, on the surface, pixel by pixel:
-  // `pixels` ({ x, y } each, of the atlas) in `color` ([r, g, b, a], 0..255).
-  // An empty list hides it. The atlas itself is not touched.
-  setPaintLine(pixels, color) {
-    const { atlasSize, lineMask: mask, lineColor } = this.texels;
+  // `pixels` ({ x, y } each, of the atlas `atlas` - an id, the first if none
+  // is given) in `color` ([r, g, b, a], 0..255). An empty list hides it. The
+  // atlas itself is not touched.
+  setPaintLine(pixels, color, atlas = this.atlases[0]?.id) {
+    for (const [id, { texels }] of this.atlasLooks) {
+      if (id === atlas || !texels.lineShown) continue;
+      texels.lineMask.value.image.data.fill(0);
+      texels.lineMask.value.needsUpdate = true;
+      texels.lineShown = false;
+    }
+    const look = this.atlasLooks.get(atlas);
+    if (!look) return;
+    look.texels.lineShown = pixels.length > 0;
+    const { atlasSize, lineMask: mask, lineColor } = look.texels;
     const [width, height] = [atlasSize.value.x, atlasSize.value.y];
     let texture = mask.value;
     if (texture.image.width !== width || texture.image.height !== height) {

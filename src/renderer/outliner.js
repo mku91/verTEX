@@ -3,6 +3,25 @@ import { MARKER_COLORS, markerColor } from './marker-colors.js';
 import { BODY_COLORS, SHAPE_ICONS, shapeLabel } from './collisions.js';
 import { latinOnly } from './names.js';
 import { boundByNode, selectBound } from './skin.js';
+import { confirmIt } from './ask-dialog.js';
+
+// Objects joined - asked first when they are on different atlases: the
+// joined one is on the first one's, and the others' faces are laid out on
+// it anew, what was painted for them left behind.
+async function joinAsked(editor, joined) {
+  const { objects } = editor.mesh;
+  const atlases = new Set(joined.map((index) => objects[index]?.atlas).filter(Boolean));
+  if (atlases.size > 1) {
+    const first = editor.atlasById(joined.map((index) => objects[index]?.atlas).find(Boolean));
+    const sure = await confirmIt(
+      'Объединить объекты с разных атласов?',
+      `Объединённый будет на атласе «${first?.name}»; грани с других атласов разложатся на нём заново, нарисованное для них останется на прежних. Действие можно отменить.`,
+      'Объединить',
+    );
+    if (!sure) return;
+  }
+  editor.joinObjects(joined);
+}
 
 const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
 const NODE_ICON = '<i class="fa-solid fa-circle-nodes"></i>'; // a node (the kind 'node')
@@ -414,7 +433,7 @@ export class Outliner {
         item(island.hiddenOwn ? 'Показать' : 'Скрыть', () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
         item('Дублировать', () => editor.duplicateObjects(whole)),
-        item('Объединить в один объект', () => editor.joinObjects(joined), island.kind !== 'node' && joined.length > 1),
+        item('Объединить в один объект', () => joinAsked(editor, joined), island.kind !== 'node' && joined.length > 1),
         item('Сбросить опорную точку', () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item('Удалить', () => editor.deleteObject(index)),
       );

@@ -411,8 +411,13 @@ export class Project extends EventTarget {
     return this.editor.history.id !== this.savedState;
   }
 
+  // Tells of the project's file, name or unsaved changes being other than
+  // they were ('change'). Its file too, not its name only: a file named as a
+  // project without one is ("Unnamed") is another project all the same -
+  // what follows the file (the atlases' working files, see atlas-link.js)
+  // must hear of it as it is opened, not at the next change made.
   report() {
-    const shown = `${this.name}|${this.dirty}`;
+    const shown = `${this.path ?? ''}|${this.name}|${this.dirty}`;
     if (shown === this.shown) return;
     this.shown = shown;
     this.api?.setState({ dirty: this.dirty });

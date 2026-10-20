@@ -312,4 +312,28 @@ export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = 
   return { width: room.width, height: room.height, charts: [...kept, ...charts], fresh, moved: [], changed };
 }
 
+// Rectangles ([{ w, h }]) packed on an atlas as an unwrap lays charts out
+// (see Room): each at the first free place row by row, a rim round it -
+// the tallest first, then the widest, which packs them tightest - on one of
+// START_SIZE, doubled along its shorter side until they fit. Returns { width,
+// height, spots: [{ x, y }] in the rectangles' order }, or null if they do
+// not fit in the largest atlas there may be.
+export function packRects(rects) {
+  const order = rects.map((_, k) => k).sort((a, b) => rects[b].h - rects[a].h || rects[b].w - rects[a].w || a - b);
+  let room = new Room(START_SIZE, START_SIZE);
+  const spots = new Array(rects.length);
+  for (const k of order) {
+    const { w, h } = rects[k];
+    let spot = room.find(w, h);
+    while (!spot) {
+      if (Math.max(room.width, room.height) >= MAX_SIZE) return null;
+      room = room.grow();
+      spot = room.find(w, h);
+    }
+    room.take(spot.x, spot.y, w, h);
+    spots[k] = spot;
+  }
+  return { width: room.width, height: room.height, spots };
+}
+
 export { START_SIZE };

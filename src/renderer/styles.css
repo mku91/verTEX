@@ -5412,3 +5412,71 @@ option::checkmark {
   height: 14px;
   flex: none;
 }
+
+/* The UV editor's buttons that work on the faces' places alone, the picture
+   left as it is: as the others, with a small "UV" in their corner. */
+.uv-bar button.uv-only {
+  position: relative;
+}
+
+.uv-bar button.uv-only::after {
+  content: 'UV';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  color: var(--accent);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.uv-bar button.uv-only:disabled::after {
+  opacity: 0.4;
+}
+
+/* The UV editor's menu of the faces under the pointer: a tick each. */
+.uv-face-menu {
+  min-width: 190px;
+  gap: 2px;
+}
+
+.uv-face-menu-title {
+  padding: 4px 10px 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.uv-face-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.uv-face-menu-row:hover {
+  background: var(--hover);
+}
+
+.uv-face-menu-row input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.uv-face-menu-buttons {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.uv-face-menu-buttons button {
+  flex: 1;
+  text-align: center;
+}

@@ -7,7 +7,7 @@ import { Mirror, mirrorPoint } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
-import { unwrap, START_SIZE, PADDING } from './unwrap.js';
+import { unwrap, START_SIZE, PADDING, packRects } from './unwrap.js';
 import { theme, onThemeChange, themeGizmo } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
@@ -1308,9 +1308,10 @@ export class Editor extends EventTarget {
     }
     if (move) {
       this.chartPreview = new Map();
+      const wanted = new Set(faces);
       for (const chart of this.chartsOfFaces(faces)) {
         const [dx, dy] = this.chartShift(chart, move[0], move[1]);
-        for (const index of chart.faces) {
+        for (const index of chart.faces.filter((face) => wanted.has(face))) { // (those moved: see placeCharts())
           const face = this.mesh.faces[index];
           this.chartPreview.set(face, face.uv);
           face.uv = face.uv.map(([x, y]) => [x + dx, y + dy]);
@@ -1391,9 +1392,12 @@ export class Editor extends EventTarget {
   }
 
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
-  // given faces. Their pictures go with them (see Atlas.carry()) - except onto
-  // the picture of a chart that stays, which they take: this is how several
-  // faces come to share one picture.
+  // given faces. Turned or turned over, their pictures go with them (see
+  // Atlas.carry()). Moved, they do not: a chart comes to its new place
+  // empty - see-through, nothing filled in (a window may be meant to be so)
+  // - and what was painted for it stays where it was, until the atlas is
+  // cleaned; put onto another chart's picture, it takes that picture: this
+  // is how several faces come to share one.
   //   { move: [dx, dy] }   by whole pixels (kept on the atlas)
   //   { turn: 1 | -1 }     a quarter turn, clockwise or back, about the chart's top left room
   //   { flip: 'h' | 'v' }  turned over, left to right or top to bottom
@@ -1405,9 +1409,12 @@ export class Editor extends EventTarget {
     const before = this.snapshot();
     let changed = false;
     const moves = []; // the pictures to carry: { pixels, place }
+    const wanted = new Set(faces);
     for (const chart of charts) {
       const { rect } = chart;
-      const members = chart.faces.map((index) => this.mesh.faces[index]);
+      // Moved: the faces given only - one taken off the others it lay on, sharing their
+      // picture, leaves them where they are. Turned, turned over: the whole chart, with its picture.
+      const members = chart.faces.filter((index) => !how.move || wanted.has(index)).map((index) => this.mesh.faces[index]);
       let place;
       if (how.move) {
         const [dx, dy] = this.chartShift(chart, how.move[0], how.move[1]);
@@ -1429,14 +1436,51 @@ export class Editor extends EventTarget {
         face.uv = face.uv.map((point) => place(point).map((value) => +value.toFixed(6)));
         face.pin = true;
       }
-      moves.push({ pixels: chart.pixels, place });
+      if (!how.move) moves.push({ pixels: chart.pixels, place });
       changed = true;
     }
     if (!changed) return false;
     this.history.push(before);
     const keep = new Set();
     for (const chart of this.atlas.charts) if (!charts.includes(chart)) for (const key of chart.pixels) keep.add(key);
-    this.atlas.carry(moves, keep);
+    if (moves.length) this.atlas.carry(moves, keep);
+    this.layOut();
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
+    return true;
+  }
+
+  // Turns the given faces' places on the atlas over (`flip` 'h' or 'v') or
+  // a quarter turn (`turn` 1 clockwise, -1 back), within the rooms of the
+  // charts they are in, the picture staying as it is: those faces show it
+  // mirrored, or turned (as Blender's UV > Mirror, the image left alone).
+  // Those faces only: others of their chart - faces that share its picture,
+  // lying on one another - stay as they are. A quarter turn only for a
+  // square room: another would reach out onto other pixels. One undo step.
+  // Returns whether anything changed.
+  mapCharts(faces, { flip = null, turn = 0 } = {}) {
+    const wanted = new Set(faces);
+    const charts = this.chartsOfFaces(faces).filter((chart) => !turn || chart.rect.w === chart.rect.h);
+    if (charts.length === 0 || (!flip && !turn) || this.busy()) return false;
+    const before = this.snapshot();
+    for (const { rect, faces: all } of charts) {
+      const members = all.filter((index) => wanted.has(index));
+      const place = flip === 'h'
+        ? ([x, y]) => [rect.x + rect.w - (x - rect.x), y]
+        : flip === 'v'
+          ? ([x, y]) => [x, rect.y + rect.h - (y - rect.y)]
+          : turn > 0
+            ? ([x, y]) => [rect.x + rect.h - (y - rect.y), rect.y + (x - rect.x)]
+            : ([x, y]) => [rect.x + (y - rect.y), rect.y + rect.w - (x - rect.x)];
+      for (const index of members) {
+        const face = this.mesh.faces[index];
+        if (!face?.uv) continue;
+        face.uv = face.uv.map((point) => (point ? place(point).map((value) => +value.toFixed(6)) : point));
+        face.pin = true; // (placed by hand: the unwrap leaves it)
+      }
+    }
+    this.history.push(before);
     this.layOut();
     this.view.updateUVs();
     this.viewport.requestRender();
@@ -1491,6 +1535,79 @@ export class Editor extends EventTarget {
   // was painted for faces that are gone, have moved or have shrunk, left
   // behind by charts put elsewhere, or painted off the charts. One undo
   // step. Returns whether anything was rubbed out.
+  // Packs the charts of the atlas worked on as tightly as they go, as an
+  // unwrap lays them out (see packRects()) - each with what is painted on it,
+  // its faces' places going along - the atlas made as small as they fit in.
+  // Charts that lie on one another - faces that share a picture (see
+  // placeCharts()), or overlap a little - go as one: the rectangle round them
+  // is packed and their picture moved once, so that it is not made twice.
+  // What is painted off the charts is not kept. Not turned: a picture
+  // turned on its side is another picture. One undo step. Returns whether
+  // anything moved, or the size changed.
+  packAtlas() {
+    const { atlas } = this;
+    if (atlas === this.noAtlas || this.busy()) return false;
+    this.commitFloating();
+    const charts = atlas.charts.filter((chart) => chart.rect?.w > 0 && chart.rect?.h > 0);
+    if (charts.length === 0) return false;
+    // The charts in groups: those whose rectangles overlap, one group.
+    const root = charts.map((_, k) => k);
+    const find = (k) => (root[k] === k ? k : (root[k] = find(root[k])));
+    const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    for (let i = 0; i < charts.length; i++) {
+      for (let j = i + 1; j < charts.length; j++) if (overlap(charts[i].rect, charts[j].rect)) root[find(i)] = find(j);
+    }
+    const groups = new Map(); // root -> { charts, rect (round them all) }
+    charts.forEach((chart, k) => {
+      const key = find(k);
+      const { x, y, w, h } = chart.rect;
+      const group = groups.get(key);
+      if (!group) {
+        groups.set(key, { charts: [chart], rect: { x, y, w, h } });
+        return;
+      }
+      group.charts.push(chart);
+      const right = Math.max(group.rect.x + group.rect.w, x + w);
+      const bottom = Math.max(group.rect.y + group.rect.h, y + h);
+      group.rect.x = Math.min(group.rect.x, x);
+      group.rect.y = Math.min(group.rect.y, y);
+      group.rect.w = right - group.rect.x;
+      group.rect.h = bottom - group.rect.y;
+    });
+    const list = [...groups.values()];
+    const packed = packRects(list.map(({ rect }) => rect));
+    if (!packed) return false;
+    const moved = list.some(({ rect }, k) => rect.x !== packed.spots[k].x || rect.y !== packed.spots[k].y);
+    if (!moved && packed.width === atlas.width && packed.height === atlas.height) return false;
+    const before = this.snapshot();
+    // Every group's picture lifted, then put down where it goes, on an atlas of the new size.
+    const lifted = list.map(({ rect }) => atlas.region(rect));
+    atlas.canvas.width = packed.width;
+    atlas.canvas.height = packed.height;
+    atlas.texture.dispose(); // (a texture of another size is another texture)
+    const shifted = new Set(); // (a face is moved once, however many charts name it)
+    list.forEach((group, k) => {
+      const { x, y } = packed.spots[k];
+      atlas.context.putImageData(lifted[k], x, y);
+      const dx = x - group.rect.x;
+      const dy = y - group.rect.y;
+      for (const chart of group.charts) {
+        for (const index of chart.faces) {
+          const face = this.mesh.faces[index];
+          if (!face?.uv || shifted.has(index)) continue;
+          shifted.add(index);
+          face.uv = face.uv.map((place) => (place ? [place[0] + dx, place[1] + dy] : place));
+        }
+      }
+    });
+    atlas.charts = [];
+    atlas.touch();
+    this.history.push(before);
+    this.rebuildView(); // the charts as they lie now (see layOut()), the faces' places as fractions of the new size
+    this.emitChange();
+    return true;
+  }
+
   cleanAtlas() {
     if (this.busy()) return false;
     const before = this.snapshot();
@@ -5122,7 +5239,7 @@ export class Editor extends EventTarget {
     const { vertices } = this.mesh;
     const visible = vertices.filter((_, i) => !this.topology.hiddenVertices.has(i));
     const points = this.selection.size ? [...this.selection].map((i) => vertices[i]) : visible;
-    this.viewport.frame(points);
+    this.viewport.frame(points, true); // (flown to, not jumped: see Viewport.frame())
   }
 
   // Moves the selection so that its center lands on `value` along `axis` ('x' | 'y' | 'z').

@@ -35,6 +35,21 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
 const GRID_FROM = 8; // px per pixel from which the pixel grid is drawn
 const CLICK = 4; // px of pointer travel that is still a click
+// Whether a point is inside a polygon ([[x, y]], even-odd), and a polygon's area (signed).
+function insidePolygon(polygon, x, y) {
+  let within = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [ax, ay] = polygon[i];
+    const [bx, by] = polygon[j];
+    if ((ay > y) !== (by > y) && x < ((bx - ax) * (y - ay)) / (by - ay) + ax) within = !within;
+  }
+  return within;
+}
+function areaOf(polygon) {
+  let area = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) area += (polygon[j][0] - polygon[i][0]) * (polygon[j][1] + polygon[i][1]);
+  return area / 2;
+}
 const HANDLE_REACH = 7; // px from a corner handle of what floats that still takes it
 const SNAP = 3; // atlas px within which a dragged chart jumps onto another's room
 const MARKER = 4.5; // px, the radius of a corner's marker
@@ -129,11 +144,17 @@ export class UVEditor {
     const pixels = this.editor.tool === 'marquee' && Boolean(this.editor.marquee); // the turns are for the pixels picked then
     const none = atlas === this.editor.noAtlas; // (a project with several, none made yet)
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove', 'shape', 'regenerate', 'clean', 'paste', 'retro'].includes(button.dataset.uv)) button.disabled = charts.length === 0 && !pixels;
+      if (!['fit', 'add', 'remove', 'shape', 'regenerate', 'clean', 'paste', 'retro', 'pack'].includes(button.dataset.uv) && !button.dataset.uv.startsWith('map-')) button.disabled = charts.length === 0 && !pixels;
       if (none && button.dataset.uv !== 'remove') button.disabled = true;
     }
+    // The faces' places turned or mirrored: charts picked (pixels are not
+    // places); a quarter turn, square ones only (see Editor.mapCharts()).
+    const square = charts.length > 0 && charts.every((chart) => chart.rect.w === chart.rect.h);
+    for (const name of ['map-flip-h', 'map-flip-v']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || charts.length === 0;
+    for (const name of ['map-turn-left', 'map-turn-right']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || !square;
     // Those that ask nothing of what is picked: on with any atlas there is (back on, once there is one).
     for (const name of ['paste', 'fit', 'shape', 'clean', 'retro']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none;
+    this.container.querySelector('[data-uv="pack"]').disabled = none || this.editor.atlas.charts.length === 0;
     // Regenerate: the picked charts, or with none picked the whole atlas - if there is anything on it.
     this.container.querySelector('[data-uv="regenerate"]').disabled = this.editor.atlas.charts.length === 0;
     const lock = this.container.querySelector('[data-uv="shape"]');
@@ -197,13 +218,18 @@ export class UVEditor {
       else this.editor.setOnAtlas(this.editor.objectsInHand(), true);
     }
     else if (name === 'remove') this.editor.setOnAtlas(this.editor.objectsInHand(), false);
-    else if (['turn-left', 'turn-right', 'flip-h', 'flip-v'].includes(name)) {
+    else if (name.startsWith('map-')) {
+      // The faces' places alone, the picture left as it is (see Editor.mapCharts()).
+      const how = { 'map-turn-left': { turn: -1 }, 'map-turn-right': { turn: 1 }, 'map-flip-h': { flip: 'h' }, 'map-flip-v': { flip: 'v' } }[name];
+      this.editor.mapCharts(faces, how);
+    } else if (['turn-left', 'turn-right', 'flip-h', 'flip-v'].includes(name)) {
       const how = { 'turn-left': { turn: -1 }, 'turn-right': { turn: 1 }, 'flip-h': { flip: 'h' }, 'flip-v': { flip: 'v' } }[name];
       // With the marquee in hand it is the pixels picked that are turned, not the charts.
       if (this.editor.tool === 'marquee' && this.editor.marquee) this.editor.turnPixels(how);
       else this.editor.placeCharts(faces, how);
     }
     else if (name === 'clean') this.askClean();
+    else if (name === 'pack') this.editor.packAtlas();
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;
@@ -337,6 +363,44 @@ export class UVEditor {
       }
     }
     return best;
+  }
+
+  // The faces of the atlas worked on under a place on it ({ x, y }, its
+  // pixels), the one on top first: the smallest, and of those as large, the
+  // last in the model (drawn last).
+  facesAt({ x, y }) {
+    const { editor } = this;
+    const out = [];
+    editor.mesh.faces.forEach((face, index) => {
+      const polygon = face.uv;
+      if (!polygon?.every(Boolean) || editor.view.atlasOfFace(face) !== editor.atlas.id || !insidePolygon(polygon, x, y)) return;
+      out.push({ index, area: Math.abs(areaOf(polygon)) });
+    });
+    out.sort((a, b) => a.area - b.area || b.index - a.index);
+    return out.map(({ index }) => index);
+  }
+
+  // What a press on a chart picks, at a place on the atlas: its faces - but of
+  // those that lie on one another (sharing a picture: one's middle is inside
+  // another), only the one on top there. A chart of faces side by side is
+  // picked whole.
+  pickableFaces(chart, at) {
+    const { faces } = this.editor.mesh;
+    const middle = (polygon) => [polygon.reduce((sum, [px]) => sum + px, 0) / polygon.length, polygon.reduce((sum, [, py]) => sum + py, 0) / polygon.length];
+    const stacked = new Set();
+    for (const a of chart.faces) {
+      for (const b of chart.faces) {
+        if (a === b || !faces[a]?.uv || !faces[b]?.uv) continue;
+        const [mx, my] = middle(faces[b].uv);
+        if (insidePolygon(faces[a].uv, mx, my)) {
+          stacked.add(a);
+          stacked.add(b);
+        }
+      }
+    }
+    if (stacked.size === 0) return chart.faces;
+    const top = this.facesAt(at).find((index) => chart.faces.includes(index));
+    return chart.faces.filter((index) => !stacked.has(index) || index === top);
   }
 
   // The chart under a place on the atlas: the smallest of those whose faces
@@ -491,7 +555,7 @@ export class UVEditor {
     canvas.addEventListener('pointerdown', (event) => {
       canvas.setPointerCapture(event.pointerId);
       if (event.button !== 0) {
-        this.drag = { pan: true, x: event.clientX, y: event.clientY, origin: { ...this.origin } };
+        this.drag = { pan: true, button: event.button, x: event.clientX, y: event.clientY, origin: { ...this.origin } };
         return;
       }
       if (editor.atlas === editor.noAtlas) return; // (no atlas yet: nothing to pick or paint on)
@@ -584,7 +648,7 @@ export class UVEditor {
         if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) <= CLICK) return;
         // The drag starts: the chart under the pointer is picked, if it was not.
         drag.moved = true;
-        if (!this.pickedCharts().includes(drag.chart)) this.pick(drag.chart, drag.additive);
+        if (!this.pickedCharts().includes(drag.chart)) this.pick(drag.chart, drag.additive, this.toAtlas(drag.x, drag.y));
         drag.charts = this.pickedCharts();
         drag.lead = drag.charts.find((chart) => chart.faces.includes(drag.chart.faces[0])) ?? drag.charts[0];
       }
@@ -601,6 +665,11 @@ export class UVEditor {
       if (drag?.paint) editor.endPaint();
       // A click with the marquee, not a drag: nothing picked.
       if (drag?.select && !drag.moved && event.type === 'pointerup') editor.setMarquee(null);
+      // The right button let go where it was pressed (a click, not a drag of the view): the menu of the faces there.
+      if (drag?.pan && drag.button === 2 && event.type === 'pointerup' && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) <= CLICK && editor.tool !== 'marquee' && !editor.painting) {
+        this.openFaceMenu(event.clientX, event.clientY);
+        return;
+      }
       if (!drag || drag.pan || drag.paint || drag.select || drag.lift || drag.resize) return;
       if (drag.marker) {
         // Let go: the corner stays where it was dragged to, or, if the drag was broken off, goes back.
@@ -614,7 +683,7 @@ export class UVEditor {
       }
       if (!drag.moved) {
         // A click: picks the chart, or with nothing under the pointer picks nothing.
-        if (event.type === 'pointerup') this.pick(drag.chart, drag.additive);
+        if (event.type === 'pointerup') this.pick(drag.chart, drag.additive, this.toAtlas(drag.x, drag.y));
         return;
       }
       if (event.type === 'pointerup' && (drag.shift[0] || drag.shift[1])) editor.placeCharts(this.pickedFaces(), { move: drag.shift });
@@ -653,7 +722,9 @@ export class UVEditor {
   }
 
   // Picks a chart: its faces are selected in the scene, in face mode.
-  pick(chart, additive) {
+  // Picks a chart - pressed at `at` (a place on the atlas): of faces lying
+  // on one another, the one on top there (see pickableFaces()).
+  pick(chart, additive, at = null) {
     const { editor } = this;
     if (editor.operation) return;
     if (editor.mode !== 'face') editor.setMode('face');
@@ -661,18 +732,129 @@ export class UVEditor {
       if (!additive) editor.clearSelection();
       return;
     }
+    const faces = at ? this.pickableFaces(chart, at) : chart.faces;
     const picked = new Set(editor.picked);
-    const whole = chart.faces.every((face) => picked.has(face));
+    const whole = faces.every((face) => picked.has(face));
     if (!additive) {
-      chart.faces.forEach((face, k) => editor.select(face, k > 0));
+      faces.forEach((face, k) => editor.select(face, k > 0));
     } else if (whole) {
-      for (const face of chart.faces) editor.select(face, true); // Shift on a picked chart lets it go
+      for (const face of faces) editor.select(face, true); // Shift on a picked chart lets it go
     } else {
-      for (const face of chart.faces) if (!picked.has(face)) editor.select(face, true);
+      for (const face of faces) if (!picked.has(face)) editor.select(face, true);
     }
   }
 
+  // The menu of the faces under the pointer (a right click, not a drag):
+  // every one with a tick, picked or not - its object and its number - and
+  // all or none; what is ticked is picked at once. Faces picked elsewhere
+  // stay picked: the menu is of these alone.
+  openFaceMenu(clientX, clientY) {
+    const { editor } = this;
+    const faces = this.facesAt(this.toAtlas(clientX, clientY));
+    if (faces.length === 0 || editor.operation || editor.busy()) return;
+    if (editor.mode !== 'face') editor.setMode('face');
+    const menu = (this.faceMenu ??= (() => {
+      const element = document.createElement('div');
+      element.className = 'context-menu uv-face-menu';
+      element.hidden = true;
+      document.body.append(element);
+      window.addEventListener('pointerdown', (event) => {
+        if (!element.hidden && !element.contains(event.target)) element.hidden = true;
+      }, true);
+      window.addEventListener('keydown', (event) => {
+        if (element.hidden || event.key !== 'Escape') return;
+        event.stopImmediatePropagation();
+        element.hidden = true;
+      }, true);
+      return element;
+    })());
+    const { objects, vertexObject } = editor.mesh;
+    const nameOf = (index) => objects.find((object) => object.id === vertexObject[editor.mesh.faces[index][0]])?.name ?? '';
+    // (these faces as `wanted` says, the rest of what is picked as it is)
+    const setPicked = (wanted) => {
+      const kept = [...editor.picked].filter((face) => !faces.includes(face));
+      const next = [...kept, ...wanted];
+      editor.clearSelection();
+      next.forEach((face, k) => editor.select(face, k > 0));
+    };
+    const show = () => {
+      const title = document.createElement('div');
+      title.className = 'uv-face-menu-title';
+      title.textContent = `Грани здесь: ${faces.length}`;
+      const rows = faces.map((index) => {
+        const row = document.createElement('label');
+        row.className = 'uv-face-menu-row';
+        const tick = document.createElement('input');
+        tick.type = 'checkbox';
+        tick.checked = editor.picked.has(index);
+        tick.addEventListener('change', () => {
+          const wanted = new Set([...editor.picked].filter((face) => faces.includes(face)));
+          if (tick.checked) wanted.add(index);
+          else wanted.delete(index);
+          setPicked(wanted);
+          this.draw();
+        });
+        const text = document.createElement('span');
+        text.textContent = `${nameOf(index)} · грань ${index}`;
+        row.append(tick, text);
+        return row;
+      });
+      const all = document.createElement('button');
+      all.textContent = 'Все';
+      all.addEventListener('click', () => {
+        setPicked(faces);
+        show();
+      });
+      const nothing = document.createElement('button');
+      nothing.textContent = 'Ни одной';
+      nothing.addEventListener('click', () => {
+        setPicked([]);
+        show();
+      });
+      const buttons = document.createElement('div');
+      buttons.className = 'uv-face-menu-buttons';
+      buttons.append(all, nothing);
+      menu.replaceChildren(title, ...rows, buttons);
+    };
+    show();
+    menu.hidden = false;
+    const { width, height } = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(clientX, window.innerWidth - width - 6)}px`;
+    menu.style.top = `${Math.min(clientY, window.innerHeight - height - 6)}px`;
+  }
+
+  // The checkerboard where nothing is painted: a pattern of squares `tile`
+  // px a side, in the theme's colours - made again only when those change.
+  checkers(tile) {
+    const key = `${tile}|${theme.bg}|${theme.bgRaised}`;
+    if (this.checkersKey !== key) {
+      const piece = document.createElement('canvas');
+      piece.width = piece.height = tile * 2;
+      const g = piece.getContext('2d');
+      g.fillStyle = theme.bg;
+      g.fillRect(0, 0, tile * 2, tile * 2);
+      g.fillStyle = theme.bgRaised;
+      g.fillRect(tile, 0, tile, tile);
+      g.fillRect(0, tile, tile, tile);
+      this.checkersPattern = this.context.createPattern(piece, 'repeat');
+      this.checkersKey = key;
+    }
+    return this.checkersPattern;
+  }
+
+  // Draws the editor anew - at the next frame of the screen: asked for many
+  // times between two (a drag tells of every move, and of the picture as
+  // well), it is drawn once.
   draw() {
+    if (this.drawAsked) return;
+    this.drawAsked = true;
+    requestAnimationFrame(() => {
+      this.drawAsked = false;
+      this.drawNow();
+    });
+  }
+
+  drawNow() {
     if (!this.open) return;
     const { canvas, context, editor } = this;
     const ratio = window.devicePixelRatio || 1;
@@ -696,13 +878,12 @@ export class UVEditor {
     context.beginPath();
     context.rect(origin.x, origin.y, w, h);
     context.clip();
+    // (one fill of a pattern of two squares a side, laid from the atlas' corner - not a square at a time)
     const tile = Math.max(4, zoom * 2);
-    for (let y = 0; y * tile < h; y++) {
-      for (let x = 0; x * tile < w; x++) {
-        context.fillStyle = (x + y) % 2 ? theme.bgRaised : theme.bg;
-        context.fillRect(origin.x + x * tile, origin.y + y * tile, tile, tile);
-      }
-    }
+    context.fillStyle = this.checkers(tile);
+    context.translate(origin.x, origin.y);
+    context.fillRect(0, 0, w, h);
+    context.translate(-origin.x, -origin.y);
     context.imageSmoothingEnabled = false;
     if (this.isolating) {
       // F1 held: all of it faint, and the face under the pointer as it is - to the edges of its pixels.

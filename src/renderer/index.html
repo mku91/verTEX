@@ -320,6 +320,20 @@
         <button data-uv="flip-v" title="Отразить выбранные лоскуты сверху вниз">
           <i class="fa-solid fa-up-down"></i>
         </button>
+        <i class="uv-divider"></i>
+        <!-- The same, of the faces' places only: the picture stays, the faces show it mirrored or turned. -->
+        <button data-uv="map-turn-left" class="uv-only" title="Повернуть развёртку на 90° против часовой стрелки: картинка на атласе остаётся на месте, грань показывает её повёрнутой. Только для квадратных лоскутов">
+          <i class="fa-solid fa-rotate-left"></i>
+        </button>
+        <button data-uv="map-turn-right" class="uv-only" title="Повернуть развёртку на 90° по часовой стрелке: картинка на атласе остаётся на месте, грань показывает её повёрнутой. Только для квадратных лоскутов">
+          <i class="fa-solid fa-rotate-right"></i>
+        </button>
+        <button data-uv="map-flip-h" class="uv-only" title="Отразить развёртку слева направо: картинка на атласе остаётся на месте, грань показывает её зеркально">
+          <i class="fa-solid fa-left-right"></i>
+        </button>
+        <button data-uv="map-flip-v" class="uv-only" title="Отразить развёртку сверху вниз: картинка на атласе остаётся на месте, грань показывает её зеркально">
+          <i class="fa-solid fa-up-down"></i>
+        </button>
         <button data-uv="shape" title="Замок формы. Закрыт: лоскут можно только переставить, повернуть и отразить. Открыт: у выбранных лоскутов появляются маркеры в углах, и их можно двигать по пикселям — грань при этом растягивается">
           <i class="fa-solid fa-lock"></i>
         </button>
@@ -333,6 +347,9 @@
             <path d="M6.5 6.3 9.7 9.5 8.5 10.7 5.3 7.5Z" fill="currentColor"/>
             <path d="M6.9 9.1 1.4 10.2M6.9 9.1 2.3 12.3M6.9 9.1 3.7 13.7M6.9 9.1 5.8 14.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
+        </button>
+        <button data-uv="pack" title="Перепаковать: уложить все лоскуты атласа плотно, вместе с нарисованным на них, по тем же правилам, что и раскладка; лоскуты с общей картинкой (лежащие друг на друге) переносятся вместе, картинка не размножается; атлас уменьшится, если они поместятся в меньший. Лоскуты не поворачиваются; нарисованное мимо лоскутов не сохраняется. Можно отменить">
+          <i class="fa-solid fa-boxes-packing"></i>
         </button>
         <button data-uv="fit" title="Показать атлас целиком">
           <i class="fa-solid fa-expand"></i>

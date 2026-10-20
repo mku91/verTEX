@@ -5,7 +5,7 @@ import { theme, onThemeChange } from './theme.js';
 const GRID_SIZE = 16;
 
 // Scene, camera, navigation and on-demand rendering.
-const FLIGHT_TIME = 400; // ms, a smooth camera move
+const FLIGHT_TIME = 220; // ms, a smooth camera move
 // The "forward" marker: a flat arrowhead on the floor at the far end of the
 // +Z ground axis, where a model's front is meant to face. World units.
 const FORWARD_HEAD = 0.3; // long

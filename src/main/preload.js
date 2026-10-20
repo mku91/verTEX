@@ -24,15 +24,15 @@ contextBridge.exposeInMainWorld('vertex', {
     list: () => ipcRenderer.invoke('recent:list'),
     remove: (path) => ipcRenderer.invoke('recent:remove', { path }),
   },
-  // The atlas as working files on disk, see atlas-file.js.
+  // The atlases as working files on disk, see atlas-file.js - each by its id.
   atlas: {
-    link: (project) => ipcRenderer.invoke('atlas:link', { project }),
+    link: (project, atlases) => ipcRenderer.invoke('atlas:link', { project, atlases }),
     write: (files) => ipcRenderer.invoke('atlas:write', files),
     discard: () => ipcRenderer.invoke('atlas:discard'),
-    open: (program) => ipcRenderer.invoke('atlas:open', { program }),
+    open: (program, atlas) => ipcRenderer.invoke('atlas:open', { program, atlas }),
     pickProgram: () => ipcRenderer.invoke('atlas:pick-program'),
-    reveal: () => ipcRenderer.invoke('atlas:reveal'),
+    reveal: (atlas) => ipcRenderer.invoke('atlas:reveal', { atlas }),
     unlink: () => ipcRenderer.send('atlas:unlink'),
-    onChanged: (callback) => ipcRenderer.on('atlas:changed', (_event, bytes) => callback(bytes)),
+    onChanged: (callback) => ipcRenderer.on('atlas:changed', (_event, bytes, atlas) => callback(bytes, atlas ?? 'main')),
   },
 });

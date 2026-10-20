@@ -1263,14 +1263,20 @@ async function exportModel(format) {
     if (!options) return;
     const target = await api.pick(project.name, EXPORTS[format].kinds);
     if (!target) return;
-    const { atlas } = editor;
-    const places = editor.mesh.faces.filter((face) => face.uv?.every(Boolean)).map((face) => face.uv);
-    const picture = meshes.some((object) => object.atlas)
-      ? await atlas.png(options.extrude ? atlas.extruded(places, EXTRUDE_DEPTH) : atlas.canvas)
-      : null;
+    // Every atlas' picture that a visible object is on - its edges grown out
+    // past its faces' pieces (`extrude`), each atlas by its own faces.
+    const { mesh } = editor;
+    const pictures = new Map();
+    for (const id of new Set(meshes.map((object) => object.atlas).filter(Boolean))) {
+      const atlas = editor.atlasById(id);
+      if (!atlas) continue;
+      const owners = new Set(mesh.objects.filter((object) => object.atlas === id).map((object) => object.id));
+      const places = mesh.faces.filter((face) => face.uv?.every(Boolean) && owners.has(mesh.vertexObject[face[0]])).map((face) => face.uv);
+      pictures.set(id, await atlas.png(options.extrude ? atlas.extruded(places, EXTRUDE_DEPTH) : atlas.canvas));
+    }
     const sized = options.scale === 1 ? model : scaledModel(model, options.scale);
-    const triangles = (face) => editor.mesh.triangulate(face);
-    const result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, picture, binary: target.extension === 'glb' }));
+    const triangles = (face) => mesh.triangulate(face);
+    const result = await api.write(target.path, gltfOf(sized, { name: target.name, triangles, pictures, binary: target.extension === 'glb' }));
     if (result.error) await tell('Не удалось экспортировать модель', result.error);
   } finally {
     exporting = false;

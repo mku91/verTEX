@@ -7,8 +7,8 @@
 //                turn (a quaternion) relative to what it is in
 //   meshes       an object's triangles: `accessors` say where in the bytes
 //                its positions, normals, places on the atlas and indices are
-//   materials    one for what is on the atlas, one for what is not
-//   textures     the atlas' picture (a PNG among the bytes) and a sampler -
+//   materials    one for what is on each atlas, one for what is on none
+//   textures     each atlas' picture (a PNG among the bytes) and a sampler -
 //                how it is to be shown: pixel by pixel
 //
 // What goes in is the model as a project file has it (see modelOf() in
@@ -113,9 +113,12 @@ function base64(bytes) {
 // The model (see modelOf() in project.js) as the bytes of a glTF file.
 //   name       what the scene is called
 //   triangles  cuts a face (by its number) into triangles: triples of vertices
-//   picture    the atlas' picture as the bytes of a PNG, or null without one
+//   pictures   the atlases' pictures as the bytes of PNGs, Map atlas id ->
+//              bytes; an object on an atlas with none is not textured
+//              (`picture`: the one atlas' - the first's - instead)
 //   binary     a .glb file; or else a .gltf one, as text
-export function gltfOf(model, { name, triangles, picture, binary }) {
+export function gltfOf(model, { name, triangles, pictures = null, picture = null, binary }) {
+  pictures ??= new Map(picture && model.atlases?.[0] ? [[model.atlases[0].id, picture]] : []);
   const bytes = new Bytes();
   const gltf = {
     asset: { version: '2.0', generator: 'verTEX' },
@@ -138,23 +141,39 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
       ...more,
     }) - 1;
 
-  // The materials, made when first called for: with the atlas on it or
-  // without, seen from both sides or from the front only.
+  // The atlases' pictures as textures, made when first called for: the
+  // texture of the atlas with the id, by its number. (One sampler for all.)
+  const textures = new Map();
+  const several = (model.atlases?.length ?? 0) > 1 || Boolean(model.multiAtlas);
+  const atlasName = (id) => model.atlases?.find((atlas) => atlas.id === id)?.name ?? id;
+  const textureFor = (id) => {
+    if (!textures.has(id)) {
+      const bytes = pictures.get(id);
+      const label = several ? `${name}.${atlasName(id)}` : name;
+      gltf.samplers ??= [{ magFilter: NEAREST, minFilter: NEAREST, wrapS: CLAMP_TO_EDGE, wrapT: CLAMP_TO_EDGE }];
+      gltf.images ??= [];
+      gltf.textures ??= [];
+      const source = gltf.images.push({ name: label, mimeType: 'image/png', ...(binary ? { bufferView: view(bytes) } : { uri: `data:image/png;base64,${base64(bytes)}` }) }) - 1;
+      textures.set(id, gltf.textures.push({ name: label, sampler: 0, source }) - 1);
+    }
+    return textures.get(id);
+  };
+
+  // The materials, made when first called for: with an atlas' picture on it
+  // (`atlas`, its id) or with none (null), seen from both sides or from the
+  // front only. With one atlas they are called as they always were (the
+  // scene's name, .plain, .oneSided); with several, after their atlas too.
   const materials = new Map();
-  const materialFor = (textured, doubleSided) => {
-    const key = `${textured}/${doubleSided}`;
+  const materialFor = (atlas, doubleSided) => {
+    const key = `${atlas ?? ''}/${doubleSided}`;
     if (!materials.has(key)) {
+      const base = atlas === null ? `${name}.plain` : several ? `${name}.${atlasName(atlas)}` : name;
       const material = {
-        name: `${textured ? name : `${name}.plain`}${doubleSided ? '' : '.oneSided'}`,
+        name: `${base}${doubleSided ? '' : '.oneSided'}`,
         pbrMetallicRoughness: { metallicFactor: 0, roughnessFactor: 1 },
         doubleSided,
       };
-      if (textured && !gltf.textures) {
-        gltf.samplers = [{ magFilter: NEAREST, minFilter: NEAREST, wrapS: CLAMP_TO_EDGE, wrapT: CLAMP_TO_EDGE }];
-        gltf.images = [{ name, mimeType: 'image/png', ...(binary ? { bufferView: view(picture) } : { uri: `data:image/png;base64,${base64(picture)}` }) }];
-        gltf.textures = [{ name, sampler: 0, source: 0 }];
-      }
-      if (textured) material.pbrMetallicRoughness.baseColorTexture = { index: 0 };
+      if (atlas !== null) material.pbrMetallicRoughness.baseColorTexture = { index: textureFor(atlas) };
       materials.set(key, gltf.materials.push(material) - 1);
     }
     return materials.get(key);
@@ -204,8 +223,9 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
     const skin = skins.get(object.id);
     const joints = [];
     const weights = [];
-    const textured = Boolean(object.atlas) && Boolean(picture);
-    const size = model.atlases.find((atlas) => atlas.id === object.atlas) ?? model.atlases[0]; // (its atlas')
+    // On its atlas' picture, if that is given; its places fractions of that atlas.
+    const textured = Boolean(object.atlas) && pictures.has(object.atlas);
+    const size = model.atlases.find((atlas) => atlas.id === object.atlas) ?? { width: 1, height: 1 };
     const positions = [];
     const normals = [];
     const places = [];
@@ -247,7 +267,7 @@ export function gltfOf(model, { name, triangles, picture, binary }) {
           } : {}),
         },
         indices: accessor(count > 65535 ? new Uint32Array(indices) : new Uint16Array(indices), 'SCALAR', indices.length),
-        material: materialFor(textured, !object.oneSided),
+        material: materialFor(textured ? object.atlas : null, !object.oneSided),
       }],
     }) - 1;
   };

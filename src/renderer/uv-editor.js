@@ -169,6 +169,16 @@ export class UVEditor {
     this.draw();
   }
 
+  // Cleaning the atlas, asked first: what goes is not to be seen in it, and it is easily forgotten.
+  async askClean() {
+    const sure = await confirmIt(
+      `Очистить атлас «${this.editor.atlas.name}»?`,
+      'Будет стёрто всё нарисованное, что не показывает ни одна грань: оставшееся от удалённых, перенесённых и уменьшенных граней и нарисованное мимо лоскутов. Действие можно отменить.',
+      'Очистить',
+    );
+    if (sure) this.editor.cleanAtlas();
+  }
+
   command(name) {
     const faces = this.pickedFaces();
     if (name === 'fit') {
@@ -193,7 +203,7 @@ export class UVEditor {
       if (this.editor.tool === 'marquee' && this.editor.marquee) this.editor.turnPixels(how);
       else this.editor.placeCharts(faces, how);
     }
-    else if (name === 'clean') this.editor.cleanAtlas();
+    else if (name === 'clean') this.askClean();
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;

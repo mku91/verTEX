@@ -326,8 +326,13 @@
         <button data-uv="regenerate" title="Перегенерировать выбранные лоскуты: закрепление и изменённая форма снимаются, лоскуты раскладываются заново и заливаются шаблоном; нарисованное на старом месте остаётся, пока не нажата «Очистить». Если ничего не выбрано — весь атлас. Можно отменить">
           <i class="fa-solid fa-arrows-rotate"></i>
         </button>
-        <button data-uv="clean" title="Очистить: стереть с атласа всё нарисованное, что не показывает ни одна грань — оставшееся от удалённых, перенесённых и уменьшенных граней и нарисованное мимо лоскутов. Можно отменить">
-          <i class="fa-solid fa-broom"></i>
+        <button data-uv="clean" title="Очистить: стереть с атласа всё нарисованное, что не показывает ни одна грань — оставшееся от удалённых, перенесённых и уменьшенных граней и нарисованное мимо лоскутов. Перед этим спрашивается; можно отменить">
+          <!-- (a broom of its own: the icon font's looks like a brush) -->
+          <svg class="icon-broom" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M14.4 1.6 8.4 7.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M6.5 6.3 9.7 9.5 8.5 10.7 5.3 7.5Z" fill="currentColor"/>
+            <path d="M6.9 9.1 1.4 10.2M6.9 9.1 2.3 12.3M6.9 9.1 3.7 13.7M6.9 9.1 5.8 14.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </button>
         <button data-uv="fit" title="Показать атлас целиком">
           <i class="fa-solid fa-expand"></i>

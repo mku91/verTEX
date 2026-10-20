@@ -5405,3 +5405,10 @@ option::checkmark {
 #retro-popup .retro-row.off {
   opacity: 0.45;
 }
+
+/* A drawn icon among the font's: as large, in the button's colour. */
+.icon-broom {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}

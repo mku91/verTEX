@@ -907,5 +907,9 @@
  "welcome.trash.message": "Delete the project «{name}»?",
  "welcome.trash.detail": "{path}\n\nThe file goes to the Recycle Bin, from where it can be restored.",
  "welcome.trash.confirm": "Delete",
- "welcome.trash.failed": "Couldn't delete the project"
+ "welcome.trash.failed": "Couldn't delete the project",
+ "uv.paste.large.title": "Enlarge the atlas to {size}?",
+ "uv.paste.large.detail": "The picture ({picture}) is larger than the atlas ({atlas}). If not, the picture is made smaller to fit.",
+ "ask.yes": "Yes",
+ "ask.no": "No"
 }

@@ -2582,8 +2582,8 @@ export class Editor extends EventTarget {
   // Ctrl+Z. All that is done to a piece between its lifting and its putting
   // down is one undo step.
   //   - A pasted picture floats too, where it was copied from; one from the
-  //     system's clipboard (pasteImage()) at the top left, the atlas grown
-  //     for it if it is larger.
+  //     system's clipboard (pasteImage()) at the top left - if it is larger
+  //     than the atlas, the atlas grown for it or it made smaller to fit.
   //   - What floats may be made larger or smaller (resizeFloating()), pixel
   //     by pixel - nearest, as pixel art wants - from what was lifted or
   //     pasted, however often: it is never made from its own resized self.
@@ -2732,26 +2732,38 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // The size the atlas worked on would grow to for a picture `image` ({ width,
+  // height }) to fit: a side doubled at a time (as an unwrap grows it, see
+  // unwrap.js), up to 4096. Its own size if the picture fits already.
+  grownAtlasFor(image) {
+    let { width, height } = this.atlas;
+    while (width < image.width && width < 4096) width *= 2;
+    while (height < image.height && height < 4096) height *= 2;
+    return { width, height };
+  }
+
   // Pastes a picture (an ImageData - from the system's clipboard, say): it
   // floats at the top left of the atlas worked on, to be moved, resized and
-  // put down - the atlas grown first, doubling a side at a time (as an
-  // unwrap grows it, see unwrap.js) up to 4096, if the picture is larger.
-  // All one undo step with its putting down. Returns whether it was pasted.
-  pasteImage(image) {
+  // put down. A picture larger than the atlas: with `grow` the atlas is grown
+  // first (see grownAtlasFor()); what does not fit even so - or all of it,
+  // without `grow` - is made smaller to fit, its proportions kept (resized
+  // later, it is from the picture as it was). All one undo step with its
+  // putting down. Returns whether it was pasted.
+  pasteImage(image, grow = true) {
     if (!image?.width || !image?.height || this.atlas === this.noAtlas) return false;
     this.commitFloating();
     if (this.busy()) return false;
     if (this.tool !== 'marquee') this.setTool('marquee'); // (the tool what floats is moved and resized with - taken first: another tool puts it down)
     const before = this.snapshot();
-    let { width, height } = this.atlas;
-    while (width < image.width && width < 4096) width *= 2;
-    while (height < image.height && height < 4096) height *= 2;
+    const { width, height } = grow ? this.grownAtlasFor(image) : this.atlas;
     if (width !== this.atlas.width || height !== this.atlas.height) {
       this.atlas.resize(width, height);
       this.atlas.touch();
     }
+    const scale = Math.min(1, width / image.width, height / image.height);
+    const shown = scale < 1 ? scaledImage(image, Math.max(1, Math.floor(image.width * scale)), Math.max(1, Math.floor(image.height * scale))) : image;
     const original = this.atlas.taken();
-    this.floating = { before, original, base: original, image, source: image, x: 0, y: 0, changed: true };
+    this.floating = { before, original, base: original, image: shown, source: image, x: 0, y: 0, changed: true };
     this.showFloating();
     this.view.updateUVs(); // (the atlas may be larger: the faces' places are fractions of it)
     this.emitChange();

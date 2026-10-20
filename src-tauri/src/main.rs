@@ -75,6 +75,10 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         .menu(menu::build(app, &language)?)
         .additional_browser_args(&browser_args())
         .initialization_script(language.script())
+        // The page reads pictures from the clipboard (pasted into the UV
+        // editor): allowed without asking, as the browser would ask a site.
+        // Only that - what else a page may ask for is asked about as before.
+        .enable_clipboard_access()
         // The window is called as its page is: the project's name.
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);

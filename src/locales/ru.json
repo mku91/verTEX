@@ -943,5 +943,9 @@
  "welcome.trash.message": "Удалить проект «{name}»?",
  "welcome.trash.detail": "{path}\n\nФайл отправится в Корзину, оттуда его можно восстановить.",
  "welcome.trash.confirm": "Удалить",
- "welcome.trash.failed": "Не удалось удалить проект"
+ "welcome.trash.failed": "Не удалось удалить проект",
+ "uv.paste.large.title": "Увеличить атлас до {size}?",
+ "uv.paste.large.detail": "Картинка ({picture}) больше атласа ({atlas}). Если нет — картинка будет уменьшена, чтобы поместиться.",
+ "ask.yes": "Да",
+ "ask.no": "Нет"
 }

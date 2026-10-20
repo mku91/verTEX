@@ -1,6 +1,6 @@
 import { theme, onThemeChange } from './theme.js';
 import { facePixels } from './atlas.js';
-import { confirmIt } from './ask-dialog.js';
+import { ask, confirmIt } from './ask-dialog.js';
 import { t } from './i18n.js';
 
 // The UV editor: the atlas, flat, with the faces drawn on it.
@@ -446,7 +446,27 @@ export class UVEditor {
     const context = canvas.getContext('2d');
     context.drawImage(bitmap, 0, 0);
     bitmap.close();
-    return this.editor.pasteImage(context.getImageData(0, 0, canvas.width, canvas.height));
+    // A picture larger than the atlas: the atlas grown to take it, or the
+    // picture made smaller to fit - as the user says. (An atlas that cannot
+    // grow any more is not asked about: the picture is made smaller.)
+    const { atlas } = this.editor;
+    const grown = this.editor.grownAtlasFor(canvas);
+    let grow = false;
+    if (grown.width !== atlas.width || grown.height !== atlas.height) {
+      const answer = await ask({
+        title: t('uv.paste.large.title', { size: `${grown.width} × ${grown.height}` }),
+        detail: t('uv.paste.large.detail', { picture: `${canvas.width} × ${canvas.height}`, atlas: `${atlas.width} × ${atlas.height}` }),
+        buttons: [
+          { label: t('ask.cancel'), value: null, aside: true, tone: 'lose' }, // nothing is pasted (Esc too)
+          { label: t('ask.no'), value: 'fit' },
+          { label: t('ask.yes'), value: 'grow', primary: true },
+        ],
+        cancel: null,
+      });
+      if (!answer) return false;
+      grow = answer === 'grow';
+    }
+    return this.editor.pasteImage(context.getImageData(0, 0, canvas.width, canvas.height), grow);
   }
 
   // The corner handle of what floats under the pointer (screen place), as

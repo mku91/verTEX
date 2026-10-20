@@ -1899,6 +1899,7 @@ body {
   gap: 6px;
   align-self: flex-start;
   height: 24px;
+  margin-top: 4px; /* set off from the rows above */
 }
 
 /* An object's atlas, in a project with several. */
@@ -4347,13 +4348,14 @@ input.refused {
   margin-right: auto;
 }
 
-/* What a button does to the work, in its colour: kept green, lost red. */
+/* What a button does to the work, in its colour: kept green, lost red - the
+   theme's own (its axes'). */
 .ask-dialog .form-buttons button[data-tone="keep"] {
-  --tone: #50fa7b;
+  --tone: var(--axis-y);
 }
 
 .ask-dialog .form-buttons button[data-tone="lose"] {
-  --tone: #ff5555;
+  --tone: var(--axis-x);
 }
 
 .ask-dialog .form-buttons button[data-tone] {

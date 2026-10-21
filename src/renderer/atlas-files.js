@@ -223,6 +223,13 @@ export function atlasFiles({ invoke, listen, word }) {
         return { error: message(error) };
       }
     },
+    // Asks for a picture file -> its bytes, or null.
+    pickPicture: async () => {
+      const path = await invoke('ask_open', {
+        ask: { title: word('dialog.picture.title'), filters: [{ name: word('dialog.picture.filter'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] },
+      });
+      return path ? read(path) : null;
+    },
     // Asks for a program's file -> its path, or null.
     pickProgram: () => invoke('ask_open', {
       ask: {

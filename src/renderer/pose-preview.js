@@ -4,6 +4,7 @@ import { ModelPose, clipValues, posedMatrices } from './pose.js';
 import { rotationOf } from './frames.js';
 import { themeGizmo } from './theme.js';
 import { unwrap } from './animation.js';
+import { ringTurn } from './ring-turn.js';
 
 // A pose to try the skin by, in the model workspace (Blender's pose mode,
 // for a look): while it is on, the gizmo of the entry picked whole - a node,
@@ -30,6 +31,7 @@ export class PosePreview extends EventTarget {
     this.proxy = new THREE.Object3D();
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
+    ringTurn(this.gizmo); // a ring follows the pointer round (see ring-turn.js)
     this.gizmo.setSize(0.8);
     themeGizmo(this.gizmo, viewport);
     viewport.scene.add(this.gizmo.getHelper());

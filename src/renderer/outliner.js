@@ -74,6 +74,14 @@ const PRIMITIVES = {
       { id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 },
     ],
   },
+  capsule: {
+    title: t('outliner.primitive.capsule'),
+    fields: [
+      { id: 'segments', label: t('outliner.field.segments'), value: 8, min: 3, max: 48, whole: true },
+      { id: 'size', label: t('outliner.field.diameter'), value: 1, min: 0.01, max: 100 },
+      { id: 'height', label: t('outliner.field.height'), value: 2, min: 0.01, max: 100 },
+    ],
+  },
 };
 
 // The scene tree: objects and nodes by name, a node's contents indented under it.

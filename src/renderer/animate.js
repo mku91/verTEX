@@ -10,6 +10,8 @@ import { rotationOf } from './frames.js';
 import { scrubbable } from './scrub.js';
 import { freeName } from './names.js';
 import { t } from './i18n.js';
+import { ROTATION_STEP } from './snap-grid.js';
+import { ringTurn } from './ring-turn.js';
 
 // The animation mode at work (see animation.js, timeline.js): the model
 // shown in the pose of the frame looked at, and posed by hand.
@@ -30,7 +32,6 @@ import { t } from './i18n.js';
 
 const GIZMO_MODES = { select: 'translate', move: 'translate', rotate: 'rotate', scale: 'scale' };
 const PROPERTY_OF_MODE = { translate: 'position', rotate: 'rotation', scale: 'scale' };
-const DEGREE = Math.PI / 180;
 const round = (value) => +value.toFixed(5);
 
 export class AnimationMode {
@@ -48,6 +49,7 @@ export class AnimationMode {
     this.proxy = new THREE.Object3D();
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
+    ringTurn(this.gizmo); // a ring follows the pointer round (see ring-turn.js)
     this.gizmo.setSize(0.8);
     themeGizmo(this.gizmo, viewport);
     viewport.scene.add(this.gizmo.getHelper());
@@ -84,6 +86,10 @@ export class AnimationMode {
     editor.workspacePress.animation = () => (this.gizmo.object && this.gizmo.axis !== null ? 'gizmo' : false);
 
     editor.addEventListener('change', () => this.refresh());
+    // Shift held or let go: a turn by steps, or freely - on the way too.
+    editor.addEventListener('shift', () => {
+      if (this.on) this.applySnap();
+    });
     // Ctrl held or let go: the grid's step in force - for a drag on the way too.
     editor.addEventListener('finesnap', () => {
       if (!this.on) return;
@@ -218,12 +224,13 @@ export class AnimationMode {
   }
 
   // The gizmo on the grid, as the editor's is: a move by the step in force -
-  // the fine one with Ctrl held (Editor.setFineSnap()) - a turn by 15°; a
-  // scale its own way (see snapScale()).
+  // the fine one with Ctrl held (Editor.setFineSnap()) - a turn by 15° (with
+  // Shift held too, see Editor.setShiftHeld()); a scale its own way (see
+  // snapScale()).
   applySnap() {
     const { snapGrid } = this.editor;
     this.gizmo.setTranslationSnap(snapGrid.enabled ? snapGrid.activeStep : null);
-    this.gizmo.setRotationSnap(snapGrid.enabled ? 15 * DEGREE : null);
+    this.gizmo.setRotationSnap(snapGrid.enabled || this.editor.shiftHeld ? ROTATION_STEP : null);
     this.gizmo.setScaleSnap(null);
   }
 

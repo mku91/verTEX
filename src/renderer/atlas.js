@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { START_SIZE, PADDING } from './unwrap.js';
 import { ATLAS } from './mesh.js';
+import { canvasPNG } from './png.js';
 
 // A texture atlas: a picture the model's objects are painted with - those
 // whose `atlas` is its id. A project has one, or several (see Editor.atlases),
@@ -598,8 +599,15 @@ export class Atlas extends EventTarget {
 
   // The picture (or another canvas) as the bytes of a PNG file.
   async png(canvas = this.canvas) {
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-    return new Uint8Array(await blob.arrayBuffer());
+    return canvasPNG(canvas);
+  }
+
+  // Takes the picture `image` (an ImageData), at the top left; the rest of
+  // the atlas left clear. By the user's hand: see touch().
+  setPicture(image) {
+    this.context.clearRect(0, 0, this.width, this.height);
+    this.context.putImageData(image, 0, 0);
+    this.touch(true);
   }
 
   // Takes the picture from the bytes of an image file. One of another size

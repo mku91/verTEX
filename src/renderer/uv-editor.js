@@ -58,6 +58,21 @@ const MARKER_REACH = 8; // px within which a marker is taken
 const SHAPED = '#ffb86c'; // the outline of a chart whose shape was changed by hand
 const DIMMED = 0.15; // how much of the picture shows with F1 held, but for the face under the pointer
 
+// A picture file's pixels (a Blob of it) as an ImageData; null if it is none.
+async function imageOf(blob) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  } catch {
+    return null;
+  }
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const context = canvas.getContext('2d');
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return context.getImageData(0, 0, canvas.width, canvas.height);
+}
+
 export class UVEditor {
   constructor(container, editor) {
     this.container = container;
@@ -145,7 +160,7 @@ export class UVEditor {
     const pixels = this.editor.tool === 'marquee' && Boolean(this.editor.marquee); // the turns are for the pixels picked then
     const none = atlas === this.editor.noAtlas; // (a project with several, none made yet)
     for (const button of this.container.querySelectorAll('[data-uv]')) {
-      if (!['fit', 'add', 'remove', 'shape', 'regenerate', 'clean', 'paste', 'retro', 'pack'].includes(button.dataset.uv) && !button.dataset.uv.startsWith('map-')) button.disabled = charts.length === 0 && !pixels;
+      if (!['fit', 'add', 'remove', 'shape', 'regenerate', 'clean', 'load', 'paste', 'retro', 'pack'].includes(button.dataset.uv) && !button.dataset.uv.startsWith('map-')) button.disabled = charts.length === 0 && !pixels;
       if (none && button.dataset.uv !== 'remove') button.disabled = true;
     }
     // The faces' places turned or mirrored: charts picked (pixels are not
@@ -154,7 +169,7 @@ export class UVEditor {
     for (const name of ['map-flip-h', 'map-flip-v']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || charts.length === 0;
     for (const name of ['map-turn-left', 'map-turn-right']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || !square;
     // Those that ask nothing of what is picked: on with any atlas there is (back on, once there is one).
-    for (const name of ['paste', 'fit', 'shape', 'clean', 'retro']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none;
+    for (const name of ['load', 'paste', 'fit', 'shape', 'clean', 'retro']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none;
     this.container.querySelector('[data-uv="pack"]').disabled = none || this.editor.atlas.charts.length === 0;
     // Regenerate: the picked charts, or with none picked the whole atlas - if there is anything on it.
     this.container.querySelector('[data-uv="regenerate"]').disabled = this.editor.atlas.charts.length === 0;
@@ -213,6 +228,8 @@ export class UVEditor {
       this.update();
     } else if (name === 'paste') {
       this.pasteFromClipboard();
+    } else if (name === 'load') {
+      this.loadFromFile();
     } else if (name === 'retro') {
       this.onRetro?.(); // (the popup is the window's: see app.js)
     } else if (name === 'add') {
@@ -441,32 +458,45 @@ export class UVEditor {
       this.onNothingToPaste?.();
       return false;
     }
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext('2d');
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    // A picture larger than the atlas: the atlas grown to take it, or the
-    // picture made smaller to fit - as the user says. (An atlas that cannot
-    // grow any more is not asked about: the picture is made smaller.)
-    const { atlas } = this.editor;
-    const grown = this.editor.grownAtlasFor(canvas);
-    let grow = false;
-    if (grown.width !== atlas.width || grown.height !== atlas.height) {
-      const answer = await ask({
-        title: t('uv.paste.large.title', { size: `${grown.width} × ${grown.height}` }),
-        detail: t('uv.paste.large.detail', { picture: `${canvas.width} × ${canvas.height}`, atlas: `${atlas.width} × ${atlas.height}` }),
-        buttons: [
-          { label: t('ask.cancel'), value: null, aside: true, tone: 'lose' }, // nothing is pasted (Esc too)
-          { label: t('ask.no'), value: 'fit' },
-          { label: t('ask.yes'), value: 'grow', primary: true },
-        ],
-        cancel: null,
-      });
-      if (!answer) return false;
-      grow = answer === 'grow';
+    const image = await imageOf(blob);
+    if (!image) return false;
+    const grow = await this.askGrow(image);
+    return grow !== null && this.editor.pasteImage(image, grow);
+  }
+
+  // A picture from a file, for the atlas worked on: it replaces the atlas'
+  // picture (see Editor.loadAtlasPicture()). Nothing if no file is chosen,
+  // or it is no picture.
+  async loadFromFile() {
+    const bytes = await window.vertex?.atlas.pickPicture?.();
+    if (!bytes) return false;
+    const image = await imageOf(new Blob([bytes]));
+    if (!image) {
+      this.onNoPicture?.();
+      return false;
     }
-    return this.editor.pasteImage(context.getImageData(0, 0, canvas.width, canvas.height), grow);
+    const grow = await this.askGrow(image);
+    return grow !== null && this.editor.loadAtlasPicture(image, grow);
+  }
+
+  // A picture larger than the atlas: the atlas grown to take it (true), or
+  // the picture made smaller to fit (false) - as the user says; null if they
+  // think better of it. (An atlas that cannot grow any more is not asked
+  // about: the picture is made smaller. One that fits: nothing to ask.)
+  askGrow(image) {
+    const { atlas } = this.editor;
+    const grown = this.editor.grownAtlasFor(image);
+    if (grown.width === atlas.width && grown.height === atlas.height) return Promise.resolve(false);
+    return ask({
+      title: t('uv.paste.large.title', { size: `${grown.width} × ${grown.height}` }),
+      detail: t('uv.paste.large.detail', { picture: `${image.width} × ${image.height}`, atlas: `${atlas.width} × ${atlas.height}` }),
+      buttons: [
+        { label: t('ask.cancel'), value: null, aside: true, tone: 'lose' }, // nothing is done (Esc too)
+        { label: t('ask.no'), value: false },
+        { label: t('ask.yes'), value: true, primary: true },
+      ],
+      cancel: null,
+    });
   }
 
   // The corner handle of what floats under the pointer (screen place), as

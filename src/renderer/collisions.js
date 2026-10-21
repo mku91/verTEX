@@ -7,6 +7,8 @@ import { scrubbable } from './scrub.js';
 import { latinName, freeName } from './names.js';
 import { themeGizmo } from './theme.js';
 import { t } from './i18n.js';
+import { ROTATION_STEP } from './snap-grid.js';
+import { ringTurn } from './ring-turn.js';
 
 // The collision mode: the objects' collision shapes (see collision-fit.js)
 // shown over the model, picked, added - by hand or fitted by themselves -
@@ -45,7 +47,6 @@ const named = (shapes, shape) => ({ ...shape, name: freeShapeName(shapes, SHAPE_
 const GIZMO_MODES = { select: 'translate', move: 'translate', rotate: 'rotate', scale: 'scale' };
 const ROUND_SEGMENTS = 32;
 const MIN_SIZE = 0.001;
-const DEGREE = Math.PI / 180;
 const round = (value) => +value.toFixed(5);
 
 // The outline of a shape, in its own frame: line segments as pairs of points.
@@ -153,6 +154,7 @@ export class CollisionMode {
     this.proxy = new THREE.Object3D();
     viewport.scene.add(this.proxy);
     this.gizmo = new TransformControls(viewport.camera, viewport.renderer.domElement);
+    ringTurn(this.gizmo); // a ring follows the pointer round (see ring-turn.js)
     this.gizmo.setSize(0.8);
     themeGizmo(this.gizmo, viewport);
     this.gizmo.setSpace('local');
@@ -178,6 +180,8 @@ export class CollisionMode {
 
     editor.workspacePress.collisions = (event) => this.press(event);
     editor.addEventListener('change', () => this.refresh());
+    // Shift held or let go: a turn by steps, or freely - on the way too.
+    editor.addEventListener('shift', () => this.gizmo.setRotationSnap(editor.snapGrid.enabled || editor.shiftHeld ? ROTATION_STEP : null));
     button.addEventListener('click', () => editor.setCollisions(!editor.collisions));
     button.addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
     this.buildPanel();
@@ -316,7 +320,7 @@ export class CollisionMode {
     this.gizmo.setMode(mode);
     const snap = this.editor.snapGrid.enabled;
     this.gizmo.setTranslationSnap(snap ? this.editor.snapGrid.step : null);
-    this.gizmo.setRotationSnap(snap ? 15 * DEGREE : null);
+    this.gizmo.setRotationSnap(snap || this.editor.shiftHeld ? ROTATION_STEP : null); // (Shift held: see Editor.setShiftHeld())
     this.gizmo.setScaleSnap(null);
     if (this.gizmo.object !== this.proxy) this.gizmo.attach(this.proxy);
   }

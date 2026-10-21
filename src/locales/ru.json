@@ -947,5 +947,11 @@
  "uv.paste.large.title": "Увеличить атлас до {size}?",
  "uv.paste.large.detail": "Картинка ({picture}) больше атласа ({atlas}). Если нет — картинка будет уменьшена, чтобы поместиться.",
  "ask.yes": "Да",
- "ask.no": "Нет"
+ "ask.no": "Нет",
+ "uv.load.title": "Загрузить атлас из файла: картинка (PNG, JPG, WebP, GIF, BMP) заменяет картинку атласа, от левого верхнего угла. Если она больше атласа — спросит, увеличить ли атлас. Можно отменить",
+ "uv.load.not-picture": "Файл — не картинка",
+ "dialog.picture.title": "Загрузить атлас из файла",
+ "dialog.picture.filter": "Картинки",
+ "add-menu.capsule": "Капсула…",
+ "outliner.primitive.capsule": "Капсула"
 }

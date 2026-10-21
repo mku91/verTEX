@@ -57,6 +57,10 @@ const DOT_FRAGMENT_SHADER = /* glsl */ `
 // A lattice point gets a dot for every axis the drag can move along, in that
 // axis' colour (the gizmo's), and the dots add up like lights: along one axis
 // they are of its colour, in a plane of the mix of two, in a free drag of all three.
+// A turn by a gizmo on the grid, or with Shift held, goes by this step (from
+// where it began).
+export const ROTATION_STEP = Math.PI / 12; // 15°
+
 export class SnapGrid {
   constructor(viewport) {
     this.viewport = viewport;

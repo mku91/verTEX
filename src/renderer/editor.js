@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
-import { SnapGrid } from './snap-grid.js';
+import { SnapGrid, ROTATION_STEP } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror, mirrorPoint } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
@@ -16,6 +16,7 @@ import { latinName, freeName } from './names.js';
 import { retrofy, paletteOf } from './retro.js';
 import { weightsOf } from './skin.js';
 import { t } from './i18n.js';
+import { ringTurn } from './ring-turn.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
 // What the editor works on, see Editor.setWorkspace(); and the tools there.
@@ -115,7 +116,8 @@ const CUT_FLOW = 40; // px per second
 
 // Adds a primitive to a mesh as a new object and returns its vertices, or
 // undefined for an unknown kind. Options: cone { sides, size }, cylinder
-// { sides, size, height }, sphere { segments, size }.
+// { sides, size, height }, sphere { segments, size }, capsule { segments,
+// size, height }.
 // A line's pixels made pixel-perfect, as pixel art wants a line: where the
 // way took a corner (two pixels for one diagonal step), the corner goes.
 // `path` is [{ pixel, ... }], in order.
@@ -137,6 +139,7 @@ function buildPrimitive(mesh, kind, options) {
     case 'cone': return mesh.addCone(options.sides, options.size);
     case 'cylinder': return mesh.addCylinder(options.sides, options.size, options.height);
     case 'sphere': return mesh.addSphere(options.segments, options.size);
+    case 'capsule': return mesh.addCapsule(options.segments, options.size, options.height);
     default: return undefined;
   }
 }
@@ -320,6 +323,7 @@ export class Editor extends EventTarget {
     this.pivotRings = [];
 
     this.gizmo = new TransformControls(camera, renderer.domElement);
+    ringTurn(this.gizmo); // a ring follows the pointer round (see ring-turn.js)
     this.gizmo.setSize(0.8);
     themeGizmo(this.gizmo, this.viewport);
     scene.add(this.gizmo.getHelper());
@@ -2464,10 +2468,15 @@ export class Editor extends EventTarget {
   // paint (`linePreview`, the path), on the model's surface and in the UV
   // editor alike - over the picture, which is not touched. Tells of it with
   // a 'painthover' event.
+  // With the gizmo, a turn goes by ROTATION_STEP while it is held - pressed
+  // or let go mid-turn too. (The other modes' gizmos hear of it by a 'shift'
+  // event: see collisions.js, animate.js.)
   setShiftHeld(on) {
     if (on === this.shiftHeld) return;
     this.shiftHeld = on;
+    this.gizmo.setRotationSnap(on ? ROTATION_STEP : null);
     this.updateLinePreview();
+    this.dispatchEvent(new Event('shift'));
   }
 
   setSpaceHeld(on) {
@@ -2766,6 +2775,26 @@ export class Editor extends EventTarget {
     this.floating = { before, original, base: original, image: shown, source: image, x: 0, y: 0, changed: true };
     this.showFloating();
     this.view.updateUVs(); // (the atlas may be larger: the faces' places are fractions of it)
+    this.emitChange();
+    return true;
+  }
+
+  // A picture (an ImageData - from a file, say) for the atlas worked on: it
+  // replaces its picture, at the top left. A picture larger than the atlas:
+  // with `grow` the atlas is grown first (see grownAtlasFor()); what does not
+  // fit even so - or all of it, without `grow` - is made smaller to fit, its
+  // proportions kept. One undo step. Returns whether it was taken.
+  loadAtlasPicture(image, grow = true) {
+    if (!image?.width || !image?.height || this.atlas === this.noAtlas) return false;
+    this.commitFloating();
+    if (this.busy()) return false;
+    const before = this.snapshot();
+    const { width, height } = grow ? this.grownAtlasFor(image) : this.atlas;
+    if (width !== this.atlas.width || height !== this.atlas.height) this.atlas.resize(width, height);
+    const scale = Math.min(1, width / image.width, height / image.height);
+    this.atlas.setPicture(scale < 1 ? scaledImage(image, Math.max(1, Math.floor(image.width * scale)), Math.max(1, Math.floor(image.height * scale))) : image);
+    this.view.updateUVs(); // (the atlas may be larger: the faces' places are fractions of it)
+    this.history.push(before);
     this.emitChange();
     return true;
   }
@@ -5006,7 +5035,8 @@ export class Editor extends EventTarget {
   }
 
   // Adds a new object and selects it: 'cube', 'cone' ({ sides, size }),
-  // 'cylinder' ({ sides, size, height }) or 'sphere' ({ segments, size }) -
+  // 'cylinder' ({ sides, size, height }), 'sphere' ({ segments, size }) or
+  // 'capsule' ({ segments, size, height }) -
   // at the origin, or with `side` up against the selection (see primitiveAnchor()).
   // `into`: a node's id - the object is made in it, in the middle of it
   // (where its pivot point is), unless it is put up against the selection.

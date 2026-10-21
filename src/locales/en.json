@@ -911,5 +911,11 @@
  "uv.paste.large.title": "Enlarge the atlas to {size}?",
  "uv.paste.large.detail": "The picture ({picture}) is larger than the atlas ({atlas}). If not, the picture is made smaller to fit.",
  "ask.yes": "Yes",
- "ask.no": "No"
+ "ask.no": "No",
+ "uv.load.title": "Load the atlas from a file: the picture (PNG, JPG, WebP, GIF, BMP) replaces the atlas' picture, from the top left. If it is larger than the atlas, you are asked whether to enlarge the atlas. Can be undone",
+ "uv.load.not-picture": "The file is not a picture",
+ "dialog.picture.title": "Load the atlas from a file",
+ "dialog.picture.filter": "Pictures",
+ "add-menu.capsule": "Capsule…",
+ "outliner.primitive.capsule": "Capsule"
 }

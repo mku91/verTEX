@@ -328,6 +328,57 @@ export class EditableMesh {
     return [top, ...circles.flat(), bottom];
   }
 
+  // A capsule standing on the grid, as a new object: a cylinder with half a
+  // sphere at either end - `segments` vertices around, a quarter as many
+  // rings in each half sphere, `size` across and `height` tall in all (the
+  // half spheres' too; no less than `size`, which leaves no cylinder between
+  // them). Quads along the rings, triangles at the poles. Returns the new
+  // vertices.
+  addCapsule(segments = 8, size = 1, height = 2) {
+    const object = this.addObject('Capsule');
+    const radius = size / 2;
+    const tall = Math.max(height, size);
+    const capRings = Math.max(1, Math.round(segments / 4));
+    // The rings from the top one down, as [height, radius]: the top half
+    // sphere down to its equator, the bottom one's equator (where there is a
+    // cylinder between), then the bottom half sphere.
+    const rings = [];
+    for (let j = 1; j <= capRings; j++) {
+      const polar = (j / capRings) * (Math.PI / 2);
+      rings.push([tall - radius + radius * Math.cos(polar), radius * Math.sin(polar)]);
+    }
+    if (tall - size > 1e-9) rings.push([radius, radius]);
+    for (let j = 1; j < capRings; j++) {
+      const polar = Math.PI / 2 + (j / capRings) * (Math.PI / 2);
+      rings.push([radius + radius * Math.cos(polar), radius * Math.sin(polar)]);
+    }
+
+    const top = this.addVertex(0, tall, 0, object);
+    const circles = rings.map(([y, r]) => {
+      const circle = [];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        circle.push(this.addVertex(r * Math.cos(angle), y, r * Math.sin(angle), object));
+      }
+      return circle;
+    });
+    const bottom = this.addVertex(0, 0, 0, object);
+
+    const next = (i) => (i + 1) % segments;
+    const first = circles[0];
+    const last = circles[circles.length - 1];
+    for (let i = 0; i < segments; i++) {
+      this.addFace([top, first[next(i)], first[i]]);
+      for (let j = 0; j < circles.length - 1; j++) {
+        const upper = circles[j];
+        const lower = circles[j + 1];
+        this.addFace([upper[i], upper[next(i)], lower[next(i)], lower[i]]);
+      }
+      this.addFace([bottom, last[i], last[next(i)]]);
+    }
+    return [top, ...circles.flat(), bottom];
+  }
+
   // Unit cube standing on the grid, as a new object. Returns indices of the new vertices.
   addCube(size = 1) {
     const object = this.addObject('Cube');

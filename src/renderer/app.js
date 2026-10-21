@@ -36,6 +36,7 @@ import { NodeMarks } from './node-marks.js';
 import { NodeBones } from './node-bones.js';
 import { latinOnly, freeName } from './names.js';
 import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
+import { canvasPNG } from './png.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -1182,9 +1183,7 @@ project.picture = () => {
   mirrorDisplay.group.visible = false;
   const canvas = editor.picture(480, 300);
   mirrorDisplay.group.visible = planes;
-  return new Promise((resolve) => {
-    canvas.toBlob(async (blob) => resolve(blob ? new Uint8Array(await blob.arrayBuffer()) : null), 'image/png');
-  });
+  return Promise.resolve(canvasPNG(canvas));
 };
 
 // Asks how the model is to be exported: gives { scale, extrude } - how many
@@ -1614,6 +1613,7 @@ function closeRetro(keep) {
 }
 
 uvEditor.onRetro = () => openRetro(document.querySelector('[data-uv="retro"]'));
+uvEditor.onNoPicture = () => tell(t('uv.load.not-picture'));
 // Dragged by its grip (as the key popup is, see timeline.js), kept within the window.
 {
   const { popup } = retro;

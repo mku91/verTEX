@@ -5,7 +5,7 @@
   "description": "Low-poly 3D editor focused on vertices",
   "private": true,
   "scripts": {
-    "start": "node scripts/tauri.mjs dev",
+    "start": "node scripts/start.mjs",
     "build": "node scripts/tauri.mjs build && node scripts/dist.mjs"
   },
   "dependencies": {

@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tauri::webview::NewWindowResponse;
+use tauri::webview::{NewWindowResponse, PageLoadEvent};
 use tauri::window::Color;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
@@ -79,6 +79,10 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         // editor): allowed without asking, as the browser would ask a site.
         // Only that - what else a page may ask for is asked about as before.
         .enable_clipboard_access()
+        .on_page_load(|_, payload| match payload.event() {
+            PageLoadEvent::Started => stage("page"),
+            PageLoadEvent::Finished => stage("page-done"),
+        })
         // The window is called as its page is: the project's name.
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);
@@ -120,13 +124,30 @@ fn open_views(app: &tauri::AppHandle, features: tauri::webview::NewWindowFeature
     builder.build()
 }
 
+// How far the start has got, for npm start to show (scripts/start.mjs): a
+// line of its own on the standard output. Development builds only.
+fn stage(name: &str) {
+    if cfg!(debug_assertions) {
+        use std::io::Write;
+        println!("[vertex] {name}");
+        let _ = std::io::stdout().flush();
+    }
+}
+
 // The page has drawn its first picture: the window can be seen.
 #[tauri::command]
 fn window_ready(window: WebviewWindow) {
+    stage("shown");
     if !window.is_visible().unwrap_or(true) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+// The page has all its scripts loaded: the editor is there.
+#[tauri::command]
+fn page_loaded() {
+    stage("loaded");
 }
 
 // A project opened or made: the editor, maximized - the views want all the
@@ -166,6 +187,7 @@ fn main() {
         .manage(system::Watching::default())
         .invoke_handler(tauri::generate_handler![
             window_ready,
+            page_loaded,
             window_editing,
             project_state,
             window_close,

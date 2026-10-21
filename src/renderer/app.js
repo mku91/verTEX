@@ -2116,4 +2116,5 @@ refresh();
   const splash = $('splash');
   splash.addEventListener('transitionend', () => splash.remove(), { once: true });
   requestAnimationFrame(() => splash.classList.add('gone'));
+  window.__TAURI__?.core.invoke('page_loaded'); // (for npm start's progress, see scripts/start.mjs)
 }

@@ -240,6 +240,8 @@ export class OrthoViews {
     };
 
     canvas.addEventListener('pointerdown', (event) => {
+      // Carving: the right button lets go of the shape being drawn here (with none, it pans).
+      if (event.button === 2 && this.carving?.cancelDrawing(view)) return;
       if (event.button === 1 || event.button === 2) {
         canvas.setPointerCapture(event.pointerId);
         view.pan = { x: event.clientX, y: event.clientY };

@@ -33,11 +33,28 @@ function check(name, shape, { euler = 2, volume = null, vertices = null, faces =
       v += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
     }
   }
+  // Loose vertices: in no face, or only in the middle of a straight edge.
+  const neighbours = shape.vertices.map(() => new Set());
+  for (const face of shape.faces) face.forEach((a, k) => {
+    const b = face[(k + 1) % face.length];
+    neighbours[a].add(b);
+    neighbours[b].add(a);
+  });
+  const loose = neighbours.filter((set, i) => {
+    if (set.size === 0) return true;
+    if (set.size !== 2) return false;
+    const [a, b] = [...set].map((j) => shape.vertices[j]);
+    const p = shape.vertices[i];
+    const e1 = [0, 1, 2].map((k) => p[k] - a[k]);
+    const e2 = [0, 1, 2].map((k) => b[k] - p[k]);
+    const cross = Math.hypot(e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]);
+    return cross <= 1e-3 * Math.hypot(...e1) * Math.hypot(...e2);
+  }).length;
   const E = edges.size / 2;
   const chi = shape.vertices.length - E + shape.faces.length;
-  const ok = open === 0 && v > 0 && chi === euler && (volume === null || Math.abs(v - volume) < 1e-3) &&
+  const ok = open === 0 && loose === 0 && v > 0 && chi === euler && (volume === null || Math.abs(v - volume) < 1e-3) &&
     (vertices === null || shape.vertices.length === vertices) && (faces === null || shape.faces.length === faces);
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${shape.vertices.length} vertices, ${shape.faces.length} faces, open edges ${open}, volume ${v.toFixed(4)}, V-E+F ${chi}`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${shape.vertices.length} vertices, ${shape.faces.length} faces, open edges ${open}, loose vertices ${loose}, volume ${v.toFixed(4)}, V-E+F ${chi}`);
   return ok;
 }
 
@@ -87,6 +104,16 @@ all &= check('whole', await buildCarve(newCarve(box, 4)), { volume: 1, vertices:
   const smooth = Math.abs(at[0] - 0.5) < 0.03 && at[1] > at[0] && Math.abs(at[2] - 1) < 0.03 && at[3] < at[2] && Math.abs(at[4] - 0.5) < 0.03;
   console.log(`${smooth ? 'ok  ' : 'FAIL'} vase widths at y = 0, 1/6, 1/3, 1/2, 2/3, 1: ${at.join(', ')}`);
   all &= smooth;
+}
+
+// Five levels on the grid, squares of three sizes from above, an outline with slanting sides from the front and the side.
+{
+  const carve = newCarve(box, 5);
+  carve.stacks.y.slices = [[{ points: square(0.25) }], [{ points: square(0.5) }], [{ points: square(0.375) }], [{ points: square(0.375) }], [{ points: square(0.1875) }]];
+  const outline = [[-0.25, 0], [-0.5, 0.25], [-0.375, 0.75], [-0.25, 1], [0.25, 1], [0.375, 0.75], [0.5, 0.25], [0.25, 0]];
+  carve.stacks.z.slices = carve.stacks.z.slices.map(() => [{ points: outline }]);
+  carve.stacks.x.slices = carve.stacks.x.slices.map(() => [{ points: outline.map(([u, v]) => [-u, v]) }]);
+  all &= check('five levels', await buildCarve(carve));
 }
 
 // An empty level: the solid stops there (the depth levels 0, 1 whole, 2 empty, 3 whole: only the first third is left).

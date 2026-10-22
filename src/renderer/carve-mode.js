@@ -22,6 +22,9 @@ import { t } from './i18n.js';
 //   drag a point - moves a corner of the shape
 //   click inside - picks the shape; Delete takes it away (the level whole again)
 //   Alt+wheel, PgUp / PgDn, the arrows in a view's title - another slice
+// The mirror (the popup's ↔ and ↕, either or both): a half - or a quarter -
+// is drawn, and closed it is made whole by its reflection across the box's
+// middle; a point dragged takes its reflections along.
 // Changes are undone by Ctrl+Z here, one by one; they are the editor's undo
 // step only when the shape is applied (see the end).
 //
@@ -96,6 +99,14 @@ export class CarveMode extends EventTarget {
       });
       input.addEventListener('change', () => this.setCount(name, parseInt(input.value, 10)));
     }
+    for (const button of popup.querySelectorAll('[data-carve-mirror]')) {
+      button.addEventListener('click', () => {
+        const axis = button.dataset.carveMirror;
+        this.mirror[axis] = !this.mirror[axis];
+        button.classList.toggle('active', this.mirror[axis]);
+        this.redraw();
+      });
+    }
     popup.querySelector('[data-carve="apply"]').addEventListener('click', () => this.apply());
     popup.querySelector('[data-carve="cancel"]').addEventListener('click', () => this.cancel());
     for (const action of popup.querySelectorAll('[data-slice]')) {
@@ -106,6 +117,9 @@ export class CarveMode extends EventTarget {
     });
 
     this.entering = false; // (making the box changes the editor too: not a beginning again)
+    this.made = null; // with a cube made to carve: the length of the undo history after its making
+    this.mirror = { u: false, v: false }; // across the box's middle: left to right (u), top to bottom (v)
+    this.applying = false;
     editor.addEventListener('change', () => {
       if (this.entering || (editor.operation === 'carve') === this.on) return;
       if (this.on) this.leave();
@@ -161,6 +175,15 @@ export class CarveMode extends EventTarget {
     this.popup.hidden = true;
     this.removeLayerControls();
     this.editor.setVeiled(null);
+    // A cube made for carving, not applied: gone again - its making undone,
+    // and not to be redone. (Only while it is still the last step taken.)
+    const { history } = this.editor;
+    if (this.made !== null && !this.applying && history.undoStack.length === this.made) {
+      this.editor.undo();
+      history.redoStack.length = 0;
+    }
+    this.made = null;
+    this.applying = false;
     this.carve = null;
     this.frame = null;
     this.shape = null;
@@ -219,11 +242,14 @@ export class CarveMode extends EventTarget {
   }
 
   // A cube made to carve, where a new object would go (see Editor.addPrimitive()).
+  // It is taken away again if carving is left without applying (see leave()).
   newBox() {
     const { editor } = this;
     const count = editor.mesh.objects.length;
     editor.addPrimitive('cube', { size: 1 });
-    return editor.mesh.objects.length === count ? null : this.boxOf(count);
+    if (editor.mesh.objects.length === count) return null;
+    this.made = editor.history.undoStack.length; // (the undo step that made it: still the last one when it is taken away)
+    return this.boxOf(count);
   }
 
   // --- the stacks -------------------------------------------------------------------
@@ -301,6 +327,7 @@ export class CarveMode extends EventTarget {
     const shape = await buildCarve(this.carve); // (as the slices are now, not as last shown)
     if (number !== this.building || !this.on || !shape) return false;
     const { frame } = this;
+    this.applying = true; // (the cube stays, made for it or not: it takes the shape)
     this.editor.setOperation(null); // (the objects shown again first: the shape is the box's, not out of sight)
     return this.editor.reshapeObject(frame, shape);
   }
@@ -399,6 +426,14 @@ export class CarveMode extends EventTarget {
     return true;
   }
 
+  // The right button in a view: the shape being drawn there let go. Whether there was one.
+  cancelDrawing(view) {
+    if (!this.on || this.drawing?.stack !== STACK_OF_VIEW[view.axes]) return false;
+    this.drawing = null;
+    this.redraw();
+    return true;
+  }
+
   // Delete: the shape picked taken away. Whether there was one.
   deletePicked() {
     if (!this.picked) return false;
@@ -485,7 +520,8 @@ export class CarveMode extends EventTarget {
     if (this.drawing && this.drawing.stack !== stack) this.drawing = null;
     if (this.drawing) {
       const first = this.pixelOf(view, this.drawing.points[0]);
-      if (this.drawing.points.length >= 3 && Math.hypot(first.x - x, first.y - y) <= PICK_RADIUS) this.finishDrawing();
+      const enough = this.mirror.u || this.mirror.v ? 2 : 3; // (a half of two points is a whole of four)
+      if (this.drawing.points.length >= enough && Math.hypot(first.x - x, first.y - y) <= PICK_RADIUS) this.finishDrawing();
       else this.addPoint(this.pointAt(view, x, y));
       this.redraw();
       return;
@@ -493,7 +529,7 @@ export class CarveMode extends EventTarget {
     const under = this.pointUnder(view, x, y);
     if (under) {
       this.remember();
-      this.drag = { ...under, moved: false };
+      this.drag = { ...under, moved: false, twins: this.twinsOf(under) };
       this.picked = { stack, index: under.shape };
       this.redraw();
       return;
@@ -517,11 +553,18 @@ export class CarveMode extends EventTarget {
         this.release();
         return;
       }
-      const point = this.pointAt(view, x, y);
       const shape = this.carve.stacks[this.drag.stack].slices[this.layer[this.drag.stack]][this.drag.shape];
+      const point = this.pointAt(view, x, y);
+      // A point on a mirror's line stays on it.
+      const [mu, mv] = this.middleOf(this.drag.stack);
+      if (this.drag.twins.onU) point[0] = mu;
+      if (this.drag.twins.onV) point[1] = mv;
       const was = shape.points[this.drag.point];
       if (was[0] !== point[0] || was[1] !== point[1]) {
         shape.points[this.drag.point] = point;
+        for (const { index, u, v } of this.drag.twins.list) {
+          shape.points[index] = [u ? 2 * mu - point[0] : point[0], v ? 2 * mv - point[1] : point[1]].map((value) => +value.toFixed(6));
+        }
         this.drag.moved = true;
         this.changed();
       }
@@ -550,9 +593,61 @@ export class CarveMode extends EventTarget {
     points.push(point);
   }
 
-  // The shape drawn put on its level, in place of the one there.
+  // The mirror's lines in a stack's plane: the box's middle, as [u, v].
+  middleOf(stack) {
+    const [a, b] = ACROSS[stack];
+    const { min, max } = this.carve.box;
+    return [(min[a] + max[a]) / 2, (min[b] + max[b]) / 2];
+  }
+
+  // A half (or with both mirrors a quarter) made whole: its points, then
+  // their reflection across the middle in turn backwards - those on the
+  // mirror's line once.
+  mirrored(stack, points) {
+    const [mu, mv] = this.middleOf(stack);
+    const same = (p, q) => Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9;
+    const join = (half, reflect) => {
+      const out = [...half];
+      for (const p of [...half].reverse().map(reflect)) if (!out.some((q) => same(p, q))) out.push(p);
+      return out;
+    };
+    const acrossU = ([u, v]) => [+(2 * mu - u).toFixed(6), v];
+    const acrossV = ([u, v]) => [u, +(2 * mv - v).toFixed(6)];
+    // The halves meet where the drawing ends: with both mirrors, the one
+    // whose line it ends on first (a quarter drawn from one line to the other).
+    const last = points[points.length - 1];
+    const vFirst = this.mirror.u && this.mirror.v && Math.abs(last[1] - mv) < 1e-9 && Math.abs(last[0] - mu) >= 1e-9;
+    let whole = points;
+    for (const axis of vFirst ? ['v', 'u'] : ['u', 'v']) {
+      if (this.mirror[axis]) whole = join(whole, axis === 'u' ? acrossU : acrossV);
+    }
+    return whole;
+  }
+
+  // A point's reflections in its shape, to be dragged along (the mirrors on
+  // as the drag begins): { list: [{ index, u, v }], onU, onV } - and whether
+  // the point is on a mirror's line, to stay there.
+  twinsOf({ stack, shape, point }) {
+    const points = this.carve.stacks[stack].slices[this.layer[stack]][shape].points;
+    const [mu, mv] = this.middleOf(stack);
+    const [pu, pv] = points[point];
+    const near = (a, b) => Math.abs(a - b) < 1e-6;
+    const onU = this.mirror.u && near(pu, mu);
+    const onV = this.mirror.v && near(pv, mv);
+    const list = [];
+    for (const [u, v] of [[true, false], [false, true], [true, true]]) {
+      if ((u && !this.mirror.u) || (v && !this.mirror.v) || (u && onU) || (v && onV)) continue;
+      const want = [u ? 2 * mu - pu : pu, v ? 2 * mv - pv : pv];
+      const index = points.findIndex((q, k) => k !== point && near(q[0], want[0]) && near(q[1], want[1]));
+      if (index >= 0 && !list.some((twin) => twin.index === index)) list.push({ index, u, v });
+    }
+    return { list, onU, onV };
+  }
+
+  // The shape drawn put on its level, in place of the one there (made whole by the mirror, if it is on).
   finishDrawing() {
-    const { stack, points } = this.drawing;
+    const { stack } = this.drawing;
+    const points = this.mirrored(stack, this.drawing.points);
     this.drawing = null;
     if (points.length < 3 || Math.abs(area(points)) < 1e-9) {
       this.redraw();
@@ -770,7 +865,38 @@ export class CarveMode extends EventTarget {
       });
     }
 
-    // The shape being drawn.
+    // The mirror's lines: dashed, in the accent, across the box.
+    if (this.mirror.u || this.mirror.v) {
+      const [mu, mv] = this.middleOf(stack);
+      const [a, b] = sectionOf(box, stack).filter((_, c) => c === 0 || c === 2);
+      context.globalAlpha = 0.7;
+      context.strokeStyle = theme.accent;
+      context.lineWidth = 1;
+      context.setLineDash([6, 4]);
+      if (this.mirror.u) {
+        path([[mu, a[1]], [mu, b[1]]].map((point) => this.pixelOf(view, point)), false);
+        context.stroke();
+      }
+      if (this.mirror.v) {
+        path([[a[0], mv], [b[0], mv]].map((point) => this.pixelOf(view, point)), false);
+        context.stroke();
+      }
+      context.setLineDash([]);
+    }
+
+    // The shape being drawn - and with the mirror, its whole as it would close, dashed.
+    if (this.drawing?.stack === stack && (this.mirror.u || this.mirror.v)) {
+      const half = this.drawing.cursor ? [...this.drawing.points, this.drawing.cursor] : this.drawing.points;
+      if (half.length >= 2) {
+        context.globalAlpha = 0.5;
+        context.strokeStyle = theme.cut;
+        context.lineWidth = 1;
+        context.setLineDash([4, 3]);
+        path(this.mirrored(stack, half).map((point) => this.pixelOf(view, point)));
+        context.stroke();
+        context.setLineDash([]);
+      }
+    }
     if (this.drawing?.stack === stack) {
       const points = this.drawing.points.map((point) => this.pixelOf(view, point));
       const cursor = this.drawing.cursor && this.pixelOf(view, this.drawing.cursor);

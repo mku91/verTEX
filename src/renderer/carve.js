@@ -28,6 +28,7 @@ export const ALONG = { y: 1, z: 2, x: 0 };
 export const STACKS = ['y', 'z', 'x'];
 
 const ROUND = 1e5; // vertices are put on a 1e-5 grid: the library's float32 rounding taken out
+const LINE_ANGLE = 1e-3; // radians: a turn this small at a vertex is a straight line
 
 let library = null;
 
@@ -408,28 +409,34 @@ function join(a, b, users) {
 // line with them (left where the slices were put together) - taken out of
 // every face, and the vertices numbered anew.
 function withoutMidpoints(vertices, faces) {
-  const neighbours = vertices.map(() => new Set());
-  for (const face of faces) face.forEach((a, k) => {
-    const b = face[(k + 1) % face.length];
-    neighbours[a].add(b);
-    neighbours[b].add(a);
-  });
-  const inLine = (a, v, b) => {
-    const e1 = [0, 1, 2].map((k) => vertices[v][k] - vertices[a][k]);
-    const e2 = [0, 1, 2].map((k) => vertices[b][k] - vertices[v][k]);
-    const cross = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    const dot = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
-    return Math.hypot(...cross) < 1e-9 && dot > 0;
-  };
-  const gone = vertices.map((_, v) => {
-    if (neighbours[v].size !== 2) return false;
-    const [a, b] = neighbours[v];
-    return inLine(a, v, b);
-  });
-  const kept = [];
-  const number = vertices.map((p, v) => (gone[v] ? -1 : kept.push(p) - 1));
-  return {
-    vertices: kept,
-    faces: faces.map((face) => face.filter((v) => !gone[v]).map((v) => number[v])).filter((face) => face.length >= 3),
-  };
+  // (Again while any goes: one taken out can leave its neighbour in a line too.)
+  for (;;) {
+    const neighbours = vertices.map(() => new Set());
+    for (const face of faces) face.forEach((a, k) => {
+      const b = face[(k + 1) % face.length];
+      neighbours[a].add(b);
+      neighbours[b].add(a);
+    });
+    // In a line: the turn at v less than LINE_ANGLE (the corners come from
+    // the library rounded, see ROUND - a straight edge is not exactly so).
+    const inLine = (a, v, b) => {
+      const e1 = [0, 1, 2].map((k) => vertices[v][k] - vertices[a][k]);
+      const e2 = [0, 1, 2].map((k) => vertices[b][k] - vertices[v][k]);
+      const cross = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      const dot = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
+      return dot > 0 && Math.hypot(...cross) <= LINE_ANGLE * Math.hypot(...e1) * Math.hypot(...e2);
+    };
+    // Gone: a vertex no face has any more (left over by mergeFlat()), and one only on a straight edge.
+    const gone = vertices.map((_, v) => {
+      if (neighbours[v].size === 0) return true;
+      if (neighbours[v].size !== 2) return false;
+      const [a, b] = neighbours[v];
+      return inLine(a, v, b);
+    });
+    if (!gone.some(Boolean)) return { vertices, faces };
+    const kept = [];
+    const number = vertices.map((p, v) => (gone[v] ? -1 : kept.push(p) - 1));
+    vertices = kept;
+    faces = faces.map((face) => face.filter((v) => !gone[v]).map((v) => number[v])).filter((face) => face.length >= 3);
+  }
 }

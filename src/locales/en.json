@@ -936,11 +936,14 @@
  "carve.slice.next": "Copy the level to the next one",
  "carve.slice.all": "Copy the level to all the levels of its stack",
  "carve.layer": "{index} / {count}",
- "carve.layer.title": "The level drawn in this view - the shape's section there; between levels it goes from one section to the next. The arrows, Alt+wheel or PgUp / PgDn go to another. Click - a point of the shape, on the fine grid (Ctrl: the coarse one); a click on its first point or Enter closes it, in place of the level's shape. Drag a point - move it, click inside the shape - pick it (Delete takes it away)",
+ "carve.layer.title": "The level drawn in this view - the shape's section there; between levels it goes from one section to the next. The arrows, Alt+wheel or PgUp / PgDn go to another. Click - a point of the shape, on the fine grid (Ctrl: the coarse one); a click on its first point or Enter closes it, in place of the level's shape; the right button lets go of it. Drag a point - move it, click inside the shape - pick it (Delete takes it away)",
  "carve.duplicate.previous": "Duplicate onto the level before: the shape picked, or the level as it is if none is - and go there",
  "carve.duplicate.next": "Duplicate onto the next level: the shape picked, or the level as it is if none is - and go there",
  "carve.apply": "Apply",
  "carve.apply.title": "The cube becomes the shape carved (one undo step). Not if nothing is left of it",
  "carve.cancel": "Cancel",
- "carve.cancel.title": "Leave carving: the slices are thrown away, the cube stays as it was (Esc)"
+ "carve.cancel.title": "Leave carving: the slices are thrown away, the cube stays as it was (Esc)",
+ "carve.mirror": "Mirror",
+ "carve.mirror.u": "Mirror left to right: a half is drawn, the other half is its reflection across the box's middle; a point dragged takes its reflection along",
+ "carve.mirror.v": "Mirror top to bottom: a half is drawn, the other half is its reflection across the box's middle; a point dragged takes its reflection along"
 }

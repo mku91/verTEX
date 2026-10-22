@@ -1025,6 +1025,19 @@ export class EditableMesh {
     return this.removeVertices(touched);
   }
 
+  // The object `id` made another shape: its vertices and faces given up for
+  // `vertices` ([x, y, z][]) and `faces` (their indices) - the object itself,
+  // its name, place and settings, staying. Returns the new vertices.
+  reshape(id, vertices, faces) {
+    const old = new Set();
+    this.vertexObject.forEach((object, i) => object === id && old.add(i));
+    const first = this.vertices.length;
+    for (const [x, y, z] of vertices) this.addVertex(x, y, z, id);
+    for (const face of faces) this.addFace(face.map((i) => first + i));
+    const remap = this.removeVertices(old);
+    return vertices.map((_, i) => remap.get(first + i));
+  }
+
   // Removes vertices together with every face that uses them. Returns a Map
   // from the old index of each surviving vertex to its new index.
   removeVertices(indices) {

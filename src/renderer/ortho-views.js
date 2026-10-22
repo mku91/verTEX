@@ -87,6 +87,9 @@ export class OrthoViews {
     // views show the whole model posed and painted, and pose it.
     this.animation = null;
     this.poseDrag = null;
+    // Carving (see carve-mode.js), set once it is made: while it goes on the
+    // views show its slices, and the left button draws them.
+    this.carving = null;
     this.views = VIEWS.map((definition) => this.createView(definition));
     this.listeners = [
       [editor, 'change', () => this.update()],
@@ -245,6 +248,11 @@ export class OrthoViews {
       }
       if (event.button !== 0) return;
       view.emptyPress = null;
+      if (this.carving?.on) {
+        canvas.setPointerCapture(event.pointerId);
+        this.carving.press(view, event);
+        return;
+      }
       if (this.posing) {
         this.pressPose(view, event);
         return;
@@ -301,6 +309,10 @@ export class OrthoViews {
         view.center[view.up] += (view.upSign * (event.clientY - view.pan.y)) / view.scale;
         view.pan = { x: event.clientX, y: event.clientY };
         this.drawView(view);
+        return;
+      }
+      if (this.carving?.on) {
+        this.carving.move(view, event);
         return;
       }
       if (this.poseDrag) {
@@ -362,6 +374,8 @@ export class OrthoViews {
       if (view.pan && event.button !== 0) {
         view.pan = null;
         canvas.style.cursor = '';
+      } else if (event.button === 0 && this.carving?.on) {
+        this.carving.release();
       } else if (event.button === 0 && this.poseDrag) {
         this.poseDrag = null;
         this.animation.endPose();
@@ -389,6 +403,11 @@ export class OrthoViews {
       'wheel',
       (event) => {
         event.preventDefault();
+        // Carving: Alt+wheel goes through its slices.
+        if (event.altKey && this.carving?.on) {
+          this.carving.stepLayer(this.carving.stackOf(view), Math.sign(event.deltaY || event.deltaX));
+          return;
+        }
         // Zoom about the cursor: the world point under it stays where it is.
         const { x, y } = this.localPoint(view, event.clientX, event.clientY);
         const anchor = this.unproject(view, x, y);
@@ -524,9 +543,11 @@ export class OrthoViews {
 
   fit(view) {
     view.fitted = false;
-    if (!this.shown || view.width === 0) return;
+    const carving = this.carving?.on;
+    if ((!this.shown && !carving) || view.width === 0) return;
     const { vertices } = this.editor.mesh;
-    const box = new THREE.Box3().setFromPoints(this.shown.vertices.map((i) => vertices[i]));
+    // (Carving: the box carved.)
+    const box = carving ? this.carving.bounds().clone() : new THREE.Box3().setFromPoints(this.shown.vertices.map((i) => vertices[i]));
     const size = box.getSize(new THREE.Vector3());
     box.getCenter(view.center);
     const room = 1 - 2 * FIT_MARGIN;
@@ -672,6 +693,11 @@ export class OrthoViews {
     const { context, width, height } = view;
     if (width === 0) return;
     context.clearRect(0, 0, width, height);
+    if (this.carving?.on) {
+      this.carving.drawView(view); // (with grids of its own)
+      this.drawGizmo(view);
+      return;
+    }
     this.drawGrid(view);
     if (this.posing) {
       this.drawModel(view);

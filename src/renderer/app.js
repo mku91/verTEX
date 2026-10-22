@@ -25,6 +25,7 @@ import { CollisionMode } from './collisions.js';
 import { Simulation } from './simulation.js';
 import { Timeline } from './timeline.js';
 import { AnimationMode } from './animate.js';
+import { CarveMode } from './carve-mode.js';
 import { ViewsWindow } from './views-window.js';
 import { tell, confirmIt, askSave } from './ask-dialog.js';
 import { toast } from './toast.js';
@@ -48,6 +49,9 @@ const orthoViews = new OrthoViews(document.getElementById('ortho-views'), editor
 const uvEditor = new UVEditor(document.getElementById('uv-editor'), editor);
 const timeline = new Timeline(document.getElementById('timeline'), editor);
 const animationMode = new AnimationMode(document.getElementById('pose-panel'), viewport, editor, timeline);
+const carveMode = new CarveMode(document.getElementById('carve-popup'), document.getElementById('carve-toggle'), viewport, editor);
+orthoViews.carving = carveMode;
+carveMode.views = orthoViews;
 // The three views pose too, in the animation mode, and show the pose.
 orthoViews.animation = animationMode;
 new NodeMarks(editor, animationMode); // (every node, a hollow square on its pivot point)
@@ -98,6 +102,7 @@ const ACTIONS = {
   // (The UV editor is not the animation mode's: the model is not edited there.)
   'toggle-uv': () => editor.workspace !== 'animation' && setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
   'toggle-animation': () => editor.setWorkspace(editor.workspace === 'animation' ? 'model' : 'animation'),
+  'toggle-carve': () => editor.setOperation(editor.operation === 'carve' ? null : 'carve'),
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
@@ -122,8 +127,8 @@ const ACTIONS = {
   'export-gltf': () => exportModel('gltf'),
   'render-sprites': () => renderMode.show(),
   new: () => project.newProject(), // the menu of a program not yet restarted
-  undo: () => editor.undo(),
-  redo: () => editor.redo(),
+  undo: () => carveMode.undo() || editor.undo(),
+  redo: () => carveMode.redo() || editor.redo(),
 };
 
 // Physical key codes, so shortcuts work regardless of keyboard layout.
@@ -156,6 +161,7 @@ const hotkeys = new Hotkeys(
     { id: 'op.pencil', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.pencil'), keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
     { id: 'op.collisions', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.collisions'), keys: '', run: () => ACTIONS['toggle-collisions']() },
     { id: 'op.animation', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.animation'), keys: '', run: () => ACTIONS['toggle-animation']() },
+    { id: 'op.carve', group: t('app.hotkeys.group.modes'), label: t('carve.hotkey'), keys: '', run: () => ACTIONS['toggle-carve']() },
     { id: 'anim.key', group: t('app.hotkeys.group.animation'), label: t('app.hotkeys.anim.key'), keys: 'KeyK', run: () => animationMode.keyPicked() },
 
     { id: 'edit.select-all', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.select-all'), keys: 'KeyA', run: () => editor.selectAll() },
@@ -167,8 +173,8 @@ const hotkeys = new Hotkeys(
     { id: 'edit.copy', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.copy'), keys: 'Ctrl+KeyC', run: () => editor.workspace === 'animation' ? timeline.copyKeys() : pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
     { id: 'edit.cut', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.cut'), keys: 'Ctrl+KeyX', run: () => pixelsInHand() && editor.cutPixels() },
     { id: 'edit.paste', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.paste'), keys: 'Ctrl+KeyV', run: () => editor.workspace === 'animation' ? timeline.pasteKeys() : pixelsInHand() ? editor.pastePixels() : editor.pasteObjects() },
-    { id: 'edit.undo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.undo'), keys: 'Ctrl+KeyZ', run: () => editor.undo() },
-    { id: 'edit.redo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.redo'), keys: 'Ctrl+KeyY', run: () => editor.redo() },
+    { id: 'edit.undo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.undo'), keys: 'Ctrl+KeyZ', run: () => ACTIONS.undo() },
+    { id: 'edit.redo', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.redo'), keys: 'Ctrl+KeyY', run: () => ACTIONS.redo() },
 
     // The selection modes, in the order of their buttons. (An operation that
     // cannot work in a mode has its button off, and its key does nothing.)
@@ -201,19 +207,21 @@ const hotkeys = new Hotkeys(
 const pixelsInHand = () => editor.tool === 'marquee';
 // In the collision mode Delete takes the picked shape away; the model is not changed there.
 // In the animation mode it takes the picked keys away.
-const deleteSelection = () => (editor.collisions ? collisionMode.deleteKey() : editor.workspace === 'animation' ? timeline.deleteKeys() : editor.deleteSelection());
+// Carving: the shape picked.
+const deleteSelection = () => (carveMode.on ? carveMode.deletePicked() : editor.collisions ? collisionMode.deleteKey() : editor.workspace === 'animation' ? timeline.deleteKeys() : editor.deleteSelection());
 
 const FIXED_KEYS = {
   // The polygon tool's own keys; they do nothing outside it. (And the
   // marquee's: what floats is put down.)
-  // And in the animation mode, play and pause.
-  Enter: () => (editor.workspace === 'animation' ? timeline.play() : editor.commitFloating() || editor.closePolygon()),
-  NumpadEnter: () => (editor.workspace === 'animation' ? timeline.play() : editor.commitFloating() || editor.closePolygon()),
-  Backspace: () => editor.undoPolygonPoint(),
-  PageUp: () => editor.shiftPolygonPlane(1),
-  PageDown: () => editor.shiftPolygonPlane(-1),
+  // And in the animation mode, play and pause; carving's shapes are drawn as the polygon tool's.
+  Enter: () => (editor.workspace === 'animation' ? timeline.play() : carveMode.close() || editor.commitFloating() || editor.closePolygon()),
+  NumpadEnter: () => (editor.workspace === 'animation' ? timeline.play() : carveMode.close() || editor.commitFloating() || editor.closePolygon()),
+  Backspace: () => carveMode.undoPoint() || editor.undoPolygonPoint(),
+  PageUp: () => carveMode.stepActive(1) || editor.shiftPolygonPlane(1),
+  PageDown: () => carveMode.stepActive(-1) || editor.shiftPolygonPlane(-1),
   Escape: () =>
     (simulation.running ? (simulation.stop(), true) : false) ||
+    carveMode.escape() ||
     (posePreview.on ? (posePreview.toggle(false), true) : false) ||
     editor.cancelFloating() ||
     (editor.marquee ? (editor.setMarquee(null), true) : false) ||
@@ -223,7 +231,7 @@ const FIXED_KEYS = {
     (editor.workspace !== 'model' ? (editor.setWorkspace('model'), true) : false) ||
     editor.cancelDrag() ||
     editor.clearSelection(),
-  'Ctrl+Shift+KeyZ': () => editor.redo(),
+  'Ctrl+Shift+KeyZ': () => ACTIONS.redo(),
 };
 const FIXED_KEY_NOTES = [
   ['Esc', t('app.hotkeys.fixed.esc')],
@@ -725,7 +733,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation', '#carve-toggle': 'op.carve',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -826,7 +834,7 @@ for (const button of placeButtons) {
 }
 document.getElementById('place-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
+const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil'), carve: t('carve.operation') };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
@@ -1725,7 +1733,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode };
+window.vertexDebug = { uv: uvEditor, carve: carveMode, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode };
 
 // The bottom panel's height, as a share of the workspace (see setViewsSize()).
 const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';
@@ -1778,6 +1786,20 @@ const restingPanel = () => (editor.workspace === 'animation' ? 'animation' : nul
 {
   const saved = localStorage.getItem(BOTTOM_PANEL_KEY);
   setBottomPanel(saved === 'uv' ? 'uv' : saved === 'views' || (saved === null && localStorage.getItem(VIEWS_OPEN_KEY) === '1') ? 'views' : null);
+}
+
+// Carving draws its slices in the three views: they open for it, and the
+// panel that was there comes back when it is done.
+{
+  let before;
+  carveMode.addEventListener('toggle', () => {
+    if (carveMode.on) {
+      before = orthoViews.open ? 'views' : uvEditor.open ? 'uv' : null;
+      if (before !== 'views') setBottomPanel('views');
+    } else if (before !== 'views') {
+      setBottomPanel(before);
+    }
+  });
 }
 
 // The panel's height is changed by dragging its top edge. It is kept as a
@@ -2101,7 +2123,7 @@ function refresh() {
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   $('animation-button').classList.toggle('active', editor.workspace === 'animation');
   document.querySelector('[data-action="toggle-uv"]').hidden = editor.workspace === 'animation';
-  for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon']) {
+  for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon', 'carve']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
 

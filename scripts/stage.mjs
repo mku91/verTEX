@@ -14,7 +14,10 @@ const ENTRIES = [
   'node_modules/three/build/three.module.js',
   'node_modules/@dimforge/rapier3d-compat/dist/rapier.mjs',
   'node_modules/fflate/esm/browser.js',
+  'node_modules/manifold-3d/manifold.js',
 ];
+// Files a module loads by itself, not by importing: copied as they are.
+const FILES = ['node_modules/manifold-3d/manifold.wasm'];
 
 fs.rmSync(OUT, { recursive: true, force: true });
 for (const folder of PAGE) fs.cpSync(path.join(ROOT, folder), path.join(OUT, folder), { recursive: true });
@@ -40,7 +43,7 @@ while (queue.length) {
   }
 }
 const VENDOR = (file) => file.replace(/^node_modules\//, 'vendor/');
-for (const file of seen) {
+for (const file of [...seen, ...FILES]) {
   fs.mkdirSync(path.dirname(path.join(OUT, VENDOR(file))), { recursive: true });
   fs.copyFileSync(path.join(ROOT, file), path.join(OUT, VENDOR(file)));
 }

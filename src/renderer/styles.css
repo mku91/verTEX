@@ -2105,28 +2105,28 @@ body {
 
 /* A new atlas' pixels per unit, asked under (or over) the button pressed;
    a clip's name and length, the same way (see timeline.js). */
-:is(#atlas-popup, #clip-popup) {
+:is(#atlas-popup, #clip-popup, #carve-popup) {
   position: fixed;
   z-index: 40;
   width: 240px;
 }
 
-:is(#atlas-popup, #clip-popup) label span {
+:is(#atlas-popup, #clip-popup, #carve-popup) label span {
   white-space: nowrap;
 }
 
-:is(#atlas-popup, #clip-popup) input[name="name"] {
+:is(#atlas-popup, #clip-popup, #carve-popup) input[name="name"] {
   flex: 1;
   min-width: 0;
   text-align: left;
 }
 
-:is(#atlas-popup, #clip-popup) input::placeholder {
+:is(#atlas-popup, #clip-popup, #carve-popup) input::placeholder {
   color: var(--text-dim);
   opacity: 0.6;
 }
 
-:is(#atlas-popup, #clip-popup) label {
+:is(#atlas-popup, #clip-popup, #carve-popup) label {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2134,12 +2134,12 @@ body {
   color: var(--text-dim);
 }
 
-:is(#atlas-popup, #clip-popup) .scrub-field {
+:is(#atlas-popup, #clip-popup, #carve-popup) .scrub-field {
   flex: none;
   width: 88px;
 }
 
-:is(#atlas-popup, #clip-popup) input {
+:is(#atlas-popup, #clip-popup, #carve-popup) input {
   width: 100%;
   height: 22px;
   padding: 0 6px;
@@ -2150,16 +2150,16 @@ body {
   font: inherit;
 }
 
-:is(#atlas-popup, #clip-popup) .scrub-field input {
+:is(#atlas-popup, #clip-popup, #carve-popup) .scrub-field input {
   padding-right: 38px; /* (room for the handle, see scrubbable()) */
 }
 
-:is(#atlas-popup, #clip-popup) input:focus {
+:is(#atlas-popup, #clip-popup, #carve-popup) input:focus {
   border-color: var(--accent);
   outline: none;
 }
 
-:is(#atlas-popup, #clip-popup) button {
+:is(#atlas-popup, #clip-popup, #carve-popup) button {
   height: 26px;
   border: 0;
   border-radius: 4px;
@@ -2170,7 +2170,7 @@ body {
   cursor: pointer;
 }
 
-:is(#atlas-popup, #clip-popup) button:hover {
+:is(#atlas-popup, #clip-popup, #carve-popup) button:hover {
   filter: brightness(1.1);
 }
 
@@ -5494,4 +5494,92 @@ option::checkmark {
 .uv-face-menu-buttons button {
   flex: 1;
   text-align: center;
+}
+
+/* Carving (see carve-mode.js): the slice shown in each view's title, with
+   arrows to the next ones - the one last worked in in the accent; and the
+   popup's own rows. */
+.carve-layer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 10px;
+}
+
+.carve-layer b {
+  min-width: 34px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Its buttons as the timeline's "+": a small square of the accent, the sign
+   dark in it. */
+.ortho-header .carve-layer button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 10px;
+}
+
+.ortho-header .carve-layer button:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  filter: brightness(1.25);
+}
+
+.ortho-header .carve-layer button + button {
+  margin-left: 2px;
+}
+
+.ortho-header .carve-layer b + button {
+  margin-right: 6px;
+}
+
+.carve-layer.active b {
+  color: var(--accent);
+}
+
+
+#carve-popup .carve-actions {
+  display: flex;
+  gap: 4px;
+}
+
+#carve-popup .carve-actions button {
+  flex: 1;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+#carve-popup .carve-actions button:hover {
+  background: var(--hover);
+}
+
+
+.ortho-header .carve-layer i {
+  width: auto;
+  height: auto;
+  font-size: 10px;
+  line-height: 1;
+}
+
+#carve-popup .form-buttons button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+#carve-popup .form-buttons button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }

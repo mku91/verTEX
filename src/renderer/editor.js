@@ -91,7 +91,7 @@ export const AXIS_LOCKS = {
 export const MODES = ['object', 'face', 'edge', 'vertex'];
 
 // Selection modes each modal operation works in; the first one is its default.
-export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'], place: ['object'] };
+export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'], place: ['object'], carve: ['object'] };
 
 // The place tool: the sides of an object's bounds, along its own axes, that it can lie on.
 export const PLACE_SIDES = {
@@ -1711,6 +1711,31 @@ export class Editor extends EventTarget {
     this.workspace = name;
     this.refreshHighlight();
     this.placeGizmo();
+    this.emitChange();
+  }
+
+  // The object `id` made the shape `shape` ({ vertices, faces }, see
+  // carve.js), itself staying (see Mesh.reshape()); its new faces take
+  // places on the atlas as new faces do. One undo step. Returns whether it was.
+  reshapeObject(id, shape) {
+    if (this.busy() || !shape?.faces.length || !this.mesh.objects.some((object) => object.id === id)) return false;
+    const before = this.snapshot();
+    const vertices = this.mesh.reshape(id, shape.vertices, shape.faces);
+    this.selection = new Set(vertices);
+    this.edited(before);
+    this.rebuildView();
+    this.emitChange();
+    return true;
+  }
+
+  // Objects out of sight for a while, their data as it was (see carving,
+  // carve-mode.js): by their ids, or null for none.
+  setVeiled(ids) {
+    const was = this.veiled ?? new Set();
+    const now = new Set(ids ?? []);
+    if (was.size === now.size && [...now].every((id) => was.has(id))) return;
+    this.veiled = now;
+    this.rebuildView();
     this.emitChange();
   }
 
@@ -4078,7 +4103,7 @@ export class Editor extends EventTarget {
     const hiddenVertices = new Set();
     const resolve = (island, under) => {
       island.hiddenOwn = island.hidden;
-      island.hidden = under || island.hiddenOwn;
+      island.hidden = under || island.hiddenOwn || Boolean(this.veiled?.has(island.id));
       if (island.hidden) for (const vertex of island.vertices) hiddenVertices.add(vertex);
       for (const child of island.children) resolve(islands[child], island.hidden);
     };

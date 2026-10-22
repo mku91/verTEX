@@ -45,7 +45,8 @@
         "three": "../../node_modules/three/build/three.module.js",
         "three/addons/": "../../node_modules/three/examples/jsm/",
         "@dimforge/rapier3d-compat": "../../node_modules/@dimforge/rapier3d-compat/dist/rapier.mjs",
-        "fflate": "../../node_modules/fflate/esm/browser.js"
+        "fflate": "../../node_modules/fflate/esm/browser.js",
+        "manifold-3d": "../../node_modules/manifold-3d/manifold.js"
       }
     }
   </script>
@@ -99,6 +100,9 @@
         </button>
         <button id="place-toggle" data-action="toggle-place" data-i18n-title="html.place-toggle.title" data-i18n-aria-label="html.place-toggle.aria-label">
           <i class="fa-solid fa-arrows-down-to-line"></i>
+        </button>
+        <button id="carve-toggle" data-action="toggle-carve" data-i18n-title="carve.button.title" data-i18n-aria-label="carve.button">
+          <i class="fa-solid fa-cubes-stacked"></i>
         </button>
       </div>
       <div id="mirror-control">
@@ -697,6 +701,35 @@
   </form>
 
   <!-- A new atlas: its pixels per unit asked first (see app.js). -->
+  <!-- Carving's slices, by the button while it goes on (see carve-mode.js). -->
+  <form id="carve-popup" class="grid-popup" hidden>
+    <div class="grid-popup-title" data-i18n="carve.counts"></div>
+    <label data-i18n-title="carve.count.y.title">
+      <span data-i18n="carve.count.y"></span>
+      <input name="y" type="text" inputmode="numeric" spellcheck="false">
+    </label>
+    <label data-i18n-title="carve.count.z.title">
+      <span data-i18n="carve.count.z"></span>
+      <input name="z" type="text" inputmode="numeric" spellcheck="false">
+    </label>
+    <label data-i18n-title="carve.count.x.title">
+      <span data-i18n="carve.count.x"></span>
+      <input name="x" type="text" inputmode="numeric" spellcheck="false">
+    </label>
+    <div class="grid-popup-title" data-i18n="carve.slice"></div>
+    <div class="carve-actions">
+      <button type="button" data-slice="whole" data-i18n-title="carve.slice.whole"><i class="fa-solid fa-square"></i></button>
+      <button type="button" data-slice="empty" data-i18n-title="carve.slice.empty"><i class="fa-regular fa-square"></i></button>
+      <button type="button" data-slice="previous" data-i18n-title="carve.slice.previous"><i class="fa-solid fa-angles-left"></i></button>
+      <button type="button" data-slice="next" data-i18n-title="carve.slice.next"><i class="fa-solid fa-angles-right"></i></button>
+      <button type="button" data-slice="all" data-i18n-title="carve.slice.all"><i class="fa-solid fa-layer-group"></i></button>
+    </div>
+    <div class="form-buttons">
+      <button type="button" data-carve="cancel" data-i18n="carve.cancel" data-i18n-title="carve.cancel.title"></button>
+      <button type="button" class="primary" data-carve="apply" data-i18n="carve.apply" data-i18n-title="carve.apply.title"></button>
+    </div>
+  </form>
+
   <form id="atlas-popup" class="grid-popup" hidden>
     <div class="grid-popup-title" data-i18n="html.atlas-popup.grid-popup-title.text"></div>
     <label data-i18n-title="html.atlas-popup.label.title">

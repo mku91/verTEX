@@ -917,5 +917,8 @@
  "dialog.picture.title": "Load the atlas from a file",
  "dialog.picture.filter": "Pictures",
  "add-menu.capsule": "Capsule…",
- "outliner.primitive.capsule": "Capsule"
+ "outliner.primitive.capsule": "Capsule",
+ "warnings.fix": "Fix",
+ "warnings.fix-all": "Fix all",
+ "warnings.fix.bent": "Split these faces into triangles: a triangle is always flat. The shape stays as it is, the texture too (each triangle keeps its corners' places on the atlas). Can be undone"
 }

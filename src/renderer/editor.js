@@ -1493,12 +1493,13 @@ export class Editor extends EventTarget {
     return true;
   }
 
-  // What is wrong with the model, as [{ text }] - for now, faces that are not
-  // flat: such a face cannot lie on the atlas without stretch, which is the
-  // one thing the unwrap is there to rule out.
+  // What is wrong with the model, as [{ text, faces? }] - for now, faces
+  // that are not flat: such a face cannot lie on the atlas without stretch,
+  // which is the one thing the unwrap is there to rule out. `faces`: the
+  // faces it is about, which splitFaces() puts right.
   problems() {
     const { faces, vertices, vertexObject, objects } = this.mesh;
-    const bent = new Map(); // object id -> how many
+    const bent = new Map(); // object id -> its bent faces
     faces.forEach((face, index) => {
       if (face.length < 4) return;
       const normal = this.mesh.faceNormal(index);
@@ -1508,11 +1509,42 @@ export class Editor extends EventTarget {
       const owner = vertexObject[face[0]];
       const ppu = this.atlasById(objects.find((object) => object.id === owner)?.atlas)?.ppu ?? this.atlases[0]?.ppu ?? 16;
       if ((Math.max(...heights) - Math.min(...heights)) * ppu <= 0.1) return;
-      bent.set(owner, (bent.get(owner) ?? 0) + 1);
+      bent.set(owner, [...(bent.get(owner) ?? []), index]);
     });
-    return [...bent].map(([id, count]) => ({
-      text: t('editor.warning.bent-faces', { count, object: objects.find((object) => object.id === id)?.name ?? '' }),
+    return [...bent].map(([id, list]) => ({
+      text: t('editor.warning.bent-faces', { count: list.length, object: objects.find((object) => object.id === id)?.name ?? '' }),
+      faces: list,
     }));
+  }
+
+  // Faces (by index) split into triangles - a triangle is always flat: the
+  // put-right of a face that is not (see problems()). The model's shape stays
+  // as it was; each triangle keeps its corners' places on the atlas, and the
+  // face's pinning. One undo step. Returns whether anything was split.
+  splitFaces(indices) {
+    const { faces } = this.mesh;
+    const list = [...new Set(indices)].filter((index) => faces[index]?.length > 3);
+    if (this.busy() || list.length === 0) return false;
+    const before = this.snapshot();
+    const added = [];
+    for (const index of list) {
+      const face = faces[index];
+      const piece = (triangle) => {
+        const made = [...triangle];
+        if (face.uv) made.uv = triangle.map((vertex) => [...face.uv[face.indexOf(vertex)]]);
+        if (face.pin) made.pin = true;
+        if (face.shaped) made.shaped = true;
+        return made;
+      };
+      const triangles = this.mesh.triangulate(index).map(piece);
+      faces[index] = triangles[0];
+      added.push(...triangles.slice(1));
+    }
+    faces.push(...added);
+    this.edited(before);
+    this.rebuildView();
+    this.emitChange();
+    return true;
   }
 
   // Takes a new picture for an atlas (by id; the one worked on, if none is

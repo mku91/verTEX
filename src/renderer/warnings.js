@@ -14,7 +14,8 @@ const point = (p) => `(${[p.x, p.y, p.z].map((n) => +n.toFixed(3)).join(', ')})`
 // vertices in question change.
 //
 // Next to it is the errors button, for what is wrong rather than doubtful:
-// faces that are not flat, which cannot be textured without stretch.
+// faces that are not flat, which cannot be textured without stretch - each
+// with a button that puts it right (splits them into triangles).
 export class Warnings {
   constructor(editor, { toast, button, errorButton, list }) {
     this.editor = editor;
@@ -153,10 +154,22 @@ export class Warnings {
     const head = make('div', null, 'warnings-head');
     head.append(make('span', t(errors ? 'warnings.head.errors' : 'warnings.head.warnings')));
     if (!errors && this.current.length > 1) head.append(action(t('warnings.merge-all'), () => this.answer(this.current, true)));
+    // An error that can be put right has its button (see Editor.problems()).
+    const fixable = this.errors.filter((error) => error.faces?.length);
+    const fix = (list) => {
+      this.editor.splitFaces(list.flatMap((error) => error.faces));
+      this.update();
+    };
+    if (errors && fixable.length > 1) head.append(action(t('warnings.fix-all'), () => fix(fixable)));
     const rows = errors
       ? this.errors.map((error) => {
           const row = make('div', null, 'warning-row');
           row.append(make('span', error.text));
+          if (error.faces?.length) {
+            const button = action(t('warnings.fix'), () => fix([error]));
+            button.title = t('warnings.fix.bent');
+            row.append(button);
+          }
           return row;
         })
       : [...this.current.map((warning) => {

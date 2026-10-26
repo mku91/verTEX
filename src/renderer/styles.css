@@ -3567,8 +3567,16 @@ input.refused {
 }
 
 .welcome-head .logo {
-  flex: 1;
   font-size: 26px;
+}
+
+/* The program's version, by its name: small, on its baseline. */
+.welcome-version {
+  flex: 1;
+  align-self: flex-end;
+  margin-bottom: 5px;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .welcome-head button {

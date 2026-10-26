@@ -74,7 +74,7 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         .visible(false)
         .menu(menu::build(app, &language)?)
         .additional_browser_args(&browser_args())
-        .initialization_script(language.script())
+        .initialization_script(language.script(&app.package_info().version.to_string()))
         // The page reads pictures from the clipboard (pasted into the UV
         // editor): allowed without asking, as the browser would ask a site.
         // Only that - what else a page may ask for is asked about as before.

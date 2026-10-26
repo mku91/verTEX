@@ -135,6 +135,8 @@ if (tauri) {
   const atlas = atlasFiles({ invoke, listen, word });
 
   window.vertex = {
+    // The program's version (from package.json, see src-tauri/tauri.conf.json).
+    version: start.version,
     locale: {
       get: () => start,
       set: (locale) => invoke('locale_set', { locale }),

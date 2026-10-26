@@ -18,6 +18,8 @@ export class Welcome {
     this.api = api ?? null;
     this.grid = element.querySelector('.welcome-grid');
     this.empty = element.querySelector('.welcome-empty');
+    // The program's version by its name (none known: nothing shown).
+    element.querySelector('.welcome-version').textContent = window.vertex?.version ? `v${window.vertex.version}` : '';
     this.pictures = []; // the object URLs of the cards' pictures, to be let go of
     this.backdrop = new WelcomeBackdrop(element.querySelector('canvas'));
 

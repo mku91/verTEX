@@ -44,13 +44,14 @@ impl Language {
         self.catalog.get(key).or_else(|| self.fallback.get(key)).and_then(Value::as_str).unwrap_or(key).into()
     }
 
-    // What the page is given before its scripts run (see host.js).
-    pub fn script(&self) -> String {
+    // What the page is given before its scripts run (see host.js), the
+    // program's version with it.
+    pub fn script(&self, version: &str) -> String {
         let languages: Vec<Value> = CATALOGS
             .iter()
             .map(|(id, _)| serde_json::json!({ "id": id, "name": catalog(id).get("language.name").cloned().unwrap_or(Value::from(*id)) }))
             .collect();
-        let start = serde_json::json!({ "locale": self.chosen, "catalog": self.catalog, "fallback": self.fallback, "languages": languages });
+        let start = serde_json::json!({ "version": version, "locale": self.chosen, "catalog": self.catalog, "fallback": self.fallback, "languages": languages });
         format!("window.__VERTEX_START__ = {start};")
     }
 }

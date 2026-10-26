@@ -922,5 +922,12 @@
  "outliner.primitive.capsule": "Capsule",
  "warnings.fix": "Fix",
  "warnings.fix-all": "Fix all",
- "warnings.fix.bent": "Split these faces into triangles: a triangle is always flat. The shape stays as it is, the texture too (each triangle keeps its corners' places on the atlas). Can be undone"
+ "warnings.fix.bent": "Split these faces into triangles: a triangle is always flat. The shape stays as it is, the texture too (each triangle keeps its corners' places on the atlas). Can be undone",
+ "update.title": "verTEX {version} is out",
+ "update.detail": "Update now? It takes a moment; the program starts again by itself.",
+ "update.install": "Update",
+ "update.later": "Later",
+ "update.progress": "Downloading the update… {percent}%",
+ "update.installing": "Installing the update…",
+ "update.failed": "The update failed"
 }

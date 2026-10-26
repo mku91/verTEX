@@ -142,6 +142,21 @@ if (tauri) {
       set: (locale) => invoke('locale_set', { locale }),
     },
     onMenu: (callback) => listen('menu', (event) => callback(event.payload)),
+    // A newer version of the program (see src-tauri/src/update.rs): check()
+    // gives { version, notes } or null; install() takes it, telling
+    // onProgress(bytes, total or null) how far it has got - and the program
+    // starts anew, updated.
+    updates: {
+      check: () => invoke('update_check'),
+      install: async (onProgress) => {
+        const stop = await listen('update-progress', (event) => onProgress(...event.payload));
+        try {
+          await invoke('update_install');
+        } finally {
+          stop();
+        }
+      },
+    },
     // The window as the editor wants it (maximized, with its menu bar), or as
     // the welcome screen does (no menu bar).
     editing: (on) => invoke('window_editing', { on }),

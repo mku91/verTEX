@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "node scripts/start.mjs",
-    "build": "node scripts/tauri.mjs build && node scripts/dist.mjs"
+    "build": "node scripts/tauri.mjs build && node scripts/dist.mjs",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",

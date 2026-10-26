@@ -32,6 +32,11 @@ deciding what the editor should do and how it should feel.
 - **The rest.** A physics preview, rendering sprites from the model, English
   and Russian interface, colour themes.
 
+## Download
+
+The installer is in [Releases](https://github.com/mku91/verTEX/releases). Once
+installed, the program offers new versions itself as it starts.
+
 ## Running and building
 
 You need [Node.js](https://nodejs.org/) and [Rust](https://rustup.rs/): the app
@@ -41,7 +46,7 @@ Windows is the only platform it is made and tested on.
 ```sh
 npm install
 npm start       # the app in development mode
-npm run build   # dist/verTEX.exe, one file of about 6 MB
+npm run build   # dist/: verTEX.exe (one file, about 6 MB) and its installer
 ```
 
 ---
@@ -78,6 +83,11 @@ verTEX я делал исключительно для себя, для свои
 - **Прочее.** Предпросмотр физики, рендер спрайтов из модели, английский и
   русский интерфейс, цветовые темы.
 
+### Скачать
+
+Установщик лежит в [Releases](https://github.com/mku91/verTEX/releases). После
+установки программа сама предлагает новые версии при запуске.
+
 ### Запуск и сборка
 
 Нужны [Node.js](https://nodejs.org/) и [Rust](https://rustup.rs/): программа
@@ -87,5 +97,5 @@ verTEX я делал исключительно для себя, для свои
 ```sh
 npm install
 npm start       # программа в режиме разработки
-npm run build   # dist/verTEX.exe, один файл примерно на 6 МБ
+npm run build   # dist/: verTEX.exe (один файл, около 6 МБ) и установщик
 ```

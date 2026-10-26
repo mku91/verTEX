@@ -8,6 +8,7 @@ mod files;
 mod locale;
 mod menu;
 mod system;
+mod update;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -181,6 +182,8 @@ fn main() {
     let (data, webview_dir) = profile();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::Updates::default())
         .manage(Windows::default())
         .manage(locale::Language::load(data.clone()))
         .manage(files::Folder(data))
@@ -209,8 +212,11 @@ fn main() {
             system::open_path,
             system::open_with,
             system::reveal,
+            update::update_check,
+            update::update_install,
         ])
         .setup(move |app| {
+            update::start(app.handle()); // asked while the page loads
             let window = open_main(app.handle(), webview_dir.clone())?;
             window.on_menu_event(|window, event| menu::handle(window, event.id().as_ref()));
             // A page that never says it is ready must not leave the window unseen.

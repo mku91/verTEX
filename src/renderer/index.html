@@ -36,6 +36,10 @@
       animation: splash-in 0.2s 0.4s forwards, splash-turn 0.8s linear infinite;
     }
     #splash.gone { opacity: 0; pointer-events: none; }
+    /* How far an update has got (see update-offer.js). */
+    #splash .splash-status { font-size: 13px; opacity: 0.7; }
+    /* A question asked while the splash is up (an update, see update-offer.js) is over it. */
+    #splash ~ .modal { z-index: 100001; }
     @keyframes splash-in { to { opacity: 1; } }
     @keyframes splash-turn { to { transform: rotate(1turn); } }
   </style>

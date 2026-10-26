@@ -37,6 +37,7 @@ import { NodeBones } from './node-bones.js';
 import { latinOnly, freeName } from './names.js';
 import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 import { canvasPNG } from './png.js';
+import { offerUpdate } from './update-offer.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -2111,10 +2112,13 @@ function refresh() {
 editor.addEventListener('change', refresh);
 refresh();
 
-// Loaded: the splash goes (see index.html).
+// Loaded: a newer version offered, if there is one (see update-offer.js),
+// and the splash goes (see index.html).
 {
   const splash = $('splash');
-  splash.addEventListener('transitionend', () => splash.remove(), { once: true });
-  requestAnimationFrame(() => splash.classList.add('gone'));
   window.__TAURI__?.core.invoke('page_loaded'); // (for npm start's progress, see scripts/start.mjs)
+  offerUpdate(splash).then(() => {
+    splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+    requestAnimationFrame(() => splash.classList.add('gone'));
+  });
 }

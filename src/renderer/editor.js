@@ -17,6 +17,7 @@ import { retrofy, paletteOf } from './retro.js';
 import { weightsOf } from './skin.js';
 import { t } from './i18n.js';
 import { ringTurn } from './ring-turn.js';
+import { snapElement, mergeLanded, weldTouching, touching } from './element-snap.js';
 
 // Tool id -> gizmo mode (null = no gizmo).
 // What the editor works on, see Editor.setWorkspace(); and the tools there.
@@ -270,6 +271,12 @@ export class Editor extends EventTarget {
       planeNormal: () => camera.getWorldDirection(new THREE.Vector3()),
       viewDirection: (point) => point.clone().sub(camera.position).normalize(),
       ray: (clientX, clientY) => this.pointerRay(clientX, clientY),
+      // A world point to the pointer's pixels, or null behind the camera.
+      project: (point) => {
+        const p = this.screenProjector(0, 0).project(point);
+        const rect = this.viewport.renderer.domElement.getBoundingClientRect();
+        return p && { x: p.x + rect.left, y: p.y + rect.top };
+      },
     };
 
     this.setupGizmo();
@@ -298,6 +305,7 @@ export class Editor extends EventTarget {
     this.view.applyTheme();
     this.gizmo.setColors(theme.axisX, theme.axisY, theme.axisZ, theme.hoveredFocus);
     this.pivotMarker.material.color.set(theme.pivot);
+    for (const part of this.snapMark.children) part.material.color.set(theme.snap);
     this.refreshHighlight(); // vertex colours, and a render
   }
 
@@ -318,6 +326,17 @@ export class Editor extends EventTarget {
     this.pivotMarker.renderOrder = 8;
     this.pivotMarker.visible = false;
     scene.add(this.pivotMarker);
+    // What a drag with Ctrl held has snapped to (see element-snap.js): its
+    // edges and its point, seen through everything.
+    this.snapMark = new THREE.Group();
+    this.snapMark.add(
+      new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ depthTest: false, transparent: true })),
+      new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false, transparent: true })),
+    );
+    this.snapMark.renderOrder = 9;
+    for (const part of this.snapMark.children) part.renderOrder = 9;
+    this.snapMark.visible = false;
+    scene.add(this.snapMark);
     // The pivot points of everything inside a selected node: the same mark,
     // smaller, as many of them as are needed at the moment.
     this.pivotRings = [];
@@ -3876,7 +3895,29 @@ export class Editor extends EventTarget {
       this.snapGrid.snap(lead.add(delta));
     }
     // Everything dragged follows that point rigidly.
-    const offset = lead.clone().sub(from);
+    let offset = lead.clone().sub(from);
+    // Or the elements near draw it, see element-snap.js.
+    const snapping = this.snappingToElements() && drag.parent === undefined && drag.viewer.project;
+    const snapped = snapping
+      ? snapElement({
+          mesh: this.mesh,
+          mode: drag.key === null ? 'vertex' : this.mode,
+          key: drag.key,
+          lead: drag.index,
+          moving: drag.moving,
+          hidden: this.topology.hiddenVertices,
+          cursor: { x: clientX, y: clientY },
+          project: drag.viewer.project,
+          seen: (point) => this.seenPast(point, drag),
+          free: offset,
+        })
+      : null;
+    if (snapped) {
+      offset = snapped.offset;
+      if (drag.axis) offset.projectOnVector(drag.axis);
+      lead.copy(from).add(offset);
+    }
+    this.showSnapMark(snapped?.mark);
     vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();
@@ -3896,6 +3937,12 @@ export class Editor extends EventTarget {
     drag.index = drag.vertex ?? this.nearestVertex(this.elementVertices(drag.key), drag.x, drag.y);
     const vertex = this.mesh.vertices[drag.index];
     drag.start = vertex.clone();
+    // The shape as it is now, for what hides what while snapping to elements (see seenPast()).
+    const { solid } = this.view;
+    drag.occluder = new THREE.Mesh(solid.geometry.clone(), solid.material);
+    drag.occluder.matrixAutoUpdate = false;
+    drag.occluder.matrixWorld.copy(solid.matrixWorld);
+    drag.occluder.geometry.computeBoundingSphere();
 
     // Grabbing a selected element drags the whole selection; grabbing an unselected
     // one drags it alone, or joins it to the selection when Shift is held.
@@ -3962,6 +4009,7 @@ export class Editor extends EventTarget {
     const { key, additive, start, before } = drag;
     this.drag = null;
     this.snapGrid.end();
+    this.showSnapMark(null);
     // The drag may have run in another view, with nothing hovered in this one.
     this.viewport.renderer.domElement.style.cursor = this.hovered === null ? '' : 'grab';
     if (!start) {
@@ -3970,9 +4018,59 @@ export class Editor extends EventTarget {
       return;
     }
     if (drag.parent !== undefined) this.finishPencil(drag);
+    else if (this.mode !== 'object' && this.snappingToElements()) this.mergeLandedVertices(drag);
     this.commit(before); // the whole drag is one undo step
     this.placeGizmo();
     this.emitChange();
+  }
+
+  // Snapping to elements is on: the grid switched off and Ctrl held (which
+  // with the grid on makes it finer, see setFineSnap()).
+  snappingToElements() {
+    return !this.snapGrid.enabled && this.snapGrid.fine;
+  }
+
+  // Whether the drag's viewer sees the point: a ray from the camera of the
+  // main view, or straight along an axis-aligned view, meeting no face of the
+  // shape as it was when the drag began - but those the drag carries whole.
+  // (A face it only stretches, at the dragged vertex, still hides what is
+  // behind: the far side of a shape is not snapped to.)
+  seenPast(point, drag) {
+    const { viewer, moving } = drag;
+    const main = viewer === this.mainViewer;
+    if (main && (this.shading === 'wireframe' || this.focus)) return true; // a wireframe hides nothing
+    const direction = main ? point.clone().sub(this.viewport.camera.position) : viewer.viewDirection(point);
+    const distance = main ? direction.length() : 1000;
+    direction.normalize();
+    const origin = point.clone().addScaledVector(direction, -distance);
+    this.raycaster.set(origin, direction);
+    // Short of the point: the faces it lies on don't count.
+    this.raycaster.far = main ? distance * (1 - 1e-3) : distance - 1e-4;
+    const { faces } = this.mesh;
+    return this.raycaster.intersectObject(drag.occluder, false).every((hit) =>
+      faces[this.view.triangleFaces[hit.faceIndex]]?.every((i) => moving.has(i)));
+  }
+
+  // Shows what a drag has snapped to - { points, lines } - or nothing (null).
+  showSnapMark(mark) {
+    const [lines, points] = this.snapMark.children;
+    this.snapMark.visible = !!mark;
+    if (mark) {
+      lines.geometry.setFromPoints(mark.lines.flat());
+      points.geometry.setFromPoints(mark.points);
+    }
+    this.viewport.requestRender();
+  }
+
+  // The end of a drag that snapped to elements: what landed on its like is
+  // merged, see mergeLanded(). (Part of the drag's undo step.)
+  mergeLandedVertices(drag) {
+    const remap = mergeLanded(this.mesh, new Set(drag.moving.keys()));
+    if (!remap) return;
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.selection = kept(this.selection);
+    this.target = kept(this.target);
+    this.rebuildView();
   }
 
   // --- pencil ------------------------------------------------------------
@@ -4031,6 +4129,7 @@ export class Editor extends EventTarget {
     const { index, start, others, pivots, parent, before } = this.drag;
     this.drag = null;
     this.snapGrid.end();
+    this.showSnapMark(null);
     this.viewport.renderer.domElement.style.cursor = '';
     if (start && parent !== undefined) {
       this.restore(before); // the pencil's new vertex goes away with its edge
@@ -4865,7 +4964,7 @@ export class Editor extends EventTarget {
   joinObjects(indices) {
     const { mesh } = this;
     const objects = [...new Set(indices)].map((index) => mesh.objects[index]).filter((object) => object && object.kind !== 'node');
-    if (objects.length < 2 || this.busy()) return;
+    if (objects.length < 2 || this.busy()) return null;
     if (this.operation) this.setOperation(null);
     this.history.push(this.snapshot());
     const [kept, ...gone] = objects;
@@ -4884,6 +4983,29 @@ export class Editor extends EventTarget {
       if (object.atlas && object.atlas !== kept.atlas) this.forgetPlaces(object.id);
       mesh.mergeObjects(kept.id, object.id);
     }
+    this.rebuildView();
+    this.selectionChanged();
+    return kept.id;
+  }
+
+  // Whether the objects (indices in the objects list) touch, corner on
+  // corner: whether mergeObjects() would weld anything.
+  objectsTouch(indices) {
+    return touching(this.mesh, indices.map((index) => this.mesh.objects[index]?.id));
+  }
+
+  // Merges objects: joins them (see joinObjects()), then welds them where
+  // they touch - vertices in one place become one, faces pressed together
+  // face to face go (see weldTouching()). What only overlaps stays as it is.
+  // One undo step.
+  mergeObjects(indices) {
+    const id = this.joinObjects(indices);
+    if (id === null) return;
+    const remap = weldTouching(this.mesh, id);
+    if (!remap) return;
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.selection = kept(this.selection);
+    this.target = kept(this.target);
     this.rebuildView();
     this.selectionChanged();
   }

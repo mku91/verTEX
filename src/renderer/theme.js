@@ -36,6 +36,7 @@ export const THEMES = {
     hovered: '#f8f8f2',
     hoveredFocus: '#f1fa8c',
     cut: '#50fa7b',
+    snap: '#50fa7b', // what a drag with Ctrl snaps to (element-snap.js)
     pivot: '#f1fa8c', // pivot point markers outside the pivot tool
     around: '#44475a', // the rest of the node, in the three views
     snapDot: '#f8f8f2',
@@ -73,6 +74,7 @@ export const THEMES = {
     hovered: '#ffffff',
     hoveredFocus: '#ffd23f',
     cut: '#50fa7b',
+    snap: '#50fa7b', // what a drag with Ctrl snaps to (element-snap.js)
     pivot: '#f1fa8c',
     around: '#3a3f4b',
     snapDot: '#ffffff',

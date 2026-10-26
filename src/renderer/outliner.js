@@ -3,12 +3,14 @@ import { MARKER_COLORS, markerColor } from './marker-colors.js';
 import { BODY_COLORS, SHAPE_ICONS, shapeLabel } from './collisions.js';
 import { latinOnly } from './names.js';
 import { boundByNode, selectBound } from './skin.js';
-import { confirmIt } from './ask-dialog.js';
+import { ask, confirmIt } from './ask-dialog.js';
 import { t } from './i18n.js';
 
 // Objects joined - asked first when they are on different atlases: the
 // joined one is on the first one's, and the others' faces are laid out on
 // it anew, what was painted for them left behind.
+// And when they touch, corner on corner: whether to weld them there (see
+// Editor.mergeObjects()) or only put them together.
 async function joinAsked(editor, joined) {
   const { objects } = editor.mesh;
   const atlases = new Set(joined.map((index) => objects[index]?.atlas).filter(Boolean));
@@ -21,7 +23,21 @@ async function joinAsked(editor, joined) {
     );
     if (!sure) return;
   }
-  editor.joinObjects(joined);
+  const weld = editor.objectsTouch(joined)
+    ? await ask({
+        title: t('outliner.weld.title'),
+        detail: t('outliner.weld.detail'),
+        buttons: [
+          { label: t('ask.cancel'), value: null, aside: true, tone: 'lose' }, // nothing is done (Esc too)
+          { label: t('ask.no'), value: false },
+          { label: t('ask.yes'), value: true, primary: true },
+        ],
+        cancel: null,
+      })
+    : false;
+  if (weld === null) return;
+  if (weld) editor.mergeObjects(joined);
+  else editor.joinObjects(joined);
 }
 
 const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';

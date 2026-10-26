@@ -166,6 +166,12 @@ export class OrthoViews {
         const origin = this.unproject(view, x, y).addScaledVector(direction, -1000);
         return new THREE.Ray(origin, direction.clone());
       },
+      // A world point to the pointer's pixels.
+      project: (point) => {
+        const p = this.project(view, point);
+        const rect = view.canvas.getBoundingClientRect();
+        return { x: p.x + rect.left, y: p.y + rect.top };
+      },
     };
 
     this.updateTitle(view);

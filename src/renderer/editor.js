@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid, ROTATION_STEP } from './snap-grid.js';
 import { History } from './history.js';
@@ -327,11 +330,12 @@ export class Editor extends EventTarget {
     this.pivotMarker.visible = false;
     scene.add(this.pivotMarker);
     // What a drag with Ctrl held has snapped to (see element-snap.js): its
-    // edges and its point, seen through everything.
+    // edges and its point, thick (plain GL lines are one pixel wide), seen
+    // through everything.
     this.snapMark = new THREE.Group();
     this.snapMark.add(
-      new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ depthTest: false, transparent: true })),
-      new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, depthTest: false, transparent: true })),
+      new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ linewidth: 5, depthTest: false, transparent: true })),
+      new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 14, sizeAttenuation: false, map: dotTexture(), depthTest: false, transparent: true })),
     );
     this.snapMark.renderOrder = 9;
     for (const part of this.snapMark.children) part.renderOrder = 9;
@@ -4056,8 +4060,12 @@ export class Editor extends EventTarget {
     const [lines, points] = this.snapMark.children;
     this.snapMark.visible = !!mark;
     if (mark) {
-      lines.geometry.setFromPoints(mark.lines.flat());
+      // (A new geometry each time: a thick line's one keeps its first size.)
+      lines.geometry.dispose();
+      lines.geometry = new LineSegmentsGeometry().setPositions(mark.lines.flat().flatMap((p) => p.toArray()));
+      lines.visible = mark.lines.length > 0;
       points.geometry.setFromPoints(mark.points);
+      points.visible = mark.points.length > 0; // (an empty list leaves the last dots in place)
     }
     this.viewport.requestRender();
   }

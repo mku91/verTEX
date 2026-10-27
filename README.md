@@ -49,6 +49,22 @@ npm start       # the app in development mode
 npm run build   # dist/: verTEX.exe (one file, about 6 MB) and its installer
 ```
 
+## License
+
+verTEX is source-available, not open source in the strict sense: the code is
+open, but the program may not be sold. In short:
+
+- **Use it for anything**, commercial work included. What you make with it -
+  models, textures, exported files - is yours: use and sell it as you like.
+- **Fork it and change it** as you like, and share your version, for free.
+- **Don't sell it**: neither verTEX nor a fork of it may be sold or distributed
+  for money. A fork stays under the same terms.
+
+The full terms are in [LICENSE](LICENSE): the
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+with an additional permission for any use of the program and of what is made
+with it.
+
 ---
 
 ## Русский
@@ -99,3 +115,20 @@ npm install
 npm start       # программа в режиме разработки
 npm run build   # dist/: verTEX.exe (один файл, около 6 МБ) и установщик
 ```
+
+### Лицензия
+
+verTEX — source-available, а не open source в строгом смысле: код открыт, но
+программу нельзя продавать. Коротко:
+
+- **Пользоваться можно для чего угодно**, в том числе в коммерческой работе.
+  Всё, что в ней сделано (модели, текстуры, экспортированные файлы), твоё:
+  используй и продавай как хочешь.
+- **Форкать и менять можно** как угодно и делиться своей версией, бесплатно.
+- **Продавать нельзя**: ни verTEX, ни его форк нельзя продавать или
+  распространять за деньги. Форк остаётся под теми же условиями.
+
+Полные условия в [LICENSE](LICENSE):
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+с дополнительным разрешением на любое использование программы и того, что в
+ней сделано.

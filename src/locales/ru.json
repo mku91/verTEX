@@ -533,8 +533,8 @@
  "app.hotkeys.fixed.alt.keys": "Alt (зажат)",
  "app.hotkeys.fixed.f1": "Развёртка: приглушить картинку, кроме грани под указателем (на развёртке или на модели)",
  "app.hotkeys.fixed.f1.keys": "F1 (зажат)",
- "app.hotkeys.fixed.alt-wheel": "Экструд: расширить / сузить вытягиваемую грань на шаг малой сетки",
- "app.hotkeys.fixed.alt-wheel.keys": "Alt + колесо",
+ "app.hotkeys.fixed.shift-wheel": "Экструд: расширить / сузить вытягиваемую грань на шаг малой сетки",
+ "app.hotkeys.fixed.shift-wheel.keys": "Shift + колесо",
  "app.hotkeys.fixed.ctrl-alt": "Перетаскивание числового поля: шаг 0.1 / 0.01",
  "app.hotkeys.fixed.ctrl-alt.keys": "Ctrl / Alt (зажаты)",
  "app.hotkeys.fixed.xcz": "При перетаскивании: только по оси X / Y / Z",
@@ -965,5 +965,9 @@
  "update.later": "Позже",
  "update.progress": "Загрузка обновления… {percent}%",
  "update.installing": "Установка обновления…",
- "update.failed": "Не удалось обновиться"
+ "update.failed": "Не удалось обновиться",
+ "html.inset-toggle.title": "Врезка: внутри каждой грани её уменьшенная копия, связанная рамкой",
+ "html.inset-toggle.aria-label": "Врезка",
+ "app.hotkeys.op.inset": "Врезка",
+ "app.operation.inset": "Врезка"
 }

@@ -249,6 +249,132 @@ export class EditableMesh {
     });
   }
 
+  // Insets faces (indices), each on its own - Blender's Inset Faces,
+  // Individual: inside each, a copy of it on new vertices, joined to its
+  // sides by a ring of quads. By zero distance for now: the copy's corners
+  // are where the face's are, and go inwards by `moves`. Returns the insets,
+  // { face (the copy's index, where the face was), loop (the face's
+  // vertices), inner (the copy's), moves (Vector3 per corner: where it goes
+  // for an inset of 1, along the face), limit (the most the inset can be
+  // before the copy turns inside out), ring (the quads' indices), uv (the
+  // face's picture as a function of a point on it, or null) }.
+  insetFaces(faceIndices) {
+    const insets = [];
+    for (const index of faceIndices) {
+      const face = this.faces[index];
+      const loop = [...face];
+      const normal = this.faceNormal(index);
+      const object = this.vertexObject[loop[0]];
+      const inner = loop.map((vertex) => {
+        const { x, y, z } = this.vertices[vertex];
+        const copy = this.addVertex(x, y, z, object);
+        this.copyWeights(vertex, copy);
+        return copy;
+      });
+      // A corner goes in along its two sides' inward normals at once, so
+      // that the copy's sides stand one inset from the face's (a mitre).
+      const inward = loop.map((vertex, k) => {
+        const next = this.vertices[loop[(k + 1) % loop.length]].clone().sub(this.vertices[vertex]);
+        return normal.clone().cross(next).normalize(); // a face runs counter-clockwise: inside is to the left
+      });
+      const moves = loop.map((_, k) => {
+        const a = inward[(k - 1 + loop.length) % loop.length];
+        const b = inward[k];
+        const along = 1 + a.dot(b);
+        return along < 1e-3 ? b.clone() : a.clone().add(b).divideScalar(along);
+      });
+      // The copy's side k turns over when its ends have closed in past each other.
+      let limit = Infinity;
+      loop.forEach((vertex, k) => {
+        const l = (k + 1) % loop.length;
+        const side = this.vertices[loop[l]].clone().sub(this.vertices[vertex]);
+        const closing = side.dot(moves[l].clone().sub(moves[k]));
+        if (closing < 0) limit = Math.min(limit, -side.lengthSq() / closing);
+      });
+      const uv = face.uv ? atlasMap(this, loop, face.uv, normal) : null;
+      const copy = [...inner];
+      const ring = loop.map((vertex, k) => [vertex, loop[(k + 1) % loop.length], inner[(k + 1) % loop.length], inner[k]]);
+      for (const made of [copy, ...ring]) {
+        if (face.pin) made.pin = true;
+        if (face.shaped) made.shaped = true;
+      }
+      this.faces[index] = copy;
+      const first = this.faces.length;
+      this.faces.push(...ring);
+      insets.push({ face: index, loop, inner, moves, limit, ring: ring.map((_, k) => first + k), uv });
+    }
+    return insets;
+  }
+
+  // Puts the insets (see insetFaces()) `distance` in from their faces' sides,
+  // with their corners' places on the atlas where those points are on the
+  // faces' pictures.
+  placeInsets(insets, distance) {
+    for (const { face, loop, inner, moves, ring, uv } of insets) {
+      inner.forEach((vertex, k) => this.vertices[vertex].copy(this.vertices[loop[k]]).addScaledVector(moves[k], distance));
+      if (!uv) continue;
+      this.faces[face].uv = inner.map((vertex) => uv(this.vertices[vertex]));
+      for (const index of ring) this.faces[index].uv = this.faces[index].map((vertex) => uv(this.vertices[vertex]));
+    }
+  }
+
+  // A face (by index) that is not flat, split into as few flat pieces as
+  // there can be - Blender's Split Non-Planar Faces: cut along diagonals,
+  // every way there is, the fewest pieces kept (a face of many corners, too
+  // many to try them all: triangles, those in one plane joined again). As
+  // vertex loops, turned the way the face is.
+  flatPieces(faceIndex) {
+    const face = this.faces[faceIndex];
+    if (this.isCoplanar(face)) return [face];
+    // The face seen along its normal, to tell a diagonal inside it.
+    const normal = this.faceNormal(faceIndex);
+    const u = new THREE.Vector3(1, 0, 0);
+    if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
+    u.cross(normal).normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u);
+    const flat = new Map(face.map((i) => [i, { x: this.vertices[i].dot(u), y: this.vertices[i].dot(v) }]));
+    if (face.length > FLAT_SEARCH_CORNERS) return this.joinFlat(this.triangulate(faceIndex));
+
+    const memo = new Map();
+    const best = (loop) => {
+      const key = loop.join(',');
+      if (memo.has(key)) return memo.get(key);
+      let found = this.isCoplanar(loop) ? [loop] : null;
+      for (let i = 0; i < loop.length && !(found?.length === 1); i++) {
+        for (let j = i + 2; j < loop.length; j++) {
+          if (i === 0 && j === loop.length - 1) continue; // neighbours
+          if (!insideDiagonal(loop, i, j, flat)) continue;
+          const a = best(loop.slice(i, j + 1));
+          const b = best([...loop.slice(j), ...loop.slice(0, i + 1)]);
+          if (a && b && (!found || a.length + b.length < found.length)) found = [...a, ...b];
+        }
+      }
+      memo.set(key, found);
+      return found;
+    };
+    return best([...face]) ?? this.triangulate(faceIndex);
+  }
+
+  // Triangles (vertex loops) of one face joined back where two that share an
+  // edge lie in one plane, for as long as any do.
+  joinFlat(pieces) {
+    const loops = pieces.map((piece) => [...piece]);
+    for (let joined = true; joined; ) {
+      joined = false;
+      search: for (let p = 0; p < loops.length; p++) {
+        for (let q = p + 1; q < loops.length; q++) {
+          const merged = joinLoops(loops[p], loops[q]);
+          if (!merged || !this.isCoplanar(merged)) continue;
+          loops[p] = merged;
+          loops.splice(q, 1);
+          joined = true;
+          break search;
+        }
+      }
+    }
+    return loops;
+  }
+
   // A cone standing on the grid, as a new object: a base of `sides` vertices,
   // `size` wide, and an apex `size` above its middle. Returns the new vertices.
   addCone(sides = 8, size = 1) {
@@ -1118,6 +1244,7 @@ export class EditableMesh {
 // The theme's colours as THREE.Color objects; loadColors() refills them.
 const COLOR_SURFACE = new THREE.Color();
 const COLOR_WHITE = new THREE.Color(1, 1, 1);
+const COLOR_BENT = new THREE.Color();
 const COLOR_WIRE = new THREE.Color();
 const COLOR_WIRE_FOCUS = new THREE.Color();
 const COLOR_VERTEX = new THREE.Color();
@@ -1138,6 +1265,7 @@ function loadColors() {
   COLOR_SELECTED.set(theme.selected);
   COLOR_HOVERED.set(theme.hovered);
   COLOR_CUT.set(theme.cut);
+  COLOR_BENT.set(theme.bent);
 }
 loadColors();
 const NO_HIGHLIGHT = { selectedFaces: [], hoveredFaces: [], selectedEdges: [], hoveredEdges: [] };
@@ -1363,6 +1491,81 @@ const TEXELS_FRAGMENT = /* glsl */ `
 // How much of the picture shows in the focus look, on a textured model (see applyLook()).
 const XRAY_OPACITY = 0.65;
 
+// A face's picture, as a function: a point on the face (Vector3) to its
+// place on the atlas, [x, y] - the one flat mapping that puts the face's
+// corners on their places (`uv`), from the three of them that span the most.
+function atlasMap(mesh, loop, uv, normal) {
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
+  u.cross(normal).normalize();
+  const v = new THREE.Vector3().crossVectors(normal, u);
+  const flat = loop.map((vertex) => [mesh.vertices[vertex].dot(u), mesh.vertices[vertex].dot(v)]);
+  let best = null;
+  let area = 0;
+  for (let a = 0; a < loop.length; a++) {
+    for (let b = a + 1; b < loop.length; b++) {
+      for (let c = b + 1; c < loop.length; c++) {
+        const size = Math.abs((flat[b][0] - flat[a][0]) * (flat[c][1] - flat[a][1]) - (flat[c][0] - flat[a][0]) * (flat[b][1] - flat[a][1]));
+        if (size > area) [best, area] = [[a, b, c], size];
+      }
+    }
+  }
+  if (!best) return () => [...uv[0]];
+  const [a, b, c] = best;
+  const e1 = [flat[b][0] - flat[a][0], flat[b][1] - flat[a][1]];
+  const e2 = [flat[c][0] - flat[a][0], flat[c][1] - flat[a][1]];
+  const det = e1[0] * e2[1] - e2[0] * e1[1];
+  return (point) => {
+    const p = [point.dot(u) - flat[a][0], point.dot(v) - flat[a][1]];
+    const s = (p[0] * e2[1] - e2[0] * p[1]) / det;
+    const t = (e1[0] * p[1] - p[0] * e1[1]) / det;
+    return [0, 1].map((k) => uv[a][k] + s * (uv[b][k] - uv[a][k]) + t * (uv[c][k] - uv[a][k]));
+  };
+}
+
+// The most corners a face may have for flatPieces() to try every way of
+// cutting it; one with more is cut into triangles and joined back.
+const FLAT_SEARCH_CORNERS = 12;
+
+// Whether the diagonal from loop[i] to loop[j] runs inside the loop, as
+// `flat` (vertex -> { x, y }) has it: it crosses no side and its middle is in.
+function insideDiagonal(loop, i, j, flat) {
+  const a = flat.get(loop[i]);
+  const b = flat.get(loop[j]);
+  const cross = (o, p, q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  for (let k = 0; k < loop.length; k++) {
+    const l = (k + 1) % loop.length;
+    if ([k, l].includes(i) || [k, l].includes(j)) continue;
+    const c = flat.get(loop[k]);
+    const d = flat.get(loop[l]);
+    if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return false;
+  }
+  const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  let inside = false;
+  loop.forEach((vertex, k) => {
+    const p = flat.get(vertex);
+    const q = flat.get(loop[(k + 1) % loop.length]);
+    if (p.y > middle.y !== q.y > middle.y && middle.x < ((q.x - p.x) * (middle.y - p.y)) / (q.y - p.y) + p.x) inside = !inside;
+  });
+  return inside;
+}
+
+// Two loops that share one edge (running opposite ways) as one, round the
+// both of them; null when they share no edge, or more than its two corners.
+function joinLoops(p, q) {
+  for (let k = 0; k < p.length; k++) {
+    const a = p[k];
+    const b = p[(k + 1) % p.length];
+    const m = q.indexOf(b);
+    if (m < 0 || q[(m + 1) % q.length] !== a) continue;
+    const fromB = [...p.slice(k + 1), ...p.slice(0, k + 1)]; // b ... a
+    const fromA = [...q.slice(m + 1), ...q.slice(0, m + 1)]; // a ... b
+    const merged = [...fromB, ...fromA.slice(1, -1)];
+    return new Set(merged).size === merged.length ? merged : null;
+  }
+  return null;
+}
+
 // Thick lines: plain GL lines are always one pixel wide.
 function edgeOverlay(color) {
   return new LineSegments2(new LineSegmentsGeometry(), new LineMaterial({ color, linewidth: 3 }));
@@ -1494,6 +1697,7 @@ export class MeshView {
     };
     this.tints = { front: tint(THREE.FrontSide), back: tint(THREE.BackSide) };
     this.shading = 'solid'; // 'solid' | 'wireframe' | 'orientation'
+    this.bent = new Set(); // faces that are not flat: red in the solid look, see setBent()
     this.focus = false;
     this.light = false; // light edges and vertices, as on a dark wireframe
 
@@ -1732,8 +1936,10 @@ export class MeshView {
       return [object.id, hex ? new THREE.Color(hex) : COLOR_SURFACE];
     }));
     const colors = new Float32Array(this.triangleFaces.length * 9);
+    const warned = this.shading === 'solid' && !painted;
     this.triangleFaces.forEach((face, triangle) => {
-      const tint = painted && this.atlasOfFace(faces[face]) !== null ? COLOR_WHITE : tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
+      const tint = warned && this.bent.has(face) ? COLOR_BENT
+        : painted && this.atlasOfFace(faces[face]) !== null ? COLOR_WHITE : tints.get(vertexObject[faces[face][0]]) ?? COLOR_SURFACE;
       for (let corner = 0; corner < 3; corner++) tint.toArray(colors, triangle * 9 + corner * 3);
     });
     this.solid.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -1878,6 +2084,16 @@ export class MeshView {
   setShading(mode) {
     this.shading = mode;
     this.applyLook();
+    this.updateSurfaceColors(); // the bent faces' red is the solid look's, see setBent()
+  }
+
+  // The faces (indices) that are not flat - the errors' list's (see
+  // Editor.problems()): drawn red in the solid look, to be found.
+  setBent(faces) {
+    const next = new Set(faces);
+    if (next.size === this.bent.size && [...next].every((face) => this.bent.has(face))) return;
+    this.bent = next;
+    this.updateSurfaceColors();
   }
 
   // Focus look for modal operations, on top of any shading: a wireframe.

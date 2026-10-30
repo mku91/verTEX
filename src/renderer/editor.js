@@ -63,6 +63,28 @@ function dotTexture() {
   return texture;
 }
 
+// How far a point (on the outline's plane) is in from the nearest side of
+// the outline (Vector3s round a flat face, `normal` its facing): 0 outside.
+function insideDepth(outline, normal, point) {
+  const u = new THREE.Vector3(1, 0, 0);
+  if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
+  u.cross(normal).normalize();
+  const v = new THREE.Vector3().crossVectors(normal, u);
+  const flat = outline.map((p) => ({ x: p.dot(u), y: p.dot(v) }));
+  const at = { x: point.dot(u), y: point.dot(v) };
+  let inside = false;
+  let nearest = Infinity;
+  flat.forEach((p, k) => {
+    const q = flat[(k + 1) % flat.length];
+    if (p.y > at.y !== q.y > at.y && at.x < ((q.x - p.x) * (at.y - p.y)) / (q.y - p.y) + p.x) inside = !inside;
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const t = THREE.MathUtils.clamp(((at.x - p.x) * dx + (at.y - p.y) * dy) / (dx * dx + dy * dy || 1), 0, 1);
+    nearest = Math.min(nearest, Math.hypot(p.x + t * dx - at.x, p.y + t * dy - at.y));
+  });
+  return inside ? nearest : 0;
+}
+
 function pivotTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 64;
@@ -95,7 +117,7 @@ export const AXIS_LOCKS = {
 export const MODES = ['object', 'face', 'edge', 'vertex'];
 
 // Selection modes each modal operation works in; the first one is its default.
-export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], pencil: ['vertex'], polygon: ['face'], place: ['object'] };
+export const OPERATION_MODES = { cut: ['face'], extrude: ['face', 'edge'], inset: ['face'], pencil: ['vertex'], polygon: ['face'], place: ['object'] };
 
 // The place tool: the sides of an object's bounds, along its own axes, that it can lie on.
 export const PLACE_SIDES = {
@@ -208,6 +230,7 @@ export class Editor extends EventTarget {
     this.cut = null;
     // The extrusion being pulled out: its new vertices and how far they went.
     this.extrude = null;
+    this.inset = null; // an inset in progress, see beginInset()
     // The polygon tool's state: its work plane and the outline drawn so far.
     this.polygon = null;
     this.axisLock = 'free';
@@ -419,7 +442,7 @@ export class Editor extends EventTarget {
         if (event.key === 'Shift') this.setShiftHeld(type === 'keydown'); // the brush's line, see setShiftHeld()
         if (event.code === 'Space') this.setSpaceHeld(type === 'keydown'); // ... along the faces
         if (event.key !== 'Alt') return;
-        if (this.tool === 'scale' || this.painting || this.extrude) event.preventDefault(); // (an extrusion's taper, see taperExtrude())
+        if (this.tool === 'scale' || this.painting || this.extrude || this.inset) event.preventDefault(); // (an extrusion or an inset off the grid, see moveExtrude(), moveInset())
         this.setAltHeld(type === 'keydown');
       });
     }
@@ -445,6 +468,8 @@ export class Editor extends EventTarget {
     const picking = this.picking;
     this.altHeld = on;
     if (this.gizmo.dragging && this.gizmo.mode === 'scale') this.applyGizmo();
+    if (this.inset?.pointer) this.moveInset(...this.inset.pointer);
+    if (this.extrude?.pointer) this.moveExtrude(...this.extrude.pointer);
     if (this.picking !== picking) this.emitChange();
     this.updateLinePreview(); // the pipette shows no line
   }
@@ -1541,10 +1566,11 @@ export class Editor extends EventTarget {
     }));
   }
 
-  // Faces (by index) split into triangles - a triangle is always flat: the
-  // put-right of a face that is not (see problems()). The model's shape stays
-  // as it was; each triangle keeps its corners' places on the atlas, and the
-  // face's pinning. One undo step. Returns whether anything was split.
+  // Faces (by index) split into as few flat pieces as there can be (see
+  // EditableMesh.flatPieces()): the put-right of a face that is not (see
+  // problems()). The model's shape stays as it was; each piece keeps its
+  // corners' places on the atlas, and the face's pinning. One undo step.
+  // Returns whether anything was split.
   splitFaces(indices) {
     const { faces } = this.mesh;
     const list = [...new Set(indices)].filter((index) => faces[index]?.length > 3);
@@ -1560,9 +1586,9 @@ export class Editor extends EventTarget {
         if (face.shaped) made.shaped = true;
         return made;
       };
-      const triangles = this.mesh.triangulate(index).map(piece);
-      faces[index] = triangles[0];
-      added.push(...triangles.slice(1));
+      const pieces = this.mesh.flatPieces(index).map(piece);
+      faces[index] = pieces[0];
+      added.push(...pieces.slice(1));
     }
     faces.push(...added);
     this.edited(before);
@@ -2039,15 +2065,18 @@ export class Editor extends EventTarget {
     const dom = this.viewport.renderer.domElement;
     let down = null; // LMB press on empty space; a click there clears the selection
 
-    // Alt + the wheel while extruding tapers the cap (see taperExtrude()):
-    // the wheel is not the camera's then. (Capture phase: before the camera's own listener.)
+    // Shift + the wheel while extruding tapers the cap (see taperExtrude()):
+    // the wheel is not the camera's then. (Capture phase: before the camera's
+    // own listener.) The browser turns a wheel with Shift sideways: its
+    // travel may come as deltaX.
     dom.addEventListener(
       'wheel',
       (event) => {
-        if (!this.extrude || !event.altKey) return;
+        if (!this.extrude || !event.shiftKey) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        this.taperExtrude(event.deltaY * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1));
+        const travel = event.deltaY || event.deltaX;
+        this.taperExtrude(travel * (event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1));
       },
       { capture: true, passive: false },
     );
@@ -2083,6 +2112,7 @@ export class Editor extends EventTarget {
           event.stopImmediatePropagation();
           if (this.operation === 'cut') this.pressCut(event.clientX, event.clientY);
           else if (this.operation === 'extrude') this.pressExtrude(event.clientX, event.clientY);
+          else if (this.operation === 'inset') this.pressInset(event.clientX, event.clientY);
           else if (this.operation === 'place') this.pressPlace(event.clientX, event.clientY);
           else this.pressPolygon(event.clientX, event.clientY);
           return;
@@ -2142,6 +2172,10 @@ export class Editor extends EventTarget {
       }
       if (this.extrude) {
         this.moveExtrude(event.clientX, event.clientY);
+        return;
+      }
+      if (this.inset) {
+        this.moveInset(event.clientX, event.clientY);
         return;
       }
       if (this.polygon) {
@@ -3047,6 +3081,7 @@ export class Editor extends EventTarget {
     const wasIdle = this.operation === null;
     this.cancelCut();
     this.cancelExtrude();
+    this.cancelInset();
     this.endPolygon();
     this.endPlace();
 
@@ -3063,6 +3098,7 @@ export class Editor extends EventTarget {
       }
       if (name === 'cut' && keys.length === 1) this.beginCut(keys[0]);
       if (name === 'extrude' && keys.length > 0) this.beginExtrude(keys);
+      if (name === 'inset' && keys.length > 0) this.beginInset(keys);
       if (name === 'place') this.beginPlace();
       if (name === 'polygon') this.polygon = { axis: null, offset: 0, points: [], cursor: null, problem: null };
     } else {
@@ -3111,7 +3147,7 @@ export class Editor extends EventTarget {
   escapeOperation() {
     if (!this.operation) return false;
     const cancelled =
-      this.cancelDrag() || this.cancelCut() || this.cancelExtrude() || this.clearPolygonOutline();
+      this.cancelDrag() || this.cancelCut() || this.cancelExtrude() || this.cancelInset() || this.clearPolygonOutline();
     if (!cancelled) this.setOperation(null);
     return true;
   }
@@ -3536,7 +3572,7 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
-  // Alt + the wheel while extruding: the cap is grown or shrunk about its
+  // Shift + the wheel while extruding: the cap is grown or shrunk about its
   // middle, a fine grid step a notch - its farthest corner goes that much
   // farther from the middle, or nearer, along the world's axes, so that a
   // cap whose corners were on the fine grid keeps them there. The sides
@@ -3635,8 +3671,10 @@ export class Editor extends EventTarget {
     const hit = this.pointerRay(clientX, clientY).intersectPlane(plane, new THREE.Vector3());
     if (!hit) return;
 
+    // By the grid's steps; with Alt held, freely.
     const step = this.snapGrid.activeStep;
-    this.extrude.distance = Math.round(hit.sub(anchor).dot(normal) / step) * step;
+    const free = hit.sub(anchor).dot(normal);
+    this.extrude.distance = this.altHeld ? free : Math.round(free / step) * step;
     this.placeExtrude();
   }
 
@@ -3675,6 +3713,134 @@ export class Editor extends EventTarget {
     if (!this.extrude) return false;
     const { before } = this.extrude;
     this.extrude = null;
+    this.restore(before);
+    return true;
+  }
+
+  // --- inset -------------------------------------------------------------
+
+  // LMB in inset mode: the first press grabs a face (with the other selected
+  // ones, if it is one of them) and starts the inset - the pointer going
+  // towards the face's middle makes it deeper; the next press fixes it.
+  pressInset(clientX, clientY) {
+    if (this.inset) {
+      this.applyInset();
+      return;
+    }
+    const key = this.pickFace(clientX, clientY);
+    if (key === null) {
+      this.clearSelection();
+      return;
+    }
+    this.beginInset(this.picked.has(key) ? [key, ...[...this.picked].filter((other) => other !== key)] : [key]);
+    if (this.inset) this.moveInset(clientX, clientY);
+  }
+
+  // Insets the given faces, each on its own (see EditableMesh.insetFaces()),
+  // by zero distance for now. The first is the one the pointer is read on.
+  beginInset(keys) {
+    const before = this.snapshot();
+    const [lead] = keys;
+    const normal = this.mesh.faceNormal(lead);
+    const corners = this.mesh.faces[lead];
+    const middle = corners.reduce((sum, i) => sum.add(this.mesh.vertices[i]), new THREE.Vector3()).divideScalar(corners.length);
+    // The lead face's outline (its sides stay where they are), for reading
+    // the pointer on: see moveInset().
+    const outline = corners.map((i) => this.mesh.vertices[i].clone());
+    const insets = this.mesh.insetFaces(keys);
+    this.selection = new Set(insets.flatMap((inset) => inset.inner));
+    this.rebuildView(); // selects the copies
+    // `limit`: the deepest the copies go - where the first of them closes up
+    // into a point or a line (see applyInset()).
+    const limit = Math.min(...insets.map((inset) => inset.limit));
+    this.inset = { before, insets, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, middle), normal, outline, distance: 0, limit };
+    this.emitChange();
+  }
+
+  moveInset(clientX, clientY) {
+    const inset = this.inset;
+    inset.pointer = [clientX, clientY];
+    const hit = this.pointerRay(clientX, clientY).intersectPlane(inset.plane, new THREE.Vector3());
+    if (!hit) return;
+    // The copy's outline goes under the pointer: the inset is how far the
+    // pointer is in from the lead face's nearest side (none, outside it).
+    const free = Math.min(insideDepth(inset.outline, inset.normal, hit), inset.limit);
+    // By the grid's steps, the limit being one more; with Alt held, freely.
+    const step = this.snapGrid.activeStep;
+    let distance = free;
+    if (!this.altHeld) {
+      distance = Math.min(Math.round(free / step) * step, Math.floor(inset.limit / step + 1e-9) * step);
+      if (inset.limit - free < free - distance) distance = inset.limit;
+    }
+    inset.distance = distance;
+    this.mesh.placeInsets(inset.insets, distance);
+    this.view.updatePositions();
+    this.view.updateUVs();
+    this.animateInset();
+    this.emitChange();
+  }
+
+  // Runs for as long as an inset is in progress: the copies' outlines drawn
+  // as the cut's line is, its dashes flowing (see animateCut()).
+  animateInset() {
+    if (this.insetFrame) return;
+    let last = performance.now();
+    const tick = (now) => {
+      this.insetFrame = null;
+      const inset = this.inset;
+      if (!inset) return;
+      inset.time = (inset.time ?? 0) + Math.min((now - last) / 1000, 0.1);
+      last = now;
+      const { vertices } = this.mesh;
+      const segments = inset.insets.flatMap(({ inner }) =>
+        inner.map((vertex, k) => [vertices[vertex].clone(), vertices[inner[(k + 1) % inner.length]].clone()]));
+      const pixel = this.viewport.worldPerPixel(); // the dashes keep their size on screen
+      this.view.setCutPreview(inset.distance > 0 ? segments : [], {
+        dash: CUT_DASH * pixel,
+        gap: CUT_GAP * pixel,
+        phase: inset.time * CUT_FLOW * pixel,
+      });
+      this.viewport.render();
+      this.insetFrame = requestAnimationFrame(tick);
+    };
+    tick(last);
+  }
+
+  applyInset() {
+    // An inset of no depth would leave doubled vertices behind.
+    if (this.inset.distance < 1e-9) {
+      this.cancelInset();
+      return;
+    }
+    const { before, insets } = this.inset;
+    this.inset = null;
+    this.view.setCutPreview([]);
+    // A copy closed up into a point or a line: its corners that met are one
+    // vertex - its sides' quads triangles, and it, of no area, gone.
+    const groups = insets.flatMap(({ inner }) => {
+      const met = [];
+      for (const vertex of inner) {
+        const group = met.find(([first]) => this.mesh.vertices[first].distanceTo(this.mesh.vertices[vertex]) < 1e-6);
+        if (group) group.push(vertex);
+        else met.push([vertex]);
+      }
+      return met.filter((group) => group.length > 1);
+    });
+    if (groups.length) {
+      const remap = this.mesh.mergeVertices(groups);
+      this.selection = new Set([...this.selection].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+      this.rebuildView();
+    }
+    this.edited(before);
+    this.setOperation(null); // one inset per activation
+  }
+
+  // Undoes the inset in progress. Returns false if there was none.
+  cancelInset() {
+    if (!this.inset) return false;
+    const { before } = this.inset;
+    this.inset = null;
+    this.view.setCutPreview([]);
     this.restore(before);
     return true;
   }
@@ -4644,6 +4810,7 @@ export class Editor extends EventTarget {
       return;
     }
     this.cancelExtrude();
+    this.cancelInset();
     // A mode picked inside an operation is the one to stay in after it.
     if (this.operation) this.modeBeforeOperation = mode;
     this.mode = mode;
@@ -5565,6 +5732,7 @@ export class Editor extends EventTarget {
       this.modeDragging ||
       this.simulating ||
       this.extrude !== null ||
+      this.inset !== null ||
       Boolean(this.polygon?.points.length)
     );
   }
@@ -5757,6 +5925,7 @@ export class Editor extends EventTarget {
 
   emitChange() {
     this.updatePivotMarker();
+    this.view.setBent(this.problems().flatMap((problem) => problem.faces)); // red in the solid look
     this.updateLinePreview(); // another tool, another colour
     this.dispatchEvent(new Event('change'));
   }

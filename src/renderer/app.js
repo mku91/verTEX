@@ -110,6 +110,7 @@ const ACTIONS = {
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
+  'toggle-inset': () => editor.setOperation(editor.operation === 'inset' ? null : 'inset'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
   'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
   'toggle-collisions': () => editor.setCollisions(!editor.collisions),
@@ -153,6 +154,7 @@ const hotkeys = new Hotkeys(
     { id: 'op.place', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.place'), keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.cut'), keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
     { id: 'op.extrude', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.extrude'), keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
+    { id: 'op.inset', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.inset'), keys: '', run: () => ACTIONS['toggle-inset']() },
     { id: 'op.polygon', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.polygon'), keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
     { id: 'op.pencil', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.pencil'), keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
     { id: 'op.collisions', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.collisions'), keys: '', run: () => ACTIONS['toggle-collisions']() },
@@ -238,7 +240,7 @@ const FIXED_KEY_NOTES = [
   [t('app.hotkeys.fixed.shift.keys'), t('app.hotkeys.fixed.shift')],
   [t('app.hotkeys.fixed.alt.keys'), t('app.hotkeys.fixed.alt')],
   [t('app.hotkeys.fixed.f1.keys'), t('app.hotkeys.fixed.f1')],
-  [t('app.hotkeys.fixed.alt-wheel.keys'), t('app.hotkeys.fixed.alt-wheel')],
+  [t('app.hotkeys.fixed.shift-wheel.keys'), t('app.hotkeys.fixed.shift-wheel')],
   [t('app.hotkeys.fixed.ctrl-alt.keys'), t('app.hotkeys.fixed.ctrl-alt')],
   [t('app.hotkeys.fixed.xcz.keys'), t('app.hotkeys.fixed.xcz')],
 ];
@@ -726,7 +728,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -827,7 +829,7 @@ for (const button of placeButtons) {
 }
 document.getElementById('place-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
+const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), inset: t('app.operation.inset'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
@@ -2102,7 +2104,7 @@ function refresh() {
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   $('animation-button').classList.toggle('active', editor.workspace === 'animation');
   document.querySelector('[data-action="toggle-uv"]').hidden = editor.workspace === 'animation';
-  for (const name of ['place', 'cut', 'extrude', 'pencil', 'polygon']) {
+  for (const name of ['place', 'cut', 'extrude', 'inset', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
 

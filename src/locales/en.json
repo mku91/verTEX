@@ -533,8 +533,8 @@
  "app.hotkeys.fixed.alt.keys": "Alt (held)",
  "app.hotkeys.fixed.f1": "Unwrap: dim the picture except the face under the pointer (on the unwrap or on the model)",
  "app.hotkeys.fixed.f1.keys": "F1 (held)",
- "app.hotkeys.fixed.alt-wheel": "Extrude: widen / narrow the extruded face by a fine grid step",
- "app.hotkeys.fixed.alt-wheel.keys": "Alt + wheel",
+ "app.hotkeys.fixed.shift-wheel": "Extrude: widen / narrow the extruded face by a fine grid step",
+ "app.hotkeys.fixed.shift-wheel.keys": "Shift + wheel",
  "app.hotkeys.fixed.ctrl-alt": "Dragging a number field: step 0.1 / 0.01",
  "app.hotkeys.fixed.ctrl-alt.keys": "Ctrl / Alt (held)",
  "app.hotkeys.fixed.xcz": "While dragging: along the X / Y / Z axis only",
@@ -929,5 +929,9 @@
  "update.later": "Later",
  "update.progress": "Downloading the update… {percent}%",
  "update.installing": "Installing the update…",
- "update.failed": "The update failed"
+ "update.failed": "The update failed",
+ "html.inset-toggle.title": "Inset: a smaller copy of each face inside it, joined by a frame",
+ "html.inset-toggle.aria-label": "Inset",
+ "app.hotkeys.op.inset": "Inset",
+ "app.operation.inset": "Inset"
 }

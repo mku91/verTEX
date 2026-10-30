@@ -42,6 +42,7 @@ export const THEMES = {
     snapDot: '#f8f8f2',
     faceFront: '#8be9fd', // face orientation display: the side a face looks to
     faceBack: '#ff5555', // ...and its reverse
+    bent: '#ff5555', // a face that is not flat, in the solid look (see MeshView.setBent())
     // An animation's keys, by what they key (see timeline.js).
     keyPosition: '#ff79c6',
     keyRotation: '#8be9fd',
@@ -80,6 +81,7 @@ export const THEMES = {
     snapDot: '#ffffff',
     faceFront: '#5f96dc',
     faceBack: '#e0606a',
+    bent: '#e0606a',
     // (Dracula's, as in that theme)
     keyPosition: '#ff79c6',
     keyRotation: '#8be9fd',

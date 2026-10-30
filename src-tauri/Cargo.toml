@@ -1,6 +1,6 @@
 [package]
 name = "vertex"
-version = "1.0.2"
+version = "1.0.3"
 description = "Low-poly 3D editor focused on vertices"
 edition = "2024"
 license-file = "../LICENSE"

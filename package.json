@@ -1,7 +1,7 @@
 {
   "name": "vertex",
   "productName": "verTEX",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Low-poly 3D editor focused on vertices",
   "license": "SEE LICENSE IN LICENSE",
   "private": true,

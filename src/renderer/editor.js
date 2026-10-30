@@ -109,6 +109,7 @@ const PLACE_NORMAL = 92; // px, the length of the normal that comes out of it
 const MIN_AXIS_SINE = 0.1; // below this angle to the view ray a locked axis is undraggable
 const PICK_RADIUS = 12; // px, vertices
 const EDGE_PICK_RADIUS = 8; // px
+const FLAT_ANGLE = THREE.MathUtils.degToRad(1); // faces this near to parallel lie in one plane, see selectFlatSide()
 const CLICK_TOLERANCE = 4; // px of pointer travel that still counts as a click
 
 // The drawn cut line: how fast it glides to the cut's position (1/s, higher is
@@ -2205,6 +2206,57 @@ export class Editor extends EventTarget {
       this.cancelBox();
       this.cancelDrag();
     });
+    // A double click on a vertex: the flat side it is on, see selectFlatSide().
+    dom.addEventListener('dblclick', (event) => {
+      if (this.mode !== 'vertex' || this.operation || this.painting || this.workspace !== 'model') return;
+      if (this.preview || this.simulating || this.tool === 'pivot' || this.overGizmo()) return;
+      const vertex = this.pickVertex(event.clientX, event.clientY);
+      if (vertex !== null) this.selectFlatSide(vertex);
+    });
+  }
+
+  // Selects the vertices of the flat side of the shape that the vertex is on
+  // and the camera sees: of the faces round the vertex, the one turned the
+  // most towards the camera, and every face joined to it, edge by edge, that
+  // lies in its plane (within FLAT_ANGLE) - as Blender's Select Linked Flat Faces.
+  selectFlatSide(vertex) {
+    const { faces } = this.mesh;
+    const hidden = this.topology.hiddenVertices;
+    const camera = this.viewport.camera.position;
+    const middle = (face) => face.reduce((sum, i) => sum.add(this.mesh.vertices[i]), new THREE.Vector3()).divideScalar(face.length);
+    let start = null;
+    let best = -Infinity;
+    faces.forEach((face, index) => {
+      if (!face.includes(vertex) || face.some((i) => hidden.has(i))) return;
+      const facing = this.mesh.faceNormal(index).dot(camera.clone().sub(middle(face)).normalize());
+      if (facing <= best) return;
+      best = facing;
+      start = index;
+    });
+    if (start === null) return;
+    const normal = this.mesh.faceNormal(start);
+    const byEdge = new Map();
+    faces.forEach((face, index) => {
+      face.forEach((a, k) => {
+        const key = edgeKey(a, face[(k + 1) % face.length]);
+        if (!byEdge.has(key)) byEdge.set(key, []);
+        byEdge.get(key).push(index);
+      });
+    });
+    const side = new Set([start]);
+    const queue = [start];
+    while (queue.length) {
+      const face = faces[queue.pop()];
+      face.forEach((a, k) => {
+        for (const next of byEdge.get(edgeKey(a, face[(k + 1) % face.length]))) {
+          if (side.has(next) || faces[next].some((i) => hidden.has(i))) continue;
+          if (this.mesh.faceNormal(next).dot(normal) < Math.cos(FLAT_ANGLE)) continue;
+          side.add(next);
+          queue.push(next);
+        }
+      });
+    }
+    this.selectVertices(new Set([...side].flatMap((index) => faces[index])));
   }
 
   // --- painting on the model -----------------------------------------------------
@@ -3479,7 +3531,8 @@ export class Editor extends EventTarget {
     anchor.divideScalar(base.size);
     // `direction` is the automatic one; `axis` ('x' | 'y' | 'z') overrides it.
     // `taper`: by how many fine grid steps the cap is grown (or, below 0, shrunk), see taperExtrude().
-    this.extrude = { before, base, direction, axis: 'free', anchor, distance: 0, pointer: null, taper: 0, wheel: 0 };
+    // `solid`: the faces of a sheet pulled into a solid (see EditableMesh.extrudeFaces()).
+    this.extrude = { before, base, direction, axis: 'free', anchor, distance: 0, pointer: null, taper: 0, wheel: 0, solid: cap.solid ?? [] };
     this.emitChange();
   }
 
@@ -3602,8 +3655,17 @@ export class Editor extends EventTarget {
       this.cancelExtrude();
       return;
     }
-    const { before } = this.extrude;
+    const { before, solid } = this.extrude;
     this.extrude = null;
+    // A sheet pulled the way it faced away from: its solid is inside out - turned over.
+    if (solid.length && this.mesh.volume(solid) < 0) {
+      for (const index of solid) {
+        const face = this.mesh.faces[index];
+        face.reverse();
+        face.uv?.reverse();
+      }
+      this.rebuildView();
+    }
     this.edited(before);
     this.setOperation(null); // one extrusion per activation
   }

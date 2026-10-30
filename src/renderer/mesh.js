@@ -873,6 +873,40 @@ export class EditableMesh {
     };
     eachEdge((a, b) => edgeUse.set(edgeKey(a, b), (edgeUse.get(edgeKey(a, b)) ?? 0) + 1));
 
+    // A piece of the region that is a sheet on its own - no face outside it
+    // shares its border (a polygon drawn flat, say) - is pulled into a solid:
+    // it keeps a bottom where it was, the faces turned the other way. (A
+    // piece of a closed shape has the rest of the shape there instead.)
+    const meshUse = new Map();
+    for (const face of this.faces) {
+      face.forEach((a, j) => {
+        const key = edgeKey(a, face[(j + 1) % face.length]);
+        meshUse.set(key, (meshUse.get(key) ?? 0) + 1);
+      });
+    }
+    const piece = new Map(faceIndices.map((index) => [index, index])); // union-find over shared edges
+    const root = (index) => (piece.get(index) === index ? index : root(piece.get(index)));
+    const byEdge = new Map();
+    eachEdge((a, b) => {
+      const key = edgeKey(a, b);
+      if (!byEdge.has(key)) byEdge.set(key, []);
+    });
+    for (const faceIndex of faceIndices) {
+      const face = this.faces[faceIndex];
+      face.forEach((a, j) => byEdge.get(edgeKey(a, face[(j + 1) % face.length])).push(faceIndex));
+    }
+    for (const sharing of byEdge.values()) {
+      for (const other of sharing.slice(1)) piece.set(root(other), root(sharing[0]));
+    }
+    const open = new Map(); // a piece's root -> whether its border is the shape's edge everywhere
+    for (const [key, sharing] of byEdge) {
+      if (edgeUse.get(key) !== 1) continue;
+      const at = root(sharing[0]);
+      open.set(at, (open.get(at) ?? true) && meshUse.get(key) === 1);
+    }
+    const sheet = new Set(faceIndices.filter((index) => open.get(root(index))));
+    const bottoms = [...sheet].map((index) => [...this.faces[index]].reverse());
+
     const copies = new Map(); // original vertex -> its copy
     for (const faceIndex of faceIndices) {
       for (const vertex of this.faces[faceIndex]) {
@@ -886,8 +920,12 @@ export class EditableMesh {
     // A side runs along its edge the same way the extruded face does, which
     // makes it face outwards.
     const sides = [];
+    const sheetSides = [];
     eachEdge((a, b) => {
-      if (edgeUse.get(edgeKey(a, b)) === 1) sides.push([a, b, copies.get(b), copies.get(a)]);
+      if (edgeUse.get(edgeKey(a, b)) !== 1) return;
+      const side = [a, b, copies.get(b), copies.get(a)];
+      sides.push(side);
+      if (sheet.has(byEdge.get(edgeKey(a, b))[0])) sheetSides.push(side);
     });
     for (const faceIndex of faceIndices) {
       const cap = this.faces[faceIndex].map((vertex) => copies.get(vertex));
@@ -896,13 +934,31 @@ export class EditableMesh {
       if (this.faces[faceIndex].shaped) cap.shaped = true;
       this.faces[faceIndex] = cap;
     }
-    this.faces.push(...sides);
+    this.faces.push(...sides, ...bottoms);
+    // The faces of the solids pulled out of sheets (see above), by index: the
+    // extrusion turns them all over if it goes against the sheet's facing.
+    // (Dropping the vertices below takes no face away: the indices hold.)
+    const pulled = new Set([...sheetSides, ...bottoms]);
+    const solid = this.faces.map((face, index) => (pulled.has(face) || sheet.has(index) ? index : -1)).filter((index) => index >= 0);
 
     // Vertices inside the region are left without faces: drop them.
     const used = new Set(this.faces.flat());
     const orphans = new Set([...copies.keys()].filter((vertex) => !used.has(vertex)));
     const remap = this.removeVertices(orphans);
-    return [...copies.values()].map((vertex) => remap.get(vertex));
+    const made = [...copies.values()].map((vertex) => remap.get(vertex));
+    made.solid = solid;
+    return made;
+  }
+
+  // Signed volume of the given faces (indices): positive when they enclose
+  // it facing outwards.
+  volume(faceIndices) {
+    let sum = 0;
+    for (const index of faceIndices) {
+      const [a, ...rest] = this.faces[index].map((vertex) => this.vertices[vertex]);
+      for (let k = 0; k + 1 < rest.length; k++) sum += a.dot(rest[k].clone().cross(rest[k + 1]));
+    }
+    return sum / 6;
   }
 
   // Every place where a face runs along one of the given edges ([a, b] pairs),

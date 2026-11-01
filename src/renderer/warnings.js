@@ -131,7 +131,8 @@ export class Warnings {
       button.querySelector('span').textContent = t(key, { count });
     };
     set(this.button, this.current.length + (this.notes?.length ?? 0), 'warnings.count.warnings');
-    set(this.errorButton, this.errors.length, 'warnings.count.errors');
+    // Each bent face is an error of its own, though one row lists an object's all.
+    set(this.errorButton, this.errors.reduce((sum, error) => sum + (error.faces?.length || 1), 0), 'warnings.count.errors');
     if (!this.list.hidden) this.showList();
   }
 

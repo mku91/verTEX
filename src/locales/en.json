@@ -933,5 +933,9 @@
  "html.inset-toggle.title": "Inset: a smaller copy of each face inside it, joined by a frame",
  "html.inset-toggle.aria-label": "Inset",
  "app.hotkeys.op.inset": "Inset",
- "app.operation.inset": "Inset"
+ "app.operation.inset": "Inset",
+ "html.knife-toggle.title": "Knife: cut one face in two, from a point of its border to another",
+ "html.knife-toggle.aria-label": "Knife",
+ "app.hotkeys.op.knife": "Knife",
+ "app.operation.knife": "Knife"
 }

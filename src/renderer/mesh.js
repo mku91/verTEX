@@ -318,11 +318,102 @@ export class EditableMesh {
     }
   }
 
+  // The knife (see Editor.pressKnife()): cuts one face in two along the line
+  // between two points of its border - each { vertex } or { edge: [a, b],
+  // point } (a point on that side). A point on a side becomes a vertex there,
+  // in the other faces along that side too (no crack at the seam), with its
+  // place on the atlas between its ends'. Returns the two ends' vertices, or
+  // null when the line does not split the face (see knifeFits()).
+  knifeCut(faceIndex, from, to) {
+    if (!this.knifeFits(faceIndex, from, to)) return null;
+    const ends = [from, to].map((end) => (end.vertex !== undefined ? end.vertex : this.splitSide(end.edge, end.point, this.vertexObject[end.edge[0]])));
+    const face = this.faces[faceIndex];
+    const i = face.indexOf(ends[0]);
+    const j = face.indexOf(ends[1]);
+    const [p, q] = i < j ? [i, j] : [j, i];
+    const piece = (indices) => {
+      const loop = indices.map((k) => face[k]);
+      if (face.uv) loop.uv = indices.map((k) => [...face.uv[k]]);
+      if (face.pin) loop.pin = true;
+      if (face.shaped) loop.shaped = true;
+      return loop;
+    };
+    const span = (a, b) => Array.from({ length: (b - a + face.length) % face.length + 1 }, (_, k) => (a + k) % face.length);
+    this.faces[faceIndex] = piece(span(p, q));
+    this.faces.push(piece(span(q, p)));
+    return ends;
+  }
+
+  // Whether the knife's line (see knifeCut()) splits the face: its ends two
+  // different points of the border, not on one side, the line inside the face.
+  knifeFits(faceIndex, from, to) {
+    const face = this.faces[faceIndex];
+    const sides = (end) => (end.vertex !== undefined
+      ? face.flatMap((a, k) => [a, face[(k + 1) % face.length]].includes(end.vertex) ? [edgeKey(a, face[(k + 1) % face.length])] : [])
+      : [edgeKey(...end.edge)]);
+    const point = (end) => (end.vertex !== undefined ? this.vertices[end.vertex] : end.point);
+    if (point(from).distanceTo(point(to)) < 1e-6) return false;
+    const touched = new Set([...sides(from), ...sides(to)]);
+    // Both on one side (or a side and its own end): the line runs along it.
+    if (sides(from).some((side) => sides(to).includes(side))) return false;
+    // Inside: seen along the face, its middle is in and it crosses no side but those it touches.
+    const normal = this.faceNormal(faceIndex);
+    const u = new THREE.Vector3(1, 0, 0);
+    if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
+    u.cross(normal).normalize();
+    const v = new THREE.Vector3().crossVectors(normal, u);
+    const flat = (p) => ({ x: p.dot(u), y: p.dot(v) });
+    const a = flat(point(from));
+    const b = flat(point(to));
+    const cross = (o, p, q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+    const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    let inside = false;
+    for (let k = 0; k < face.length; k++) {
+      const c = flat(this.vertices[face[k]]);
+      const d = flat(this.vertices[face[(k + 1) % face.length]]);
+      if (c.y > middle.y !== d.y > middle.y && middle.x < ((d.x - c.x) * (middle.y - c.y)) / (d.y - c.y) + c.x) inside = !inside;
+      if (touched.has(edgeKey(face[k], face[(k + 1) % face.length]))) continue;
+      if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return false;
+    }
+    return inside;
+  }
+
+  // A new vertex at `point` on the side [a, b], put into every face and wire
+  // along that side. Returns it.
+  splitSide([a, b], point, object) {
+    const vertex = this.addVertex(point.x, point.y, point.z, object);
+    const whole = this.vertices[a].distanceTo(this.vertices[b]);
+    const t = whole > 0 ? this.vertices[a].distanceTo(point) / whole : 0.5;
+    this.blendWeights(vertex, a, b, t);
+    for (const face of this.faces) {
+      for (let k = 0; k < face.length; k++) {
+        const [c, d] = [face[k], face[(k + 1) % face.length]];
+        if (!((c === a && d === b) || (c === b && d === a))) continue;
+        if (face.uv) {
+          const along = c === a ? t : 1 - t;
+          const [from, to] = [face.uv[k], face.uv[(k + 1) % face.length]];
+          face.uv.splice(k + 1, 0, [from[0] + (to[0] - from[0]) * along, from[1] + (to[1] - from[1]) * along]);
+        }
+        face.splice(k + 1, 0, vertex);
+        break;
+      }
+    }
+    const wires = [];
+    for (const wire of this.wires) {
+      if (edgeKey(...wire) === edgeKey(a, b)) wires.push([wire[0], vertex], [vertex, wire[1]]);
+      else wires.push(wire);
+    }
+    this.wires = wires;
+    return vertex;
+  }
+
   // A face (by index) that is not flat, split into as few flat pieces as
   // there can be - Blender's Split Non-Planar Faces: cut along diagonals,
   // every way there is, the fewest pieces kept (a face of many corners, too
-  // many to try them all: triangles, those in one plane joined again). As
-  // vertex loops, turned the way the face is.
+  // many to try them all: triangles, those in one plane joined again). Of
+  // ways with as few pieces, the one that folds the face outwards, not in,
+  // and then the shortest cuts - by the shape alone, so that a face's mirror
+  // image is cut as its mirror image. As vertex loops, turned the way the face is.
   flatPieces(faceIndex) {
     const face = this.faces[faceIndex];
     if (this.isCoplanar(face)) return [face];
@@ -346,13 +437,38 @@ export class EditableMesh {
           if (!insideDiagonal(loop, i, j, flat)) continue;
           const a = best(loop.slice(i, j + 1));
           const b = best([...loop.slice(j), ...loop.slice(0, i + 1)]);
-          if (a && b && (!found || a.length + b.length < found.length)) found = [...a, ...b];
+          if (a && b && (!found || this.betterCut([...a, ...b], found))) found = [...a, ...b];
         }
       }
       memo.set(key, found);
       return found;
     };
     return best([...face]) ?? this.triangulate(faceIndex);
+  }
+
+  // Whether one way of cutting a face into pieces (vertex loops) beats
+  // another: fewer pieces; then fewer folds inwards (between two pieces that
+  // share a cut, one bending up past the other's plane); then shorter cuts.
+  betterCut(pieces, than) {
+    const cost = (loops) => {
+      let folds = 0;
+      let length = 0;
+      loops.forEach((a, p) => {
+        const facing = this.loopNormal(a);
+        loops.forEach((b, q) => {
+          const shared = b.filter((i) => a.includes(i));
+          if (p === q || shared.length !== 2) return;
+          if (p < q) length += this.vertices[shared[0]].distanceTo(this.vertices[shared[1]]);
+          const off = b.find((i) => !a.includes(i));
+          if (facing.dot(this.vertices[off].clone().sub(this.vertices[a[0]])) > 1e-6) folds++;
+        });
+      });
+      return [loops.length, folds, length];
+    };
+    const [x, y] = [cost(pieces), cost(than)];
+    if (x[0] !== y[0]) return x[0] < y[0];
+    if (x[1] !== y[1]) return x[1] < y[1];
+    return x[2] < y[2] - 1e-9;
   }
 
   // Triangles (vertex loops) of one face joined back where two that share an
@@ -1528,11 +1644,20 @@ function atlasMap(mesh, loop, uv, normal) {
 const FLAT_SEARCH_CORNERS = 12;
 
 // Whether the diagonal from loop[i] to loop[j] runs inside the loop, as
-// `flat` (vertex -> { x, y }) has it: it crosses no side and its middle is in.
+// `flat` (vertex -> { x, y }) has it: it crosses no side, goes through no
+// other corner (that would leave a piece with a side over another's, and a
+// crack at that corner), and its middle is in.
 function insideDiagonal(loop, i, j, flat) {
   const a = flat.get(loop[i]);
   const b = flat.get(loop[j]);
   const cross = (o, p, q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  const length = Math.hypot(b.x - a.x, b.y - a.y);
+  for (let k = 0; k < loop.length; k++) {
+    if (k === i || k === j) continue;
+    const c = flat.get(loop[k]);
+    const along = ((c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)) / (length * length);
+    if (along > 0 && along < 1 && Math.abs(cross(a, b, c)) / length < 1e-6) return false;
+  }
   for (let k = 0; k < loop.length; k++) {
     const l = (k + 1) % loop.length;
     if ([k, l].includes(i) || [k, l].includes(j)) continue;

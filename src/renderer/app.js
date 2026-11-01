@@ -111,6 +111,7 @@ const ACTIONS = {
   'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
   'toggle-extrude': () => editor.setOperation(editor.operation === 'extrude' ? null : 'extrude'),
   'toggle-inset': () => editor.setOperation(editor.operation === 'inset' ? null : 'inset'),
+  'toggle-knife': () => editor.setOperation(editor.operation === 'knife' ? null : 'knife'),
   'toggle-pencil': () => editor.setOperation(editor.operation === 'pencil' ? null : 'pencil'),
   'toggle-polygon': () => editor.setOperation(editor.operation === 'polygon' ? null : 'polygon'),
   'toggle-collisions': () => editor.setCollisions(!editor.collisions),
@@ -155,6 +156,7 @@ const hotkeys = new Hotkeys(
     { id: 'op.cut', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.cut'), keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
     { id: 'op.extrude', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.extrude'), keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
     { id: 'op.inset', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.inset'), keys: '', run: () => ACTIONS['toggle-inset']() },
+    { id: 'op.knife', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.knife'), keys: '', run: () => ACTIONS['toggle-knife']() },
     { id: 'op.polygon', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.polygon'), keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
     { id: 'op.pencil', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.pencil'), keys: 'KeyP', run: () => ACTIONS['toggle-pencil']() },
     { id: 'op.collisions', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.collisions'), keys: '', run: () => ACTIONS['toggle-collisions']() },
@@ -728,7 +730,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -829,7 +831,7 @@ for (const button of placeButtons) {
 }
 document.getElementById('place-options').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), inset: t('app.operation.inset'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
+const OPERATION_NAMES = { place: t('app.operation.place'), cut: t('app.operation.cut'), extrude: t('app.operation.extrude'), inset: t('app.operation.inset'), knife: t('app.operation.knife'), polygon: t('app.operation.polygon'), pencil: t('app.operation.pencil') };
 $('operation-close').addEventListener('click', () => editor.setOperation(null));
 $('operation-banner').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
@@ -2104,7 +2106,7 @@ function refresh() {
   $('app').classList.toggle('pencil-mode', editor.operation === 'pencil'); // pencil cursor, see styles.css
   $('animation-button').classList.toggle('active', editor.workspace === 'animation');
   document.querySelector('[data-action="toggle-uv"]').hidden = editor.workspace === 'animation';
-  for (const name of ['place', 'cut', 'extrude', 'inset', 'pencil', 'polygon']) {
+  for (const name of ['place', 'cut', 'knife', 'extrude', 'inset', 'pencil', 'polygon']) {
     $(`${name}-toggle`).classList.toggle('active', editor.operation === name);
   }
 

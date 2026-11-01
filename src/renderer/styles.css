@@ -1686,6 +1686,22 @@ body {
   pointer-events: none;
 }
 
+/* The knife's ring under the pointer (see Editor.moveKnife()): red where a
+   press would do nothing, green where it would start or end the cut. */
+.knife-ring {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 2px solid var(--axis-x);
+  border-radius: 50%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.knife-ring.can {
+  border-color: var(--axis-y);
+}
+
 /* Pencil mode: the pointer is a pencil over every view; its tip is the hot
    spot. Wins over the grab cursors the views set inline. */
 #app.pencil-mode #viewport > canvas,

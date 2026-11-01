@@ -969,5 +969,9 @@
  "html.inset-toggle.title": "Врезка: внутри каждой грани её уменьшенная копия, связанная рамкой",
  "html.inset-toggle.aria-label": "Врезка",
  "app.hotkeys.op.inset": "Врезка",
- "app.operation.inset": "Врезка"
+ "app.operation.inset": "Врезка",
+ "html.knife-toggle.title": "Нож: разрезать одну грань надвое, от точки её края до другой",
+ "html.knife-toggle.aria-label": "Нож",
+ "app.hotkeys.op.knife": "Нож",
+ "app.operation.knife": "Нож"
 }

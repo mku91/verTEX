@@ -1687,7 +1687,8 @@ body {
 }
 
 /* The knife's ring under the pointer (see Editor.moveKnife()): red where a
-   press would do nothing, green where it would start or end the cut. */
+   press would do nothing, green where it would start the cut. (Where it
+   would end it, a dot on the face's side shows it instead.) */
 .knife-ring {
   position: absolute;
   width: 18px;

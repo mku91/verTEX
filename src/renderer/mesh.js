@@ -367,6 +367,14 @@ export class EditableMesh {
     const b = flat(point(to));
     const cross = (o, p, q) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
     const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    // Through another corner: a piece's side would lie over another's, with a crack at the corner.
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    for (const vertex of face) {
+      if (vertex === from.vertex || vertex === to.vertex) continue;
+      const c = flat(this.vertices[vertex]);
+      const along = ((c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)) / (length * length);
+      if (along > 1e-6 && along < 1 - 1e-6 && Math.abs(cross(a, b, c)) / length < 1e-6) return false;
+    }
     let inside = false;
     for (let k = 0; k < face.length; k++) {
       const c = flat(this.vertices[face[k]]);

@@ -338,6 +338,7 @@ export class Editor extends EventTarget {
     this.pivotMarker.material.color.set(theme.pivot);
     for (const part of this.snapMark.children) part.material.color.set(theme.snap);
     this.knifeMark.material.color.set(theme.selected);
+    this.knifeEndMark.material.color.set(theme.cut);
     this.refreshHighlight(); // vertex colours, and a render
   }
 
@@ -376,6 +377,11 @@ export class Editor extends EventTarget {
     this.knifeMark.renderOrder = 10;
     this.knifeMark.visible = false;
     scene.add(this.knifeMark);
+    // ... and where the cut would end: the same dot, in the cut line's colour.
+    this.knifeEndMark = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTexture(), sizeAttenuation: false, depthTest: false, transparent: true }));
+    this.knifeEndMark.renderOrder = 10;
+    this.knifeEndMark.visible = false;
+    scene.add(this.knifeEndMark);
     // The pivot points of everything inside a selected node: the same mark,
     // smaller, as many of them as are needed at the moment.
     this.pivotRings = [];
@@ -2098,8 +2104,8 @@ export class Editor extends EventTarget {
     this.boxElement.className = 'selection-box';
     this.boxElement.hidden = true;
     this.viewport.container.append(this.boxElement);
-    // The knife's ring under the pointer: green where a press would start (or
-    // end) the cut, red where it would not. See moveKnife().
+    // The knife's ring under the pointer: green where a press would start the
+    // cut, red where a press would do nothing. See moveKnife().
     this.knifeRing = document.createElement('div');
     this.knifeRing.className = 'knife-ring';
     this.knifeRing.hidden = true;
@@ -2648,6 +2654,7 @@ export class Editor extends EventTarget {
     this.shiftHeld = on;
     this.gizmo.setRotationSnap(on ? ROTATION_STEP : null);
     this.updateLinePreview();
+    if (this.knife?.pointer) this.moveKnife(...this.knife.pointer); // its angle step, see knifeStep()
     this.dispatchEvent(new Event('shift'));
   }
 
@@ -3912,7 +3919,7 @@ export class Editor extends EventTarget {
       ? loop.includes(start.vertex)
       : loop.some((a, k) => edgeKey(a, loop[(k + 1) % loop.length]) === edgeKey(...start.edge)));
     const candidates = faces.map((_, index) => index).filter((index) => holds(faces[index]) && !faces[index].some((i) => hidden.has(i)));
-    this.knife = { face, faces: candidates, start, end: null, cursor: null, time: 0 };
+    this.knife = { face, faces: candidates, start, end: null, time: 0 };
     this.moveKnife(clientX, clientY);
   }
 
@@ -3923,11 +3930,70 @@ export class Editor extends EventTarget {
     const knife = this.knife;
     const under = this.pickFace(clientX, clientY);
     const order = [...knife.faces].sort((a, b) => (b === under) - (a === under));
+    const step = this.knifeStep();
     for (const face of order) {
-      const end = this.knifeEnd(face, clientX, clientY);
+      // Without a step, a corner near the pointer draws the end to it.
+      const near = step ? null : this.knifeEnd(face, clientX, clientY);
+      if (near?.vertex !== undefined && this.mesh.knifeFits(face, knife.start, near)) return { face, end: near };
+      const end = this.knifeExit(face, step, clientX, clientY);
       if (end && this.mesh.knifeFits(face, knife.start, end)) return { face, end };
     }
     return null;
+  }
+
+  // The knife's angle step, in radians: Shift held, 45°; Ctrl held, 15°;
+  // none, the line goes where the pointer is.
+  knifeStep() {
+    if (this.shiftHeld) return Math.PI / 4;
+    if (this.snapGrid.fine) return Math.PI / 12;
+    return null;
+  }
+
+  // The end of the knife's line: from the start towards the pointer - the
+  // angle rounded to `step` (radians; null: not rounded), counted in the
+  // face's plane from the world's axis that lies the most in it - out to where
+  // the line first meets the face's border (a corner, if it meets one). As
+  // knifeEnd() gives; null if it meets none.
+  knifeExit(faceIndex, step, clientX, clientY) {
+    const face = this.mesh.faces[faceIndex];
+    const { vertices } = this.mesh;
+    const start = this.knife.start;
+    const from = this.knifePoint(start);
+    const normal = this.mesh.faceNormal(faceIndex);
+    const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+    const along = axes.reduce((best, axis) => (Math.abs(axis.dot(normal)) < Math.abs(best.dot(normal)) ? axis : best));
+    const e1 = along.clone().addScaledVector(normal, -along.dot(normal)).normalize();
+    const e2 = normal.clone().cross(e1);
+    const hit = this.pointerRay(clientX, clientY).intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(normal, from), new THREE.Vector3());
+    if (!hit) return null;
+    const toward = hit.sub(from);
+    if (toward.lengthSq() < 1e-12) return null;
+    const free = Math.atan2(toward.dot(e2), toward.dot(e1));
+    const angle = step ? Math.round(free / step) * step : free;
+    const flat = (p) => ({ x: p.clone().sub(from).dot(e1), y: p.clone().sub(from).dot(e2) });
+    const d = { x: Math.cos(angle), y: Math.sin(angle) };
+    // The sides the start is on are not where the line leaves.
+    const own = (a, b) => (start.vertex !== undefined ? a === start.vertex || b === start.vertex : edgeKey(a, b) === edgeKey(...start.edge));
+    let best = null;
+    face.forEach((a, k) => {
+      const b = face[(k + 1) % face.length];
+      if (own(a, b)) return;
+      const p = flat(vertices[a]);
+      const q = flat(vertices[b]);
+      const side = { x: q.x - p.x, y: q.y - p.y };
+      const denominator = d.x * side.y - d.y * side.x;
+      if (Math.abs(denominator) < 1e-12) return; // along the side
+      const t = (p.x * side.y - p.y * side.x) / denominator; // along the line
+      const s = (p.x * d.y - p.y * d.x) / denominator; // along the side
+      if (t <= 1e-6 || s < -1e-6 || s > 1 + 1e-6 || (best && t >= best.t)) return;
+      best = { t, s, a, b };
+    });
+    if (!best) return null;
+    const length = vertices[best.a].distanceTo(vertices[best.b]);
+    const near = 1e-4 / Math.max(length, 1e-9);
+    if (best.s < near) return { vertex: best.a };
+    if (best.s > 1 - near) return { vertex: best.b };
+    return { edge: [best.a, best.b], point: vertices[best.a].clone().lerp(vertices[best.b], best.s) };
   }
 
   // A point of the face's border near the pointer, for the knife: a corner
@@ -3969,6 +4035,7 @@ export class Editor extends EventTarget {
   // the ring says whether a press would cut.
   moveKnife(clientX, clientY) {
     const knife = this.knife;
+    if (knife) knife.pointer = [clientX, clientY];
     const rect = this.viewport.container.getBoundingClientRect();
     this.knifeRing.style.left = `${clientX - rect.left}px`;
     this.knifeRing.style.top = `${clientY - rect.top}px`;
@@ -3981,11 +4048,10 @@ export class Editor extends EventTarget {
     const target = this.knifeTarget(clientX, clientY);
     knife.end = target?.end ?? null;
     if (target) knife.face = target.face; // the line is drawn on the face it would cut
-    this.knifeRing.classList.toggle('can', knife.end !== null);
-    // Without an end, the line goes to the pointer, on the face's plane.
-    const corners = this.mesh.faces[knife.face];
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.mesh.faceNormal(knife.face), this.mesh.vertices[corners[0]]);
-    knife.cursor = this.pointerRay(clientX, clientY).intersectPlane(plane, new THREE.Vector3()) ?? knife.cursor;
+    // Where the cut can end, the dot there shows it (see animateKnife()); the
+    // red ring under the pointer, where it cannot.
+    this.knifeRing.classList.remove('can');
+    this.knifeRing.hidden = knife.end !== null;
     this.animateKnife();
   }
 
@@ -4006,7 +4072,7 @@ export class Editor extends EventTarget {
       knife.time += Math.min((now - last) / 1000, 0.1);
       last = now;
       const from = this.knifePoint(knife.start);
-      const to = knife.end ? this.knifePoint(knife.end) : knife.cursor;
+      const to = knife.end ? this.knifePoint(knife.end) : null; // no cut there: the start's dot alone
       const pixel = this.viewport.worldPerPixel(); // the dashes keep their size on screen
       this.view.setCutPreview(to ? [[from, to]] : [], {
         dash: CUT_DASH * pixel,
@@ -4017,6 +4083,11 @@ export class Editor extends EventTarget {
       const size = (KNIFE_DOT / this.viewport.container.clientHeight) * 2 * Math.tan(THREE.MathUtils.degToRad(this.viewport.camera.fov / 2));
       this.knifeMark.scale.set(size, size, 1);
       this.knifeMark.visible = true;
+      this.knifeEndMark.visible = Boolean(to);
+      if (to) {
+        this.knifeEndMark.position.copy(to);
+        this.knifeEndMark.scale.set(size, size, 1);
+      }
       this.viewport.render();
       this.knifeFrame = requestAnimationFrame(tick);
     };
@@ -4029,6 +4100,7 @@ export class Editor extends EventTarget {
     this.knife = null;
     this.view.setCutPreview([]);
     this.knifeMark.visible = false;
+    this.knifeEndMark.visible = false;
     this.viewport.requestRender();
     return true;
   }
@@ -5069,6 +5141,7 @@ export class Editor extends EventTarget {
     if (on === this.snapGrid.fine) return;
     this.snapGrid.fine = on;
     if (this.cut) this.placeCut(this.cut.point);
+    if (this.knife?.pointer) this.moveKnife(...this.knife.pointer); // its angle step, see knifeStep()
     if (this.polygon?.axis) this.showPolygonGrid();
     if (this.drag?.start) {
       this.constrainDrag();

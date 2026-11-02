@@ -1162,5 +1162,7 @@
  "guide.more.keys0.2.text": "Animation: a key for the picked objects at the current frame",
  "guide.more.keys0.3.name": "Sprite render",
  "guide.more.keys0.3.text": "The model from every side into a PNG sheet for a 2D game",
- "guide.more.p0": "File → Export to glTF writes the model with its textures, collisions and animations for Godot to import as it is."
+ "guide.more.p0": "File → Export to glTF writes the model with its textures, collisions and animations for Godot to import as it is.",
+ "project.failed": "That did not work.",
+ "html.uv-editor.uv-bar.uv-map-turn.title": "Turn the unwrap: drag on a chart to turn the picked charts about their middle, Shift — by 15°. The picture on the atlas stays where it is; the face shows it turned"
 }

@@ -32,6 +32,7 @@ import { t } from './i18n.js';
 //   LMB drag             move the picked charts, by whole pixels
 //   wheel                zoom at the pointer
 //   RMB / MMB drag       pan
+const TURN_STEP = Math.PI / 12; // the unwrap turn's step with Shift held: 15°
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
 const GRID_FROM = 8; // px per pixel from which the pixel grid is drawn
@@ -85,6 +86,7 @@ export class UVEditor {
     this.fitted = ''; // the atlas size the view was last fitted to
     this.moved = false; // panned or zoomed by hand since: a new size of the panel then leaves it be
     this.shaping = false; // the shape lock is open: corners can be dragged
+    this.turning = false; // the unwrap turn is on: a drag on a chart turns the picked ones' places
     this.hoveredMarker = null;
     this.ants = 0; // how far the marquee's dashes have crawled
     // F1 held (see isolate()): the face shown alone, and where the pointer was last.
@@ -167,6 +169,9 @@ export class UVEditor {
     // places); a quarter turn, square ones only (see Editor.mapCharts()).
     const square = charts.length > 0 && charts.every((chart) => chart.rect.w === chart.rect.h);
     for (const name of ['map-flip-h', 'map-flip-v']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || charts.length === 0;
+    const turn = this.container.querySelector('[data-uv="map-turn"]');
+    turn.disabled = none;
+    turn.classList.toggle('active', this.turning);
     for (const name of ['map-turn-left', 'map-turn-right']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || !square;
     // Those that ask nothing of what is picked: on with any atlas there is (back on, once there is one).
     for (const name of ['load', 'paste', 'fit', 'shape', 'clean', 'retro']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none;
@@ -237,7 +242,11 @@ export class UVEditor {
       else this.editor.setOnAtlas(this.editor.objectsInHand(), true);
     }
     else if (name === 'remove') this.editor.setOnAtlas(this.editor.objectsInHand(), false);
-    else if (name.startsWith('map-')) {
+    else if (name === 'map-turn') {
+      // The unwrap turn on or off: how a drag on a chart goes (see the pointer handlers).
+      this.turning = !this.turning;
+      this.update();
+    } else if (name.startsWith('map-')) {
       // The faces' places alone, the picture left as it is (see Editor.mapCharts()).
       const how = { 'map-turn-left': { turn: -1 }, 'map-turn-right': { turn: 1 }, 'map-flip-h': { flip: 'h' }, 'map-flip-v': { flip: 'v' } }[name];
       this.editor.mapCharts(faces, how);
@@ -623,6 +632,21 @@ export class UVEditor {
         if (pixel && editor.paintPress(pixel, null, event.altKey, { line })) this.drag = { paint: true, last: pixel };
         return;
       }
+      // The unwrap turn on: the charts picked (the one pressed on picked, if
+      // it was not) turn about their middle as the pointer goes round it.
+      if (this.turning) {
+        const at = this.toAtlas(event.clientX, event.clientY);
+        const chart = this.chartAt(at);
+        if (chart && !this.pickedCharts().includes(chart)) this.pick(chart, event.shiftKey, at);
+        const faces = this.pickedFaces();
+        const corners = faces.flatMap((index) => editor.mesh.faces[index]?.uv ?? []).filter(Boolean);
+        if (corners.length === 0) return;
+        const xs = corners.map(([x]) => x);
+        const ys = corners.map(([, y]) => y);
+        const center = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+        this.drag = { turn: true, faces, center, from: Math.atan2(at.y - center[1], at.x - center[0]), angle: 0 };
+        return;
+      }
       // A corner's marker first: it lies on the chart it belongs to.
       const marker = this.markerAt(event.clientX, event.clientY);
       if (marker) {
@@ -661,6 +685,17 @@ export class UVEditor {
         }
         editor.setPaintHover(pixel);
         if (!drag) editor.setLineTarget(pixel ? { pixel } : null);
+        return;
+      }
+      if (drag?.turn) {
+        const at = this.toAtlas(event.clientX, event.clientY);
+        let angle = Math.atan2(at.y - drag.center[1], at.x - drag.center[0]) - drag.from;
+        angle = Math.atan2(Math.sin(angle), Math.cos(angle)); // (within half a turn either way)
+        if (event.shiftKey) angle = Math.round(angle / TURN_STEP) * TURN_STEP;
+        if (angle === drag.angle) return;
+        drag.angle = angle;
+        editor.turnPlaces(drag.faces, drag.center, angle, false); // shown as it goes, the model too
+        this.draw();
         return;
       }
       if (!drag) {
@@ -723,6 +758,12 @@ export class UVEditor {
         return;
       }
       if (!drag || drag.pan || drag.paint || drag.select || drag.lift || drag.resize) return;
+      if (drag.turn) {
+        if (event.type === 'pointerup' && drag.angle) editor.turnPlaces(drag.faces, drag.center, drag.angle, true);
+        else editor.previewCharts(drag.faces, null);
+        this.draw();
+        return;
+      }
       if (drag.marker) {
         // Let go: the corner stays where it was dragged to, or, if the drag was broken off, goes back.
         const { chart, vertex, x, y } = drag.marker;
@@ -1019,6 +1060,18 @@ export class UVEditor {
       context.lineWidth = 2;
       context.strokeStyle = theme.box;
       context.stroke();
+    }
+    // The unwrap being turned: its middle, and the angle so far.
+    if (this.drag?.turn) {
+      const [cx, cy] = this.drag.center;
+      const x = origin.x + cx * zoom;
+      const y = origin.y + cy * zoom;
+      context.fillStyle = theme.box;
+      context.beginPath();
+      context.arc(x, y, 4, 0, Math.PI * 2);
+      context.fill();
+      context.font = '12px sans-serif';
+      context.fillText(`${Math.round((this.drag.angle * 180) / Math.PI)}°`, x + 8, y - 8);
     }
     // The line the brush would paint, Shift held (here or on the model): its
     // pixels in the brush's colour, a little see-through - or, rubbing out,

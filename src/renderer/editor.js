@@ -1561,6 +1561,49 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // Turns the given faces' places on the atlas about `center` ([x, y], in
+  // pixels) by `angle` (radians, clockwise on the picture), the picture
+  // staying as it is: those faces show it turned by as much, the other way
+  // (as Blender's UV Rotate, the image left alone). Any angle: the corners
+  // need not land on pixel corners. With `settle` off it is only shown, as
+  // the turn is dragged (see previewCharts()); on, it is done: one undo step,
+  // the faces pinned and shaped - the user's from then on (see unwrap.js).
+  // Returns whether anything turned.
+  turnPlaces(faces, center, angle, settle = true) {
+    if (this.chartPreview) this.previewCharts(faces, null);
+    const wanted = new Set(faces);
+    const members = [...new Set(this.chartsOfFaces(faces).flatMap((chart) => chart.faces.filter((index) => wanted.has(index))))]
+      .map((index) => this.mesh.faces[index])
+      .filter((face) => face?.uv?.every(Boolean));
+    if (members.length === 0 || (settle && (this.busy() || Math.abs(angle) < 1e-9))) {
+      this.view.updateUVs();
+      this.viewport.requestRender();
+      return false;
+    }
+    const [cx, cy] = center;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const place = ([x, y]) => [cx + (x - cx) * cos - (y - cy) * sin, cy + (x - cx) * sin + (y - cy) * cos].map((value) => +value.toFixed(6));
+    const before = settle ? this.snapshot() : null;
+    if (!settle) this.chartPreview = new Map();
+    for (const face of members) {
+      if (!settle) this.chartPreview.set(face, face.uv);
+      face.uv = face.uv.map(place);
+      if (settle) {
+        face.pin = true;
+        face.shaped = true;
+      }
+    }
+    if (settle) {
+      this.history.push(before);
+      this.layOut();
+      this.emitChange();
+    }
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    return true;
+  }
+
   // What is wrong with the model, as [{ text, faces? }] - for now, faces
   // that are not flat: such a face cannot lie on the atlas without stretch,
   // which is the one thing the unwrap is there to rule out. `faces`: the

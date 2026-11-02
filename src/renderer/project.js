@@ -437,9 +437,11 @@ export class Project extends EventTarget {
     try {
       await command();
     } catch (error) {
-      // The window does not answer: it is older than this page (the page
-      // was reloaded after an update, the program was not restarted).
-      await tell(restart, error.message);
+      // The window does not know the command: it is older than this page
+      // (the page was reloaded after an update, the program was not
+      // restarted). Anything else is a failure, said as one.
+      const unknown = /command not found|not allowed/i.test(String(error?.message ?? error));
+      await tell(unknown ? restart : t('project.failed'), String(error?.message ?? error));
     } finally {
       this.working = false;
     }
@@ -486,6 +488,7 @@ export class Project extends EventTarget {
       // What kind of project: asked by the window (see app.js), if it has a way to ask.
       const options = this.ask ? await this.ask() : {};
       if (!options) return;
+      this.leave();
       if (!this.editor.newProject(options)) return;
       this.path = null;
       this.savedState = this.editor.history.id;
@@ -508,6 +511,7 @@ export class Project extends EventTarget {
         await this.api.alert(t('project.error.open'), `${result.path}\n\n${error.message}`);
         return;
       }
+      this.leave();
       if (!this.editor.loadProject(project)) return;
       for (const [id, bytes] of project.pictures) await this.editor.atlasById(id)?.load(bytes);
       this.path = result.path;
@@ -521,6 +525,14 @@ export class Project extends EventTarget {
     return this.run(() => this.write(false));
   }
 
+  // The scene is about to be replaced by another project's: what follows this
+  // one (the atlases' working files, see atlas-link.js) lets go of it first,
+  // so that nothing of the next scene is written as this project's - even if
+  // the replacing fails half way.
+  leave() {
+    this.dispatchEvent(new Event('leave'));
+  }
+
   saveAs() {
     return this.run(() => this.write(true));
   }
@@ -531,6 +543,7 @@ export class Project extends EventTarget {
   closeProject() {
     return this.run(async () => {
       if (!(await this.mayDiscard())) return;
+      this.leave();
       if (!this.editor.newProject()) return;
       this.path = null;
       this.savedState = this.editor.history.id;

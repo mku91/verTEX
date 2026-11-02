@@ -674,9 +674,20 @@ export class OrthoViews {
     for (const view of this.views) this.drawView(view);
   }
 
+  // Whether what is shown is of a model that is gone: the model was replaced
+  // (a project closed or opened) and something asked for a picture - the
+  // camera, say - before the editor's 'change' brought the views up to date
+  // (see update()). Nothing is drawn until it does.
+  stale() {
+    const { shown } = this;
+    if (!shown) return false;
+    const { vertices, faces } = this.editor.mesh;
+    return shown.vertices.some((i) => i >= vertices.length) || shown.faces.some((i) => i >= faces.length);
+  }
+
   drawView(view) {
     const { context, width, height } = view;
-    if (width === 0) return;
+    if (width === 0 || this.stale()) return;
     context.clearRect(0, 0, width, height);
     this.drawGrid(view);
     if (this.posing) {

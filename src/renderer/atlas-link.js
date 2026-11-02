@@ -39,6 +39,15 @@ export class AtlasLink extends EventTarget {
       for (const atlas of editor.atlases) if (!before.has(atlas.id)) this.queue(atlas.id, true, true);
     });
     project.addEventListener('change', () => this.follow());
+    // The scene is being replaced: no more writing to this project's files,
+    // until the next project's are linked (see follow()).
+    project.addEventListener('leave', () => {
+      clearTimeout(this.timer);
+      this.pending.clear();
+      this.path = null;
+      this.linked = undefined; // (follow() links again, whatever the next path)
+      this.api.unlink(); // nor any more reading of what the painter saves there
+    });
     // Unsaved changes thrown away: the pictures painted and not saved go with them.
     project.addEventListener('discard', () => this.api.discard());
     this.api.onChanged((bytes, atlas) => editor.atlasById(atlas) && editor.paintAtlas(bytes, atlas));

@@ -45,13 +45,21 @@ impl Language {
     }
 
     // What the page is given before its scripts run (see host.js), the
-    // program's version with it.
+    // program's version with it - and the guide's texts in every language,
+    // which it can be read in whatever the interface's is (see guide.js).
     pub fn script(&self, version: &str) -> String {
         let languages: Vec<Value> = CATALOGS
             .iter()
             .map(|(id, _)| serde_json::json!({ "id": id, "name": catalog(id).get("language.name").cloned().unwrap_or(Value::from(*id)) }))
             .collect();
-        let start = serde_json::json!({ "version": version, "locale": self.chosen, "catalog": self.catalog, "fallback": self.fallback, "languages": languages });
+        let guides: Map<String, Value> = CATALOGS
+            .iter()
+            .map(|(id, _)| {
+                let texts: Map<String, Value> = catalog(id).into_iter().filter(|(key, _)| key.starts_with("guide.")).collect();
+                (id.to_string(), Value::Object(texts))
+            })
+            .collect();
+        let start = serde_json::json!({ "version": version, "locale": self.chosen, "catalog": self.catalog, "fallback": self.fallback, "languages": languages, "guides": guides });
         format!("window.__VERTEX_START__ = {start};")
     }
 }

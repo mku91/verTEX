@@ -9,15 +9,25 @@
 // ({ one, few, many, other }), chosen by params.count.
 // A key the language lacks is taken from English, a key no one has - as it is.
 
-const { locale, catalog, fallback, languages } = window.vertex.locale.get();
+const { locale, catalog, fallback, languages, guides = {} } = window.vertex.locale.get();
 const plurals = new Intl.PluralRules(locale);
 
 export { locale, languages };
 
-export function t(key, params) {
-  let text = catalog[key] ?? fallback[key] ?? key;
-  if (typeof text === 'object') text = text[plurals.select(params?.count ?? 0)] ?? text.other;
+function fill(text, params, rules) {
+  if (typeof text === 'object') text = text[rules.select(params?.count ?? 0)] ?? text.other;
   return params ? text.replace(/\{(\w+)\}/g, (whole, name) => (name in params ? String(params[name]) : whole)) : text;
+}
+
+export function t(key, params) {
+  return fill(catalog[key] ?? fallback[key] ?? key, params, plurals);
+}
+
+// The guide's texts (keys guide.*) in a language of one's choosing, whatever
+// the interface's is (see guide.js); English where that language lacks one.
+export function guideText(language, key, params) {
+  const text = guides[language]?.[key] ?? guides.en?.[key] ?? t(key);
+  return fill(text, params, new Intl.PluralRules(language));
 }
 
 // The markup's words: data-i18n="key" - the element's text (an <i18n-text>

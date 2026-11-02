@@ -45,7 +45,10 @@ pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
         .item(&item("devtools", "menu.view.devtools", Some("Ctrl+Shift+I"))?)
         .item(&item("fullscreen", "menu.view.fullscreen", Some("F11"))?)
         .build()?;
-    MenuBuilder::new(app).items(&[&file, &edit, &view]).build()
+    let help = SubmenuBuilder::new(app, language.t("menu.help"))
+        .item(&item("help-guide", "menu.help.guide", None)?)
+        .build()?;
+    MenuBuilder::new(app).items(&[&file, &edit, &view, &help]).build()
 }
 
 // The window's own matters are done here; the rest goes to the page.

@@ -2217,9 +2217,11 @@ body {
   text-transform: uppercase;
 }
 
-/* Scrollbars in the side panel: thin and of the theme. */
+/* Scrollbars in the side panel: thin and of the theme. (The guide's too.) */
 #panel,
-#outliner {
+#outliner,
+#guide-nav,
+.guide-page {
   scrollbar-width: thin;
   scrollbar-color: var(--hover) transparent;
 }
@@ -3545,6 +3547,135 @@ input.refused {
   display: none;
 }
 
+/* The guide (see guide.js): over everything, as the settings are. */
+#guide-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  animation: popup-backdrop-in 0.16s ease-out;
+}
+
+#guide-dialog[hidden] {
+  display: none;
+}
+
+#guide-dialog .dialog {
+  animation: popup-dialog-in 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.dialog.settings.guide {
+  width: min(920px, calc(100vw - 40px));
+  height: min(640px, calc(100vh - 40px));
+}
+
+.guide-page {
+  flex: 1;
+  min-width: 0;
+  padding: 16px 22px 22px;
+  overflow-y: auto;
+  line-height: 1.55;
+}
+
+.dialog .guide-page h3 {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.guide-page p,
+.guide-page ol {
+  margin: 0 0 12px;
+}
+
+.guide-page ol {
+  padding-left: 22px;
+}
+
+.guide-page li + li {
+  margin-top: 4px;
+}
+
+.guide-keys {
+  margin: 0 0 14px;
+  border-collapse: collapse;
+}
+
+.guide-keys td {
+  padding: 4px 14px 4px 0;
+  vertical-align: top;
+}
+
+.guide-keys td:first-child {
+  white-space: nowrap;
+}
+
+.guide-keys kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.guide-icon {
+  width: 1.25em;
+  margin-right: 8px;
+  color: var(--accent);
+  text-align: center;
+}
+
+.guide-page h3 .guide-icon {
+  margin-right: 10px;
+}
+
+.guide-keys kbd .guide-icon {
+  margin-right: 6px;
+  color: inherit;
+}
+
+.guide-or {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.guide-keys kbd.unset {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.guide-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.guide-head-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-foot button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.guide-counter {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 /* The welcome screen: over the whole window, under the dialogs. */
 #welcome {
   position: fixed;
@@ -3851,7 +3982,8 @@ input.refused {
   min-height: 0;
 }
 
-#settings-nav {
+#settings-nav,
+#guide-nav {
   display: flex;
   flex: none;
   flex-direction: column;
@@ -3872,7 +4004,8 @@ input.refused {
   text-transform: uppercase;
 }
 
-#settings-nav button {
+#settings-nav button,
+#guide-nav button {
   padding: 5px 8px 5px 18px;
   border: 0;
   border-radius: 4px;
@@ -3880,11 +4013,13 @@ input.refused {
   text-align: left;
 }
 
-#settings-nav button:hover {
+#settings-nav button:hover,
+#guide-nav button:hover {
   background: var(--hover);
 }
 
-#settings-nav button.active {
+#settings-nav button.active,
+#guide-nav button.active {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
   box-shadow: inset 2px 0 0 var(--accent);
 }

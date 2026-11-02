@@ -38,6 +38,7 @@ import { latinOnly, freeName } from './names.js';
 import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 import { canvasPNG } from './png.js';
 import { offerUpdate } from './update-offer.js';
+import { Guide } from './guide.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -102,6 +103,7 @@ const ACTIONS = {
   // N: face orientation on and off.
   'toggle-orientation': () => setShading(editor.shading === 'orientation' ? 'solid' : 'orientation'),
   settings: () => openSettings(),
+  'help-guide': () => guide.open(),
   'toggle-snapping': () => setSnapping(!editor.snapGrid.enabled),
   'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
@@ -195,6 +197,7 @@ const hotkeys = new Hotkeys(
     { id: 'view.light', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.light'), keys: '', run: () => ACTIONS['toggle-light']() },
     { id: 'view.orientation', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.orientation'), keys: 'KeyN', run: () => ACTIONS['toggle-orientation']() },
     { id: 'view.settings', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.settings'), keys: 'Ctrl+Comma', run: () => openSettings() },
+    { id: 'help.guide', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.help.guide'), keys: '', run: () => guide.open() },
   ],
   // The fixed keys below can't be given to anything else.
   ['Escape', 'Tab', 'Shift+Tab', 'Space', 'Enter', 'NumpadEnter', 'Backspace', 'PageUp', 'PageDown', 'Ctrl+Shift+KeyZ', 'F1'],
@@ -1160,6 +1163,9 @@ window.vertex?.onMenu((action) => {
 // src-tauri/src/main.rs): `vertexDebug.text()` returns the whole project as text, and
 // `vertexDebug.editor` is the editor itself.
 showHotkeys();
+
+// The guide: Help -> Guide (see guide.js).
+const guide = new Guide($('guide-dialog'), hotkeys);
 
 // Warnings about the model: a card when one comes up, a block in the status bar after.
 const warnings = new Warnings(editor, {

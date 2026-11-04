@@ -46,7 +46,10 @@ export class ViewsWindow extends EventTarget {
     const opened = window.open('views.html', 'vertex-views', 'width=1280,height=860');
     if (!opened) return;
     this.window = opened;
-    const ready = () => this.build();
+    const ready = () => {
+      opened.addEventListener('contextmenu', (event) => event.preventDefault(), true); // (as the main window, see app.js)
+      this.build();
+    };
     if (opened.document.readyState === 'complete' && opened.document.getElementById('quad')) ready();
     else opened.addEventListener('load', ready, { once: true });
     const watch = setInterval(() => {

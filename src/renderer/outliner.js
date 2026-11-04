@@ -44,6 +44,7 @@ const OBJECT_ICON = '<i class="fa-solid fa-cube"></i>';
 const NODE_ICON = '<i class="fa-solid fa-circle-nodes"></i>'; // a node (the kind 'node')
 const EYE_ICON = '<i class="fa-solid fa-eye"></i>';
 const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
+const ISOLATE_ICON = '<i class="fa-solid fa-crosshairs"></i>';
 const INDENT = 14; // px per nesting level
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
 // Ctrl combinations that still work in the fields of the modal form.
@@ -96,6 +97,15 @@ const PRIMITIVES = {
       { id: 'segments', label: t('outliner.field.segments'), value: 8, min: 3, max: 48, whole: true },
       { id: 'size', label: t('outliner.field.diameter'), value: 1, min: 0.01, max: 100 },
       { id: 'height', label: t('outliner.field.height'), value: 2, min: 0.01, max: 100 },
+    ],
+  },
+  torus: {
+    title: t('outliner.primitive.torus'),
+    fields: [
+      { id: 'segments', label: t('outliner.field.segments'), value: 12, min: 3, max: 64, whole: true },
+      { id: 'sides', label: t('outliner.field.sides'), value: 8, min: 3, max: 32, whole: true },
+      { id: 'size', label: t('outliner.field.diameter'), value: 1, min: 0.01, max: 100 },
+      { id: 'thickness', label: t('outliner.field.thickness'), value: 0.25, min: 0.01, max: 100 },
     ],
   },
 };
@@ -152,6 +162,7 @@ export class Outliner {
       [...bound].map(([node, objects]) => [node, objects.map(({ object, vertices }) => [object, vertices.length])]), focus,
       [...selected],
       whole,
+      this.editor.isolation?.id ?? null,
       [...this.folded],
       this.editor.mesh.objects.map((object) => object.color ?? null), // the icons' colours
       this.editor.mesh.objects.map((object) => object.locked ?? false), // the nodes' locks
@@ -228,6 +239,16 @@ export class Outliner {
       }
       // Hidden, by its own eye or by a node's above it.
       row.classList.toggle('hidden', island.hidden);
+      // On what is picked (and on what is worked on alone, to go back): the others set aside.
+      const alone = this.editor.isolation?.id === island.id;
+      if (alone || picked) {
+        const isolate = document.createElement('span');
+        isolate.className = `outliner-eye outliner-isolate${alone ? ' active' : ''}`;
+        isolate.dataset.isolate = '';
+        isolate.title = alone ? t('outliner.isolate.off') : t('outliner.isolate.on');
+        isolate.innerHTML = ISOLATE_ICON;
+        row.append(isolate);
+      }
       const eye = document.createElement('span');
       eye.className = 'outliner-eye';
       eye.dataset.eye = '';
@@ -300,6 +321,11 @@ export class Outliner {
       const plus = event.target.closest('[data-add-into]');
       if (plus) {
         this.openAddMenu(Number(plus.dataset.addInto), plus);
+        return;
+      }
+      const isolate = event.target.closest('[data-isolate]');
+      if (isolate) {
+        editor.setIsolated(Number(rowAt(isolate).dataset.object));
         return;
       }
       const eye = event.target.closest('[data-eye]');

@@ -34,6 +34,8 @@ const START_SIZE = 64; // px, an empty project's atlas
 const MAX_SIZE = 4096;
 
 const tidy = (value) => (Math.abs(value - Math.round(value)) < 1e-6 ? Math.round(value) : +value.toFixed(6));
+const UNFOLD_HAIR = 1e-3; // px: nearer than this, two faces of an unfolded piece only touch (see unfold())
+const NEAR_SHIFTS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]; // whole pixels, the nearest first
 
 // The charts of a mesh's faces that are still to be placed, each { faces, object, normal, flat } - `flat` a Map
 // from a vertex of the chart to its place [x, y] in pixels, and `width`,
@@ -79,15 +81,7 @@ export function chartsOf(mesh, ppu, atlas = ATLAS) {
     const object = vertexObject[faces[members[0]][0]];
     const normal = normals[members[0]];
     const turn = turns.get(object) ?? new THREE.Quaternion();
-    // The plane's axes, in the object's own frame: `up` runs up the surface
-    // (on a floor or a ceiling, where nothing does, along the object's Z), and
-    // `right` to the right of it for someone looking at the face.
-    const own = normal.clone().applyQuaternion(turn.clone().invert());
-    const up = Math.abs(own.y) > 0.9999
-      ? new THREE.Vector3(0, 0, 1)
-      : new THREE.Vector3(0, 1, 0).addScaledVector(own, -own.y).normalize();
-    const right = new THREE.Vector3().crossVectors(up, own).applyQuaternion(turn);
-    up.applyQuaternion(turn);
+    const { right, up } = planeAxes(normal, turn);
 
     const along = new Map();
     for (const i of members) {
@@ -198,6 +192,178 @@ function keptCharts(mesh, atlas = ATLAS) {
   });
 }
 
+// A plane's axes, as a chart is laid flat by them (see chartsOf()), in the
+// object's own frame: `up` runs up the surface (on a floor or a ceiling, where
+// nothing does, along the object's Z), and `right` to the right of it for
+// someone looking at the face.
+function planeAxes(normal, turn) {
+  const own = normal.clone().applyQuaternion(turn.clone().invert());
+  const up = Math.abs(own.y) > 0.9999
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(0, 1, 0).addScaledVector(own, -own.y).normalize();
+  const right = new THREE.Vector3().crossVectors(up, own).applyQuaternion(turn);
+  up.applyQuaternion(turn);
+  return { right, up };
+}
+
+// Whether a point is inside a polygon ([[x, y]]), by more than a hair from its sides.
+function within(point, polygon) {
+  let inside = false;
+  for (let k = 0; k < polygon.length; k++) {
+    const a = polygon[k];
+    const b = polygon[(k + 1) % polygon.length];
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    if (Math.hypot(a[0] + t * dx - point[0], a[1] + t * dy - point[1]) < UNFOLD_HAIR) return false;
+    if (a[1] > point[1] !== b[1] > point[1] && point[0] < (dx * (point[1] - a[1])) / dy + a[0]) inside = !inside;
+  }
+  return inside;
+}
+
+// A polygon's extent.
+function boxOf(polygon) {
+  const xs = polygon.map(([x]) => x);
+  const ys = polygon.map(([, y]) => y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+// Whether two polygons overlap: more than touching along a side or at a corner.
+function overlapping(p, q) {
+  const middle = (polygon) => [0, 1].map((axis) => polygon.reduce((sum, point) => sum + point[axis], 0) / polygon.length);
+  if (within(middle(p), q) || within(middle(q), p)) return true;
+  if (p.some((point) => within(point, q)) || q.some((point) => within(point, p))) return true;
+  // A side may go in through a corner they share, and no corner be inside: points along the sides.
+  const along = (polygon, other) => polygon.some((a, k) => {
+    const c = polygon[(k + 1) % polygon.length];
+    return [0.25, 0.5, 0.75].some((t) => within([a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t], other));
+  });
+  if (along(p, q) || along(q, p)) return true;
+  const side = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i];
+    const b = p[(i + 1) % p.length];
+    for (let j = 0; j < q.length; j++) {
+      const c = q[j];
+      const d = q[(j + 1) % q.length];
+      const [s1, s2, s3, s4] = [side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b)];
+      if (Math.abs(s1) > UNFOLD_HAIR && Math.abs(s2) > UNFOLD_HAIR && Math.abs(s3) > UNFOLD_HAIR && Math.abs(s4) > UNFOLD_HAIR && s1 * s2 < 0 && s3 * s4 < 0) return true;
+    }
+  }
+  return false;
+}
+
+// The given faces laid out as they lie on the object, next to each other. For
+// pixel art: each face stays as a chart is laid (see chartsOf()), upright on
+// its plane's axes, its pixel grid straight - never turned, never stretched -
+// and is only shifted, by whole pixels, up against a face it shares an edge
+// with, the middles of that edge as near as they come. An upright edge meets
+// its neighbour's whole; a slanting one leaves a wedge between them: on a
+// curved surface a straight grid and meeting edges cannot both be had. The
+// biggest face comes first, and the rest by how near they are to the plane
+// of the one they join. A face that would land on what is laid does not join
+// there: by another edge, or in a piece of its own. Returns the pieces, each
+// { faces, places: Map(face -> [[x, y]], its corners, in pixels), width,
+// height }, ready for unwrap() (see `unfolded`).
+export function unfold(mesh, faceIndices, ppu) {
+  const { faces, vertices, vertexObject, objects } = mesh;
+  const turns = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation)]));
+  const normals = new Map(faceIndices.map((i) => [i, mesh.faceNormal(i)]));
+  const sound = faceIndices.filter((i) => normals.get(i).lengthSq() > 0.5);
+  // A face flat, in pixels, by the axes of its own plane.
+  const flatOf = (i) => {
+    const { right, up } = planeAxes(normals.get(i), turns.get(vertexObject[faces[i][0]]) ?? new THREE.Quaternion());
+    const flat = faces[i].map((vertex) => [vertices[vertex].dot(right) * ppu, -vertices[vertex].dot(up) * ppu]);
+    const left = Math.min(...flat.map(([x]) => x));
+    const top = Math.min(...flat.map(([, y]) => y));
+    return flat.map(([x, y]) => [tidy(x - left), tidy(y - top)]); // (its own top left corner on a pixel, as a chart's)
+  };
+  const area = (polygon) => Math.abs(polygon.reduce((sum, [x, y], k) => {
+    const [nx, ny] = polygon[(k + 1) % polygon.length];
+    return sum + x * ny - nx * y;
+  }, 0)) / 2;
+  const flats = new Map(sound.map((i) => [i, flatOf(i)]));
+  const byEdge = new Map();
+  for (const i of sound) {
+    faces[i].forEach((a, k) => {
+      const key = edgeKey(a, faces[i][(k + 1) % faces[i].length]);
+      if (!byEdge.has(key)) byEdge.set(key, []);
+      byEdge.get(key).push(i);
+    });
+  }
+  const left = new Set(sound);
+  const seeds = [...sound].sort((a, b) => area(flats.get(b)) - area(flats.get(a)) || a - b);
+  const pieces = [];
+  for (const seed of seeds) {
+    if (!left.has(seed)) continue;
+    const places = new Map();
+    const boxes = []; // what is laid: { polygon, box }, for telling overlaps quickly
+    // What can join: a face left, over an edge of one laid - the nearest in
+    // plane last, to be taken first. An offer is tried once: what lands on
+    // what is laid now will land on it still.
+    const offers = [];
+    const lay = (i, polygon) => {
+      places.set(i, polygon);
+      left.delete(i);
+      boxes.push({ polygon, box: boxOf(polygon) });
+      faces[i].forEach((a, k) => {
+        const l = (k + 1) % faces[i].length;
+        for (const other of byEdge.get(edgeKey(a, faces[i][l]))) {
+          if (!left.has(other)) continue;
+          const offer = { other, a, b: faces[i][l], from: polygon[k], to: polygon[l], near: normals.get(i).dot(normals.get(other)), order: offers.count++ };
+          // (Kept in order: a binary search for its place.)
+          let low = 0;
+          let high = offers.length;
+          while (low < high) {
+            const middle = (low + high) >> 1;
+            const there = offers[middle];
+            if (there.near < offer.near || (there.near === offer.near && there.order > offer.order)) low = middle + 1;
+            else high = middle;
+          }
+          offers.splice(low, 0, offer);
+        }
+      });
+    };
+    offers.count = 0;
+    lay(seed, flats.get(seed));
+    while (offers.length) {
+      const { other, a, b, from, to } = offers.pop();
+      if (!left.has(other)) continue;
+      const own = flats.get(other);
+      const corners = faces[other];
+      const p = own[corners.indexOf(a)];
+      const q = own[corners.indexOf(b)];
+      // The shift that brings the edge's middles together, in whole pixels; a
+      // pixel either way, if rounding it lands on what is laid.
+      const dx = Math.round((from[0] + to[0] - p[0] - q[0]) / 2);
+      const dy = Math.round((from[1] + to[1] - p[1] - q[1]) / 2);
+      let laid = null;
+      for (const [nx, ny] of NEAR_SHIFTS) {
+        const moved = own.map(([x, y]) => [x + dx + nx, y + dy + ny]);
+        const box = boxOf(moved);
+        const lands = boxes.some((there) => box.x0 < there.box.x1 && there.box.x0 < box.x1 && box.y0 < there.box.y1 && there.box.y0 < box.y1 && overlapping(moved, there.polygon));
+        if (!lands) {
+          laid = moved;
+          break;
+        }
+      }
+      if (laid) lay(other, laid); // (otherwise a seam here)
+    }
+    const all = [...places.values()].flat();
+    const minX = Math.floor(Math.min(...all.map(([x]) => x)) + 1e-6);
+    const minY = Math.floor(Math.min(...all.map(([, y]) => y)) + 1e-6);
+    const moved = new Map([...places].map(([i, polygon]) => [i, polygon.map(([x, y]) => [tidy(x - minX), tidy(y - minY)])]));
+    const shifted = [...moved.values()].flat();
+    pieces.push({
+      faces: [...moved.keys()],
+      places: moved,
+      width: Math.max(...shifted.map(([x]) => x)),
+      height: Math.max(...shifted.map(([, y]) => y)),
+    });
+  }
+  return pieces;
+}
+
 // Room on the atlas: which pixels are spoken for.
 class Room {
   constructor(width, height) {
@@ -264,7 +430,8 @@ class Room {
 //   fresh          the rects given to the charts laid out now: to be cleared
 //   changed        whether any face's places are not what they were
 // `repack` forgets every place on it first: its objects are laid out anew.
-export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = START_SIZE, repack = false }) {
+// `unfolded`: pieces worked out by unfold(), whose faces have no places now: given room as they are, pinned.
+export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = START_SIZE, repack = false, unfolded = [] }) {
   let changed = false;
   if (repack) {
     const own = new Set(mesh.objects.filter((object) => object.atlas === atlas).map((object) => object.id));
@@ -285,12 +452,9 @@ export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = 
   let room = new Room(width, height);
   for (const { rect } of kept) room.take(rect.x, rect.y, rect.w, rect.h);
 
-  // The faces without places, in charts, each laid flat and given free room.
-  const charts = chartsOf(mesh, ppu, atlas);
   const fresh = [];
-  for (const chart of charts) {
-    const w = Math.max(1, Math.ceil(chart.width - 1e-6));
-    const h = Math.max(1, Math.ceil(chart.height - 1e-6));
+  // Room for a rectangle, the atlas growing until there is some.
+  const place = (w, h) => {
     let spot = room.find(w, h);
     while (!spot) {
       if (Math.max(room.width, room.height) >= MAX_SIZE) throw new Error('the texture atlas is full');
@@ -298,6 +462,29 @@ export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = 
       spot = room.find(w, h);
     }
     room.take(spot.x, spot.y, w, h);
+    return spot;
+  };
+  const pieces = unfolded.map((piece) => {
+    const w = Math.max(1, Math.ceil(piece.width - 1e-6));
+    const h = Math.max(1, Math.ceil(piece.height - 1e-6));
+    const spot = place(w, h);
+    const rect = { ...spot, w, h };
+    fresh.push(rect);
+    for (const i of piece.faces) {
+      const face = mesh.faces[i];
+      face.uv = piece.places.get(i).map(([x, y]) => [tidy(x + spot.x), tidy(y + spot.y)]);
+      face.pin = true;
+    }
+    changed = true;
+    return { faces: piece.faces, rect, pinned: true, shaped: false };
+  });
+
+  // The faces without places, in charts, each laid flat and given free room.
+  const charts = chartsOf(mesh, ppu, atlas);
+  for (const chart of charts) {
+    const w = Math.max(1, Math.ceil(chart.width - 1e-6));
+    const h = Math.max(1, Math.ceil(chart.height - 1e-6));
+    const spot = place(w, h);
     chart.rect = { ...spot, w, h };
     fresh.push(chart.rect);
     for (const i of chart.faces) {
@@ -309,7 +496,7 @@ export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = 
     }
     changed = true;
   }
-  return { width: room.width, height: room.height, charts: [...kept, ...charts], fresh, moved: [], changed };
+  return { width: room.width, height: room.height, charts: [...kept, ...pieces, ...charts], fresh, moved: [], changed };
 }
 
 // Rectangles ([{ w, h }]) packed on an atlas as an unwrap lays charts out

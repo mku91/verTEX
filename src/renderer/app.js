@@ -2122,6 +2122,14 @@ function refresh() {
 editor.addEventListener('change', refresh);
 refresh();
 
+// The browser's own menu (Back, Reload, Print...) has no place in a program:
+// off everywhere, whoever is under the pointer - a menu of ours opened on the
+// button's release is, by the time it would come. Only a field of text keeps
+// it, for its Cut, Copy and Paste.
+window.addEventListener('contextmenu', (event) => {
+  if (!event.target.closest?.('input, textarea')) event.preventDefault();
+}, true);
+
 // Loaded: a newer version offered, if there is one (see update-offer.js),
 // and the splash goes (see index.html).
 {

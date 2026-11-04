@@ -2653,6 +2653,18 @@ input.refused {
   opacity: 1;
 }
 
+/* Its neighbour the eye goes to the right edge; so does this, the eye beside it. */
+.outliner-isolate + .outliner-eye {
+  margin-left: 2px;
+}
+
+.outliner-isolate.active,
+.outliner-isolate.active:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  opacity: 1;
+}
+
 .outliner-row.hidden .outliner-name,
 .outliner-row.hidden > i {
   opacity: 0.4;
@@ -5612,46 +5624,3 @@ option::checkmark {
 }
 
 /* The UV editor's menu of the faces under the pointer: a tick each. */
-.uv-face-menu {
-  min-width: 190px;
-  gap: 2px;
-}
-
-.uv-face-menu-title {
-  padding: 4px 10px 6px;
-  color: var(--text-dim);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.uv-face-menu-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: 4px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.uv-face-menu-row:hover {
-  background: var(--hover);
-}
-
-.uv-face-menu-row input {
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.uv-face-menu-buttons {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border);
-}
-
-.uv-face-menu-buttons button {
-  flex: 1;
-  text-align: center;
-}

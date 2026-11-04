@@ -149,6 +149,26 @@ export class UVEditor {
     return this.editor.chartsOfFaces(this.pickedFaces());
   }
 
+  // The faces picked in the scene; in object mode, all those of the objects in hand.
+  facesInHand() {
+    const { editor } = this;
+    if (editor.mode === 'face') return this.pickedFaces();
+    if (editor.mode !== 'object' || editor.picked.size === 0) return [];
+    const { faces, objects, vertexObject } = editor.mesh;
+    const ids = new Set(editor.objectsInHand().map((index) => objects[index]?.id));
+    return faces.map((_, index) => index).filter((index) => ids.has(vertexObject[faces[index][0]]));
+  }
+
+  // The panel's Stack: those charts on one spot - the biggest one's, whose
+  // picture leaves the least of the others see-through (see Editor.stackCharts()).
+  stackInHand() {
+    const faces = this.facesInHand();
+    const charts = this.editor.chartsOfFaces(faces);
+    if (charts.length < 2) return;
+    const biggest = charts.reduce((best, chart) => (chart.rect.w * chart.rect.h > best.rect.w * best.rect.h ? chart : best));
+    this.editor.stackCharts(faces, biggest.faces[0]);
+  }
+
   update() {
     if (!this.open) return;
     const { atlas } = this.editor;
@@ -169,6 +189,10 @@ export class UVEditor {
     // places); a quarter turn, square ones only (see Editor.mapCharts()).
     const square = charts.length > 0 && charts.every((chart) => chart.rect.w === chart.rect.h);
     for (const name of ['map-flip-h', 'map-flip-v']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || charts.length === 0;
+    // (Stacking is of several charts: those of the faces picked, or of the objects.)
+    this.container.querySelector('[data-uv="stack"]').disabled = none || this.editor.chartsOfFaces(this.facesInHand()).length < 2;
+    // (Unfolding is of several charts: one has nothing to join.)
+    this.container.querySelector('[data-uv="unfold"]').disabled = none || charts.length < 2;
     const turn = this.container.querySelector('[data-uv="map-turn"]');
     turn.disabled = none;
     turn.classList.toggle('active', this.turning);
@@ -258,6 +282,8 @@ export class UVEditor {
     }
     else if (name === 'clean') this.askClean();
     else if (name === 'pack') this.editor.packAtlas();
+    else if (name === 'stack') this.stackInHand();
+    else if (name === 'unfold') this.editor.unfoldCharts(faces);
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;
@@ -739,12 +765,8 @@ export class UVEditor {
         drag.charts = this.pickedCharts();
         drag.lead = drag.charts.find((chart) => chart.faces.includes(drag.chart.faces[0])) ?? drag.charts[0];
       }
-      const shift = this.snapped(drag, (event.clientX - drag.x) / this.zoom, (event.clientY - drag.y) / this.zoom);
-      if (shift[0] === drag.shift[0] && shift[1] === drag.shift[1]) return;
-      drag.shift = shift;
-      // The model shows it as it goes.
-      editor.previewCharts(this.pickedFaces(), shift);
-      this.draw();
+      if (event.altKey) this.altDragged = true;
+      this.dragCharts(drag, event.clientX, event.clientY, event.altKey);
     });
     const release = (event) => {
       const { drag } = this;
@@ -754,7 +776,7 @@ export class UVEditor {
       if (drag?.select && !drag.moved && event.type === 'pointerup') editor.setMarquee(null);
       // The right button let go where it was pressed (a click, not a drag of the view): the menu of the faces there.
       if (drag?.pan && drag.button === 2 && event.type === 'pointerup' && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) <= CLICK && editor.tool !== 'marquee' && !editor.painting) {
-        this.openFaceMenu(event.clientX, event.clientY);
+        this.openChartMenu(event.clientX, event.clientY);
         return;
       }
       if (!drag || drag.pan || drag.paint || drag.select || drag.lift || drag.resize) return;
@@ -783,6 +805,18 @@ export class UVEditor {
       else editor.previewCharts(this.pickedFaces(), null);
       this.draw();
     };
+    // Alt, pressed or let go as charts are dragged, takes effect at once; and
+    // it does not send the keyboard to the window's menu.
+    for (const type of ['keydown', 'keyup']) {
+      window.addEventListener(type, (event) => {
+        if (event.key !== 'Alt') return;
+        const dragging = this.drag?.chart && this.drag.moved;
+        if (dragging || this.altDragged) event.preventDefault();
+        if (type === 'keydown' && dragging) this.altDragged = true;
+        if (type === 'keyup' && !dragging) this.altDragged = false;
+        if (dragging && this.pointer) this.dragCharts(this.drag, this.pointer.x, this.pointer.y, type === 'keydown');
+      });
+    }
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('pointerleave', () => {
@@ -799,7 +833,8 @@ export class UVEditor {
   // How far the dragged charts go, in whole pixels: onto another chart's room
   // if the one that is led comes close to it (so that they share a picture
   // exactly), and not off the atlas.
-  snapped(drag, dx, dy) {
+  snapped(drag, dx, dy, free = false) {
+    if (free) return [dx, dy]; // Alt held: where the pointer has it, on no pixel and no chart
     let shift = [Math.round(dx), Math.round(dy)];
     const { rect } = drag.lead;
     let nearest = SNAP + 0.5;
@@ -812,6 +847,16 @@ export class UVEditor {
       }
     }
     return shift;
+  }
+
+  // The charts being dragged, as the pointer has them now: shown on the model
+  // as they go, nothing settled until the release.
+  dragCharts(drag, clientX, clientY, free) {
+    const shift = this.snapped(drag, (clientX - drag.x) / this.zoom, (clientY - drag.y) / this.zoom, free);
+    if (shift[0] === drag.shift[0] && shift[1] === drag.shift[1]) return;
+    drag.shift = shift;
+    this.editor.previewCharts(this.pickedFaces(), shift);
+    this.draw();
   }
 
   // Picks a chart: its faces are selected in the scene, in face mode.
@@ -837,18 +882,21 @@ export class UVEditor {
     }
   }
 
-  // The menu of the faces under the pointer (a right click, not a drag):
-  // every one with a tick, picked or not - its object and its number - and
-  // all or none; what is ticked is picked at once. Faces picked elsewhere
-  // stay picked: the menu is of these alone.
-  openFaceMenu(clientX, clientY) {
+  // The menu of the charts under the pointer (a right click, not a drag):
+  // stacked on one spot, or laid out as they lie on the object. It is of what
+  // is under the pointer - with all that is picked, if that is among it: a
+  // stack, of which a click picks only the top, is taken whole.
+  openChartMenu(clientX, clientY) {
     const { editor } = this;
-    const faces = this.facesAt(this.toAtlas(clientX, clientY));
-    if (faces.length === 0 || editor.operation || editor.busy()) return;
+    const here = this.facesAt(this.toAtlas(clientX, clientY));
+    if (here.length === 0 || editor.operation || editor.busy()) return;
     if (editor.mode !== 'face') editor.setMode('face');
-    const menu = (this.faceMenu ??= (() => {
+    const among = here.some((face) => editor.picked.has(face));
+    const faces = among ? [...new Set([...editor.picked, ...here])] : here;
+    const several = editor.chartsOfFaces(faces).length > 1;
+    const menu = (this.chartMenu ??= (() => {
       const element = document.createElement('div');
-      element.className = 'context-menu uv-face-menu';
+      element.className = 'context-menu';
       element.hidden = true;
       document.body.append(element);
       window.addEventListener('pointerdown', (event) => {
@@ -861,55 +909,22 @@ export class UVEditor {
       }, true);
       return element;
     })());
-    const { objects, vertexObject } = editor.mesh;
-    const nameOf = (index) => objects.find((object) => object.id === vertexObject[editor.mesh.faces[index][0]])?.name ?? '';
-    // (these faces as `wanted` says, the rest of what is picked as it is)
-    const setPicked = (wanted) => {
-      const kept = [...editor.picked].filter((face) => !faces.includes(face));
-      const next = [...kept, ...wanted];
-      editor.clearSelection();
-      next.forEach((face, k) => editor.select(face, k > 0));
+    const item = (label, title, run) => {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.title = title;
+      button.disabled = !several;
+      button.addEventListener('click', () => {
+        menu.hidden = true;
+        run();
+        this.draw();
+      });
+      return button;
     };
-    const show = () => {
-      const title = document.createElement('div');
-      title.className = 'uv-face-menu-title';
-      title.textContent = t('uv.faces-menu.title', { count: faces.length });
-      const rows = faces.map((index) => {
-        const row = document.createElement('label');
-        row.className = 'uv-face-menu-row';
-        const tick = document.createElement('input');
-        tick.type = 'checkbox';
-        tick.checked = editor.picked.has(index);
-        tick.addEventListener('change', () => {
-          const wanted = new Set([...editor.picked].filter((face) => faces.includes(face)));
-          if (tick.checked) wanted.add(index);
-          else wanted.delete(index);
-          setPicked(wanted);
-          this.draw();
-        });
-        const text = document.createElement('span');
-        text.textContent = t('uv.faces-menu.face', { name: nameOf(index), index });
-        row.append(tick, text);
-        return row;
-      });
-      const all = document.createElement('button');
-      all.textContent = t('uv.faces-menu.all');
-      all.addEventListener('click', () => {
-        setPicked(faces);
-        show();
-      });
-      const nothing = document.createElement('button');
-      nothing.textContent = t('uv.faces-menu.none');
-      nothing.addEventListener('click', () => {
-        setPicked([]);
-        show();
-      });
-      const buttons = document.createElement('div');
-      buttons.className = 'uv-face-menu-buttons';
-      buttons.append(all, nothing);
-      menu.replaceChildren(title, ...rows, buttons);
-    };
-    show();
+    menu.replaceChildren(
+      item(t('uv.chart-menu.stack'), t('uv.chart-menu.stack.title'), () => editor.stackCharts(faces, here[0])),
+      item(t('uv.chart-menu.spread'), t('uv.chart-menu.spread.title'), () => editor.unfoldCharts(faces, true)),
+    );
     menu.hidden = false;
     const { width, height } = menu.getBoundingClientRect();
     menu.style.left = `${Math.min(clientX, window.innerWidth - width - 6)}px`;

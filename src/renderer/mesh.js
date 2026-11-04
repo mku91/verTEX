@@ -578,6 +578,37 @@ export class EditableMesh {
     return [top, ...circles.flat(), bottom];
   }
 
+  // A torus lying on the grid, as a new object: `segments` sections round the
+  // ring, each a circle of `sides`, all quads. `size` is across the whole of
+  // it, `thickness` across the tube - no more than leaves a hole in the
+  // middle. The tube has a flat side down, on the grid.
+  addTorus(segments = 12, sides = 8, size = 1, thickness = 0.25) {
+    const object = this.addObject('Torus');
+    const tube = Math.min(thickness, size * 0.48) / 2;
+    const ring = size / 2 - tube;
+    const step = (Math.PI * 2) / sides;
+    const circles = [];
+    for (let i = 0; i < segments; i++) {
+      const around = (i / segments) * Math.PI * 2;
+      const circle = [];
+      for (let j = 0; j < sides; j++) {
+        const angle = -Math.PI / 2 + (j + 0.5) * step;
+        const out = ring + tube * Math.cos(angle);
+        circle.push(this.addVertex(out * Math.cos(around), tube * (Math.sin(angle) + Math.cos(step / 2)), out * Math.sin(around), object));
+      }
+      circles.push(circle);
+    }
+    for (let i = 0; i < segments; i++) {
+      const here = circles[i];
+      const there = circles[(i + 1) % segments];
+      for (let j = 0; j < sides; j++) {
+        const k = (j + 1) % sides;
+        this.addFace([here[j], here[k], there[k], there[j]]);
+      }
+    }
+    return circles.flat();
+  }
+
   // A capsule standing on the grid, as a new object: a cylinder with half a
   // sphere at either end - `segments` vertices around, a quarter as many
   // rings in each half sphere, `size` across and `height` tall in all (the
@@ -1612,6 +1643,8 @@ const TEXELS_FRAGMENT = /* glsl */ `
 #endif
 `;
 
+const GHOST_OPACITY = 0.1; // the objects set aside while one is worked on alone, see `ghost`
+
 // How much of the picture shows in the focus look, on a textured model (see applyLook()).
 const XRAY_OPACITY = 0.65;
 
@@ -1772,6 +1805,12 @@ export class MeshView {
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: COLOR_WIRE }),
     );
+    // The objects set aside while one is worked on alone (see
+    // Editor.setIsolated()): only just there, for their place to be seen.
+    this.ghost = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: COLOR_WIRE, transparent: true, opacity: GHOST_OPACITY, depthWrite: false }),
+    );
     this.points = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
     // Drawn last: over the edges, the face highlights and the cut line.
     this.points.renderOrder = 5;
@@ -1900,6 +1939,7 @@ export class MeshView {
       this.sketchLine,
       this.sketchPoints,
       this.previewLine,
+      this.ghost,
     ];
     for (const object of objects) {
       object.frustumCulled = false;
@@ -1933,8 +1973,11 @@ export class MeshView {
     const hidden = (this.hidden ??= new Set());
     this.buildSurface();
     this.edgeIndices = this.mesh.edges().filter(([a]) => !hidden.has(a)).flat();
+    const ghosted = this.ghosted ?? new Set();
+    this.ghostIndices = ghosted.size ? this.mesh.edges().filter(([a]) => ghosted.has(a)).flat() : [];
 
     this.setPositions(this.wire, this.edgeIndices.length);
+    this.setPositions(this.ghost, this.ghostIndices.length);
     this.setPositions(this.points, vertices.length);
     this.points.geometry.setAttribute(
       'color',
@@ -2166,6 +2209,7 @@ export class MeshView {
     write(this.solid, this.triangleIndices);
     this.updateNormals();
     write(this.wire, this.edgeIndices);
+    write(this.ghost, this.ghostIndices);
     write(this.points, vertices.map((_, i) => i));
     // Raycasting against the surface relies on an up-to-date bounding sphere.
     this.solid.geometry.computeBoundingSphere();
@@ -2301,6 +2345,8 @@ export class MeshView {
       tint.visible = !this.bare && !this.focus && this.shading === 'orientation';
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
+    this.ghost.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
+    this.ghost.visible = !this.bare; // (not in the preview: nothing but the model there)
   }
 
   // Shows the line the brush would paint, on the surface, pixel by pixel:

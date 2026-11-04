@@ -75,6 +75,7 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         .visible(false)
         .menu(menu::build(app, &language)?)
         .additional_browser_args(&browser_args())
+        .general_autofill_enabled(false) // no browser's "saved information" under the fields of a program
         .initialization_script(language.script(&app.package_info().version.to_string()))
         // The page reads pictures from the clipboard (pasted into the UV
         // editor): allowed without asking, as the browser would ask a site.
@@ -118,7 +119,8 @@ fn open_views(app: &tauri::AppHandle, features: tauri::webview::NewWindowFeature
         .title(language.t("window.views.title"))
         .inner_size(1280.0, 860.0)
         .background_color(BACKGROUND)
-        .additional_browser_args(&browser_args());
+        .additional_browser_args(&browser_args())
+        .general_autofill_enabled(false);
     if let Some(dir) = webview_dir {
         builder = builder.data_directory(dir);
     }

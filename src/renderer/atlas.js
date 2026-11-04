@@ -575,6 +575,10 @@ export class Atlas extends EventTarget {
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           if (taken[y * width + x]) continue;
+          // What is painted stays, whether a face shows it or not (a picture
+          // pasted, what is left of a chart that has moved): only what is
+          // clear is grown into - and what grew is the only thing it grows from.
+          if (data[(y * width + x) * 4 + 3] !== 0) continue;
           const [dx, dy] = around.find(([ax, ay]) => {
             const nx = x + ax;
             const ny = y + ay;

@@ -10,7 +10,7 @@ import { Mirror, mirrorPoint } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
-import { unwrap, START_SIZE, PADDING, packRects } from './unwrap.js';
+import { unwrap, unfold, START_SIZE, PADDING, packRects } from './unwrap.js';
 import { theme, onThemeChange, themeGizmo } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
@@ -147,7 +147,7 @@ const CUT_MARGIN = 1e-3; // a cut off the grid (Alt held) stays this far inside 
 // Adds a primitive to a mesh as a new object and returns its vertices, or
 // undefined for an unknown kind. Options: cone { sides, size }, cylinder
 // { sides, size, height }, sphere { segments, size }, capsule { segments,
-// size, height }.
+// size, height }, torus { segments, sides, size, thickness }.
 // A line's pixels made pixel-perfect, as pixel art wants a line: where the
 // way took a corner (two pixels for one diagonal step), the corner goes.
 // `path` is [{ pixel, ... }], in order.
@@ -170,6 +170,7 @@ function buildPrimitive(mesh, kind, options) {
     case 'cylinder': return mesh.addCylinder(options.sides, options.size, options.height);
     case 'sphere': return mesh.addSphere(options.segments, options.size);
     case 'capsule': return mesh.addCapsule(options.segments, options.size, options.height);
+    case 'torus': return mesh.addTorus(options.segments, options.sides, options.size, options.thickness);
     default: return undefined;
   }
 }
@@ -234,6 +235,7 @@ export class Editor extends EventTarget {
     // The extrusion being pulled out: its new vertices and how far they went.
     this.extrude = null;
     this.inset = null; // an inset in progress, see beginInset()
+    this.isolation = null; // one object worked on alone: { id, others }, see setIsolated()
     this.knife = null; // the knife's cut being drawn, see pressKnife()
     // The polygon tool's state: its work plane and the outline drawn so far.
     this.polygon = null;
@@ -1312,10 +1314,10 @@ export class Editor extends EventTarget {
   // forgets the places and lays everything out anew - on the atlas `only`
   // (an id), or on all. What no face shows any more stays, until the atlas
   // is cleaned (see cleanAtlas()).
-  layOut(repack = false, only = null) {
+  layOut(repack = false, only = null, unfolded = null) {
     let changed = false;
     for (const atlas of this.atlases) {
-      const result = unwrap(this.mesh, { atlas: atlas.id, ppu: atlas.ppu, width: atlas.width, height: atlas.height, repack: repack && (only === null || only === atlas.id) });
+      const result = unwrap(this.mesh, { atlas: atlas.id, ppu: atlas.ppu, width: atlas.width, height: atlas.height, repack: repack && (only === null || only === atlas.id), unfolded: unfolded?.get(atlas.id) ?? [] });
       const resized = result.width !== atlas.width || result.height !== atlas.height;
       atlas.apply(result, this.mesh);
       changed ||= result.changed || resized;
@@ -1362,12 +1364,13 @@ export class Editor extends EventTarget {
     return this.atlas.charts.filter((chart) => chart.faces.some((face) => wanted.has(face)));
   }
 
-  // How far a chart can go by (dx, dy): whole pixels, and not off the atlas (its rim included).
+  // How far a chart can go by (dx, dy): not off the atlas (its rim included).
+  // (Whole pixels, unless the user has it otherwise: see UVEditor.snapped().)
   chartShift(chart, dx, dy) {
     const { rect } = chart;
     return [
-      Math.max(PADDING - rect.x, Math.min(this.atlas.width - PADDING - rect.w - rect.x, Math.round(dx))),
-      Math.max(PADDING - rect.y, Math.min(this.atlas.height - PADDING - rect.h - rect.y, Math.round(dy))),
+      Math.max(PADDING - rect.x, Math.min(this.atlas.width - PADDING - rect.w - rect.x, dx)),
+      Math.max(PADDING - rect.y, Math.min(this.atlas.height - PADDING - rect.h - rect.y, dy)),
     ];
   }
 
@@ -1464,6 +1467,85 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // Stacks the charts that hold any of the given faces on one spot, the top
+  // left corner of the one that holds `lead`: they share its picture - for
+  // what is painted one colour, a shape takes the room of one chart. They go
+  // as a move does (see placeCharts()): what was painted at their old places
+  // stays there, until the atlas is cleaned, and what of a chart reaches past
+  // the picture it comes onto is see-through. One undo step. Returns whether
+  // anything moved.
+  stackCharts(faces, lead) {
+    if (this.chartPreview) this.previewCharts(faces, null);
+    const charts = this.chartsOfFaces(faces);
+    const target = charts.find((chart) => chart.faces.includes(lead)) ?? charts[0];
+    if (charts.length < 2 || this.busy()) return false;
+    const before = this.snapshot();
+    let moved = false;
+    for (const chart of charts) {
+      if (chart === target) continue;
+      const [dx, dy] = this.chartShift(chart, target.rect.x - chart.rect.x, target.rect.y - chart.rect.y);
+      if (dx === 0 && dy === 0) continue;
+      moved = true;
+      for (const index of chart.faces) {
+        const face = this.mesh.faces[index];
+        face.uv = face.uv.map(([x, y]) => [x + dx, y + dy]);
+        face.pin = true;
+      }
+    }
+    if (!moved) return false;
+    this.history.push(before);
+    this.layOut();
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
+    return true;
+  }
+
+  // Lays the charts that hold any of the given faces out as they lie on the
+  // object, next to each other (see unfold()): every face upright, its pixel
+  // grid straight. They come to new rooms, filled in like new ones; what was
+  // painted for them stays where it was, until the
+  // atlas is cleaned (see cleanAtlas()). One undo step. Returns how many
+  // pieces they made, or 0 if nothing joined: then nothing is changed -
+  // unless `spread`: charts lying on one another are parted even so.
+  unfoldCharts(faces, spread = false) {
+    const charts = this.chartsOfFaces(faces);
+    if (charts.length < 2 || this.busy()) return 0;
+    const members = charts.flatMap((chart) => chart.faces);
+    const ownerOf = (index) => this.mesh.objects.find((object) => object.id === this.mesh.vertexObject[this.mesh.faces[index][0]]);
+    const byAtlas = new Map();
+    for (const index of members) {
+      const atlas = ownerOf(index)?.atlas;
+      if (!atlas) continue;
+      if (!byAtlas.has(atlas)) byAtlas.set(atlas, []);
+      byAtlas.get(atlas).push(index);
+    }
+    const unfolded = new Map([...byAtlas].map(([atlas, list]) => [atlas, unfold(this.mesh, list, this.atlasById(atlas).ppu)]));
+    const pieces = [...unfolded.values()].flat();
+    if (pieces.length === 0 || (!spread && pieces.length >= charts.length)) return 0;
+    const before = this.snapshot();
+    for (const piece of pieces) {
+      for (const index of piece.faces) {
+        const face = this.mesh.faces[index];
+        delete face.uv;
+        delete face.pin;
+        delete face.shaped;
+      }
+    }
+    try {
+      this.layOut(false, null, unfolded);
+    } catch {
+      // No room on an atlas of the largest size there may be: as it was.
+      this.restore(before);
+      return 0;
+    }
+    this.history.push(before);
+    this.view.updateUVs();
+    this.viewport.requestRender();
+    this.emitChange();
+    return pieces.length;
+  }
+
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
   // given faces. Turned or turned over, their pictures go with them (see
   // Atlas.carry()). Moved, they do not: a chart comes to its new place
@@ -1471,7 +1553,7 @@ export class Editor extends EventTarget {
   // - and what was painted for it stays where it was, until the atlas is
   // cleaned; put onto another chart's picture, it takes that picture: this
   // is how several faces come to share one.
-  //   { move: [dx, dy] }   by whole pixels (kept on the atlas)
+  //   { move: [dx, dy] }   by so many pixels (kept on the atlas)
   //   { turn: 1 | -1 }     a quarter turn, clockwise or back, about the chart's top left room
   //   { flip: 'h' | 'v' }  turned over, left to right or top to bottom
   // A chart placed so is pinned: the unwrap leaves it where it is. One undo step.
@@ -4760,6 +4842,20 @@ export class Editor extends EventTarget {
       for (const child of island.children) resolve(islands[child], island.hidden);
     };
     for (const island of islands) if (island.parentIndex === null) resolve(island, false);
+    // One object worked on alone (see setIsolated()): the others set aside
+    // are as hidden - nothing picks them - and drawn only as a faint wireframe.
+    // (Not `under`: a node above the one worked on must not hide it.)
+    const ghosted = new Set();
+    // (The one worked on is gone - deleted, undone: everything is back.)
+    if (this.isolation && !islands.some((island) => island.id === this.isolation.id)) this.isolation = null;
+    if (this.isolation) {
+      for (const island of islands) {
+        if (!this.isolation.others.has(island.id)) continue;
+        if (!island.hidden) for (const vertex of island.vertices) ghosted.add(vertex);
+        island.hidden = true;
+        for (const vertex of island.vertices) hiddenVertices.add(vertex);
+      }
+    }
     const collect = (island) => {
       if (island.node) return;
       island.node = island.hidden ? [] : [...island.vertices];
@@ -4774,6 +4870,7 @@ export class Editor extends EventTarget {
     const edges = this.mesh.edges().filter(([a]) => !hiddenVertices.has(a));
     this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices };
     this.view.hidden = hiddenVertices; // takes effect at the view's next rebuild
+    this.view.ghosted = ghosted; // likewise
   }
 
   // Takes what has become hidden out of the selection and the target.
@@ -5487,6 +5584,28 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
+  // Works on one entry of the objects list alone (Blender's Local View,
+  // Maya's Isolate Select), or - on the one that is, or with null - goes back:
+  // the others are set aside, a faint wireframe that nothing can pick. A way
+  // of looking, not an edit: no undo step, not saved, not exported. It is
+  // the others that are remembered, as they are now, so that what is made
+  // meanwhile (added, pasted, duplicated) is there to work on.
+  setIsolated(index) {
+    const object = index === null ? null : this.mesh.objects[index];
+    if (this.busy() || (index !== null && !object)) return;
+    if (this.operation) this.setOperation(null);
+    if (!object || this.isolation?.id === object.id) {
+      this.isolation = null;
+    } else {
+      const own = new Set(this.entriesUnder(index).map((entry) => this.mesh.objects[entry].id));
+      this.isolation = { id: object.id, others: new Set(this.mesh.objects.map((entry) => entry.id).filter((id) => !own.has(id))) };
+    }
+    this.updateTopology();
+    this.dropHidden();
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
   // Deletes an object or a node (index in the objects list) with all it
   // holds, whatever is selected.
   deleteObject(index) {
@@ -5739,7 +5858,7 @@ export class Editor extends EventTarget {
 
   // Adds a new object and selects it: 'cube', 'cone' ({ sides, size }),
   // 'cylinder' ({ sides, size, height }), 'sphere' ({ segments, size }) or
-  // 'capsule' ({ segments, size, height }) -
+  // 'capsule' ({ segments, size, height }) or 'torus' ({ segments, sides, size, thickness }) -
   // at the origin, or with `side` up against the selection (see primitiveAnchor()).
   // `into`: a node's id - the object is made in it, in the middle of it
   // (where its pivot point is), unless it is put up against the selection.
@@ -5857,6 +5976,7 @@ export class Editor extends EventTarget {
     if (this.busy()) return false;
     this.setWorkspace('model'); // (another project, or none: begun on the model, whatever mode the last was in)
     this.setOperation(null);
+    this.isolation = null; // (nor one object worked on alone, see setIsolated())
     this.lastPaint = null; // a line is not drawn from another project's pixel
     this.floating = null;
     this.marquee = null;

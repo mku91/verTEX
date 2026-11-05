@@ -301,6 +301,7 @@ const PAGES = [
           [{ button: '[data-tool="paint"]', name: 'guide.painting.keys0.0.name', hotkey: 'tool.paint' }, 'guide.painting.keys0.0.text'],
           [{ button: '[data-tool="pipette"]', name: 'guide.painting.keys0.1.name', hotkey: 'tool.pipette' }, 'guide.painting.keys0.1.text'],
           [{ button: '[data-tool="fill"]', name: 'guide.painting.keys0.2.name', hotkey: 'tool.fill' }, 'guide.painting.keys0.2.text'],
+          [{ button: '[data-tool="fillObject"]', name: 'guide.painting.fill-object.name', hotkey: 'tool.fill-object' }, 'guide.painting.fill-object.text'],
           [{ hotkey: 'tool.rect' }, 'guide.painting.keys0.3.text'],
           [{ hotkey: 'tool.ellipse' }, 'guide.painting.keys0.4.text'],
           [{ button: '[data-tool="marquee"]', name: 'guide.painting.keys0.5.name', hotkey: 'tool.marquee' }, 'guide.painting.keys0.5.text'],

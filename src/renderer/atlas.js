@@ -464,10 +464,19 @@ export class Atlas extends EventTarget {
   paintPixels(pixels, color) {
     const inside = pixels.filter(([x, y]) => x >= 0 && y >= 0 && x < this.width && y < this.height);
     if (inside.length === 0) return false;
-    const left = Math.min(...inside.map(([x]) => x));
-    const top = Math.min(...inside.map(([, y]) => y));
-    const width = Math.max(...inside.map(([x]) => x)) - left + 1;
-    const height = Math.max(...inside.map(([, y]) => y)) - top + 1;
+    // (By a loop: a whole object's pixels are too many to pass to Math.min() as arguments.)
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const [x, y] of inside) {
+      if (x < left) left = x;
+      if (y < top) top = y;
+      if (x > right) right = x;
+      if (y > bottom) bottom = y;
+    }
+    const width = right - left + 1;
+    const height = bottom - top + 1;
     const image = this.context.getImageData(left, top, width, height);
     let changed = false;
     for (const [x, y] of inside) {

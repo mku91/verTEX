@@ -150,6 +150,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.paint', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.paint'), keys: 'KeyV', run: () => editor.setTool('paint') },
     { id: 'tool.pipette', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.pipette'), keys: 'KeyI', run: () => editor.setTool('pipette') },
     { id: 'tool.fill', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill'), keys: 'KeyE', run: () => editor.setTool('fill') },
+    { id: 'tool.fill-object', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill-object'), keys: 'Shift+KeyE', run: () => editor.setTool('fillObject') },
     { id: 'tool.rect', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.rect'), keys: 'KeyM', run: () => editor.setTool('rect') },
     { id: 'tool.ellipse', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.ellipse'), keys: 'KeyO', run: () => editor.setTool('ellipse') },
     { id: 'tool.marquee', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.marquee'), keys: '', run: () => editor.setTool('marquee') },
@@ -730,7 +731,7 @@ $('hotkeys-reset').addEventListener('click', () => {
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
   '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot', '[data-tool="paint"]': 'tool.paint',
-  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="marquee"]': 'tool.marquee',
+  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="fillObject"]': 'tool.fill-object', '[data-tool="marquee"]': 'tool.marquee',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
@@ -2003,7 +2004,7 @@ function refresh() {
   if (editor.paintColor[3]) localStorage.setItem(PAINT_COLOR_KEY, hexOf(editor.paintColor));
   $('viewport').classList.toggle('painting', editor.painting && !editor.preview && tool !== 'marquee'); // (the marquee is the UV editor's)
   $('app').classList.toggle('picking', editor.picking); // pipette cursor, see styles.css
-  $('app').classList.toggle('filling', tool === 'fill' && !editor.picking && !editor.preview); // bucket cursor
+  $('app').classList.toggle('filling', (tool === 'fill' || tool === 'fillObject') && !editor.picking && !editor.preview); // bucket cursor
   for (const button of modeButtons) {
     button.classList.toggle('active', button.dataset.mode === mode);
     // An operation switches off the modes it can't work in.

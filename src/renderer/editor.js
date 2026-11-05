@@ -37,11 +37,12 @@ export const TOOLS = {
   paint: null, // the brush: a pixel at a time
   pipette: null, // takes the colour of a pixel
   fill: null, // floods an area of one colour
+  fillObject: null, // paints over all of an object, whatever colours it has
   rect: null, // draws a rectangle out
   ellipse: null, // and an ellipse
   marquee: null, // a rectangle of pixels, picked to be moved, copied, turned or rubbed out - in the UV editor only
 };
-export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'rect', 'ellipse', 'marquee'];
+export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'fillObject', 'rect', 'ellipse', 'marquee'];
 
 const PIVOT_MARKER_SIZE = 18; // px
 const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected node holds
@@ -2637,6 +2638,14 @@ export class Editor extends EventTarget {
       this.endPaint();
       return false;
     }
+    if (this.tool === 'fillObject') {
+      // The object under the press (in the UV editor, the one whose face holds
+      // the pixel), and with the mirror on, those of the mirror images.
+      const faces = [at?.face ?? this.placeOfPixel(pixel.x, pixel.y)?.face, ...this.mirroredPixels(pixel.x, pixel.y, at).map((image) => image.face)];
+      for (const face of faces) if (face !== undefined && this.paintObjectOf(face)) this.stroke.changed = true;
+      this.endPaint();
+      return false;
+    }
     if (this.tool === 'rect' || this.tool === 'ellipse') {
       this.stroke.base = this.atlas.taken();
       this.paintDrag(pixel);
@@ -2646,6 +2655,23 @@ export class Editor extends EventTarget {
     this.strokePixel(pixel.x, pixel.y, at);
     this.updateLinePreview();
     return true;
+  }
+
+  // Gives every pixel of the object a face belongs to the paint colour: all
+  // its faces' on the face's atlas (see facePixels()). A spot of the atlas that
+  // another object shows as well changes there too. Returns whether the picture changed.
+  paintObjectOf(index) {
+    const { faces, vertexObject } = this.mesh;
+    const owner = vertexObject[faces[index][0]];
+    const atlasId = this.view.atlasOfFace(faces[index]);
+    const atlas = this.atlasById(atlasId);
+    if (!atlas) return false;
+    const keys = new Set();
+    for (const face of faces) {
+      if (vertexObject[face[0]] !== owner || !face.uv?.every(Boolean) || this.view.atlasOfFace(face) !== atlasId) continue;
+      for (const key of facePixels(face.uv)) keys.add(key);
+    }
+    return atlas.paintPixels([...keys].map((key) => key.split(',').map(Number)), this.paintColor);
   }
 
   // The brush's stroke takes in a pixel - `at`, where on the model's surface

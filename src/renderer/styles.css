@@ -2661,8 +2661,11 @@ input.refused {
 .outliner-isolate.active,
 .outliner-isolate.active:hover {
   background: var(--accent);
-  color: var(--accent-text);
   opacity: 1;
+}
+
+.outliner-isolate.active i {
+  color: #fff;
 }
 
 .outliner-row.hidden .outliner-name,
@@ -2673,6 +2676,68 @@ input.refused {
 /* The row its right-click menu is open for. */
 .outliner-row.context {
   background: var(--hover);
+}
+
+/* Unfold's popup: how the pixel grid is to lie. */
+.unfold-popup {
+  position: fixed;
+  z-index: 6;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.unfold-popup[hidden] {
+  display: none;
+}
+
+.unfold-popup .plane-buttons {
+  align-items: center;
+}
+
+.unfold-body,
+.unfold-foot button {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.unfold-body:hover,
+.unfold-foot button:hover:not(:disabled) {
+  background: var(--bg-raised);
+}
+
+.unfold-body.active {
+  border-color: var(--text);
+}
+
+.unfold-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unfold-count {
+  flex: 1;
+  margin-right: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.unfold-foot .unfold-apply {
+  border-color: var(--accent);
+}
+
+.unfold-foot .unfold-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* A menu at the pointer. */

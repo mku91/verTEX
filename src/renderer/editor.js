@@ -339,6 +339,7 @@ export class Editor extends EventTarget {
     this.gizmo.setColors(theme.axisX, theme.axisY, theme.axisZ, theme.hoveredFocus);
     this.pivotMarker.material.color.set(theme.pivot);
     for (const part of this.snapMark.children) part.material.color.set(theme.snap);
+    this.unfoldGrid?.material.color.set(theme.snap);
     this.knifeMark.material.color.set(theme.selected);
     this.knifeEndMark.material.color.set(theme.cut);
     this.refreshHighlight(); // vertex colours, and a render
@@ -384,6 +385,12 @@ export class Editor extends EventTarget {
     this.knifeEndMark.renderOrder = 10;
     this.knifeEndMark.visible = false;
     scene.add(this.knifeEndMark);
+    // The pixel grid a chosen Unfold would give (see previewUnfold()).
+    this.unfoldGrid = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: theme.snap, transparent: true, opacity: 0.8 }));
+    this.unfoldGrid.renderOrder = 8;
+    this.unfoldGrid.frustumCulled = false;
+    this.unfoldGrid.visible = false;
+    scene.add(this.unfoldGrid);
     // The pivot points of everything inside a selected node: the same mark,
     // smaller, as many of them as are needed at the moment.
     this.pivotRings = [];
@@ -1506,21 +1513,11 @@ export class Editor extends EventTarget {
   // ones; what was painted for them stays where it was, until the atlas is
   // cleaned (see cleanAtlas()). One undo step. Returns how many pieces they
   // made, or 0 if nothing joined: then nothing is changed - unless `spread`:
-  // charts lying on one another are parted even so.
-  unfoldCharts(faces, spread = false) {
+  // charts lying on one another are parted even so. `along`: how the grid lies.
+  unfoldCharts(faces, spread = false, along = 'y') {
     const charts = this.chartsOfFaces(faces);
-    const whole = charts.flatMap((chart) => chart.faces);
-    const members = faces.filter((index) => whole.includes(index));
-    if (members.length < 2 || this.busy()) return 0;
-    const ownerOf = (index) => this.mesh.objects.find((object) => object.id === this.mesh.vertexObject[this.mesh.faces[index][0]]);
-    const byAtlas = new Map();
-    for (const index of members) {
-      const atlas = ownerOf(index)?.atlas;
-      if (!atlas) continue;
-      if (!byAtlas.has(atlas)) byAtlas.set(atlas, []);
-      byAtlas.get(atlas).push(index);
-    }
-    const unfolded = new Map([...byAtlas].map(([atlas, list]) => [atlas, unfold(this.mesh, list, this.atlasById(atlas).ppu)]));
+    const unfolded = this.unfoldedPieces(faces, along);
+    if (!unfolded || this.busy()) return 0;
     const pieces = [...unfolded.values()].flat();
     if (pieces.length === 0 || (!spread && charts.length > 1 && pieces.length >= charts.length)) return 0;
     const before = this.snapshot();
@@ -1544,6 +1541,71 @@ export class Editor extends EventTarget {
     this.viewport.requestRender();
     this.emitChange();
     return pieces.length;
+  }
+
+  // The pieces the given faces would make (see unfold()), by the atlas they are
+  // on; null if there are not two of them on any.
+  unfoldedPieces(faces, along) {
+    const whole = this.chartsOfFaces(faces).flatMap((chart) => chart.faces);
+    const members = faces.filter((index) => whole.includes(index));
+    if (members.length < 2) return null;
+    const ownerOf = (index) => this.mesh.objects.find((object) => object.id === this.mesh.vertexObject[this.mesh.faces[index][0]]);
+    const byAtlas = new Map();
+    for (const index of members) {
+      const atlas = ownerOf(index)?.atlas;
+      if (!atlas) continue;
+      if (!byAtlas.has(atlas)) byAtlas.set(atlas, []);
+      byAtlas.get(atlas).push(index);
+    }
+    return new Map([...byAtlas].map(([atlas, list]) => [atlas, unfold(this.mesh, list, this.atlasById(atlas).ppu, along)]));
+  }
+
+  // Shows on the model the pixel grid Unfold would give the faces, nothing
+  // changed: the lines between pixels, across each face, a hair above it. A
+  // piece comes to a whole pixel on the atlas, so these are the lines it will
+  // have. Returns how many pieces they would make.
+  previewUnfold(faces, along) {
+    const unfolded = this.unfoldedPieces(faces, along);
+    const pieces = unfolded ? [...unfolded.values()].flat() : [];
+    const points = [];
+    const { faces: all, vertices } = this.mesh;
+    const LIFT = 0.002; // above the face, not to sink into it
+    for (const piece of pieces) {
+      for (const [index, polygon] of piece.places) {
+        const lift = this.mesh.faceNormal(index).multiplyScalar(LIFT);
+        const corners = all[index].map((vertex) => vertices[vertex]);
+        for (const axis of [0, 1]) {
+          const values = polygon.map((place) => place[axis]);
+          const last = Math.floor(Math.max(...values) - 1e-6);
+          for (let line = Math.ceil(Math.min(...values) + 1e-6); line <= last; line++) {
+            // Where the line goes through the outline, in order along it: in, out, in, out.
+            const crossings = [];
+            polygon.forEach((place, k) => {
+              const next = polygon[(k + 1) % polygon.length];
+              if (place[axis] < line === next[axis] < line) return;
+              const t = (line - place[axis]) / (next[axis] - place[axis]);
+              crossings.push({ at: place[1 - axis] + (next[1 - axis] - place[1 - axis]) * t, point: corners[k].clone().lerp(corners[(k + 1) % corners.length], t).add(lift) });
+            });
+            crossings.sort((a, b) => a.at - b.at);
+            for (let k = 0; k + 1 < crossings.length; k += 2) {
+              const { x, y, z } = crossings[k].point;
+              const end = crossings[k + 1].point;
+              points.push(x, y, z, end.x, end.y, end.z);
+            }
+          }
+        }
+      }
+    }
+    this.unfoldGrid.geometry.dispose();
+    this.unfoldGrid.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    this.unfoldGrid.visible = points.length > 0;
+    this.viewport.requestRender();
+    return pieces.length;
+  }
+
+  hideUnfoldPreview() {
+    this.unfoldGrid.visible = false;
+    this.viewport.requestRender();
   }
 
   // Puts charts elsewhere on the atlas by hand - those that hold any of the
@@ -4985,9 +5047,10 @@ export class Editor extends EventTarget {
   }
 
   // The surface alone, painted, with nothing drawn on it: in the preview, and
-  // under the brush - which also has the atlas' pixels marked out on it.
+  // under the brush - which also has the atlas' pixels marked out on it, and
+  // the objects set aside still in sight, to paint with them in mind.
   applyBare() {
-    this.view.setBare(this.preview || this.painting);
+    this.view.setBare(this.preview || this.painting, !this.preview);
     this.view.setTexelGrid(this.painting && !this.preview);
     if (!this.painting || this.preview) this.setPaintHover(null);
   }

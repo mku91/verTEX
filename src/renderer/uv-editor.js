@@ -108,7 +108,10 @@ export class UVEditor {
       if (!this.moved && this.open) this.fit();
       this.draw();
     }).observe(this.canvas);
-    editor.addEventListener('change', () => this.update());
+    editor.addEventListener('change', () => {
+      this.update();
+      if (this.unfolding) this.showUnfold(); // (the faces picked, or what they are, may have changed)
+    });
     editor.addEventListener('painthover', () => (editor.marquee ? this.update() : this.draw())); // (what is picked, as it moves: said too)
     // (the atlas shown: the one worked on, see Editor.atlas)
     editor.addEventListener('atlaschange', ({ detail }) => detail.atlas === editor.atlas && this.draw());
@@ -283,7 +286,10 @@ export class UVEditor {
     else if (name === 'clean') this.askClean();
     else if (name === 'pack') this.editor.packAtlas();
     else if (name === 'stack') this.stackInHand();
-    else if (name === 'unfold') this.editor.unfoldCharts(faces);
+    else if (name === 'unfold') {
+      if (this.unfolding) this.closeUnfold();
+      else this.openUnfold();
+    }
     else if (name === 'regenerate') {
       // With nothing picked it is the whole atlas, and everything painted: asked first.
       const all = this.pickedCharts().length === 0;
@@ -929,6 +935,97 @@ export class UVEditor {
     const { width, height } = menu.getBoundingClientRect();
     menu.style.left = `${Math.min(clientX, window.innerWidth - width - 6)}px`;
     menu.style.top = `${Math.min(clientY, window.innerHeight - height - 6)}px`;
+  }
+
+  // Unfold's popup: how the pixel grid is to lie, shown on the model as it is
+  // chosen. It leaves the view free: the model can be looked round and other
+  // faces picked. Nothing changes until it is applied.
+  openUnfold() {
+    const popup = (this.unfoldPopup ??= this.buildUnfoldPopup());
+    this.unfolding = 'body';
+    popup.hidden = false;
+    this.container.querySelector('[data-uv="unfold"]').classList.add('active');
+    const button = this.container.querySelector('[data-uv="unfold"]').getBoundingClientRect();
+    const { width, height } = popup.getBoundingClientRect();
+    popup.style.left = `${Math.max(6, Math.min(button.left, window.innerWidth - width - 6))}px`;
+    popup.style.top = `${button.top - height - 6 >= 0 ? button.top - height - 6 : button.bottom + 6}px`;
+    this.showUnfold();
+  }
+
+  closeUnfold() {
+    this.unfolding = null;
+    this.unfoldPopup.hidden = true;
+    this.container.querySelector('[data-uv="unfold"]').classList.remove('active');
+    this.editor.hideUnfoldPreview();
+  }
+
+  showUnfold() {
+    const faces = this.pickedFaces();
+    if (faces.length < 2) {
+      this.closeUnfold();
+      return;
+    }
+    const pieces = this.editor.previewUnfold(faces, this.unfolding);
+    const popup = this.unfoldPopup;
+    popup.querySelector('.unfold-count').textContent = t('uv.unfold.pieces', { count: pieces });
+    popup.querySelector('.unfold-apply').disabled = pieces === 0;
+    for (const button of popup.querySelectorAll('[data-along]')) button.classList.toggle('active', button.dataset.along === this.unfolding);
+  }
+
+  applyUnfold() {
+    const along = this.unfolding;
+    const faces = this.pickedFaces();
+    this.closeUnfold();
+    this.editor.unfoldCharts(faces, true, along); // (asked for by hand: done even if nothing joins)
+    this.draw();
+  }
+
+  buildUnfoldPopup() {
+    const popup = document.createElement('div');
+    popup.className = 'unfold-popup';
+    popup.hidden = true;
+    const choice = (along, label, title, className) => {
+      const button = document.createElement('button');
+      button.dataset.along = along;
+      button.textContent = label;
+      button.title = title;
+      button.className = className;
+      button.addEventListener('click', () => {
+        this.unfolding = along;
+        this.showUnfold();
+      });
+      return button;
+    };
+    const row = document.createElement('div');
+    row.className = 'plane-buttons';
+    row.append(
+      choice('body', t('uv.unfold.body'), t('uv.unfold.body.title'), 'unfold-body'),
+      ...['x', 'y', 'z'].map((axis) => choice(axis, axis.toUpperCase(), t('uv.unfold.axis.title', { axis: axis.toUpperCase() }), `plane-button ${axis}`)),
+    );
+    const foot = document.createElement('div');
+    foot.className = 'unfold-foot';
+    const count = document.createElement('span');
+    count.className = 'unfold-count';
+    count.title = t('uv.unfold.pieces.title');
+    const action = (label, className, run) => {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.className = className;
+      button.addEventListener('click', run);
+      return button;
+    };
+    foot.append(count, action(t('uv.unfold.cancel'), 'unfold-cancel', () => this.closeUnfold()), action(t('uv.unfold.apply'), 'unfold-apply', () => this.applyUnfold()));
+    popup.append(row, foot);
+    document.body.append(popup);
+    window.addEventListener('keydown', (event) => {
+      if (!this.unfolding || !['Escape', 'Enter', 'NumpadEnter'].includes(event.code)) return;
+      if (event.target.closest?.('input, textarea')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.code === 'Escape') this.closeUnfold();
+      else if (!popup.querySelector('.unfold-apply').disabled) this.applyUnfold();
+    }, true);
+    return popup;
   }
 
   // The checkerboard where nothing is painted: a pattern of squares `tile`

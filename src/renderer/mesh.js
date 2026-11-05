@@ -2148,8 +2148,15 @@ export class MeshView {
     let height = 1;
     const uvs = new Float32Array(this.triangleFaces.length * 6);
     const boxes = new Float32Array(this.triangleFaces.length * 12);
-    // From `low` to `high` (pixels), half a pixel in; of less than a pixel, its middle.
-    const inside = (low, high) => (high - low > 1 ? [low + 0.5, high - 0.5] : [(low + high) / 2, (low + high) / 2]);
+    // From the middle of the first pixel `low` is on to the middle of the last
+    // `high` is on: a corner may stand anywhere in a pixel (see unfold()), and
+    // what shows there must be that pixel, not the next one in. With no pixel
+    // between them (no width at all), the middle of the two.
+    const inside = (low, high) => {
+      const first = Math.floor(low + 1e-6) + 0.5;
+      const last = Math.ceil(high - 1e-6) - 0.5;
+      return first <= last ? [first, last] : [(low + high) / 2, (low + high) / 2];
+    };
     const boxOf = new Map(); // face -> its bounds
     const bounds = (face) => {
       if (!boxOf.has(face)) {
@@ -2282,8 +2289,10 @@ export class MeshView {
 
   // The preview look: the model as it will be seen outside the editor - its
   // surface, painted, and nothing drawn on it. On top of any shading.
-  setBare(on) {
+  // `ghosts`: the objects set aside still shown (see `ghost`).
+  setBare(on, ghosts = false) {
     this.bare = on;
+    this.bareGhosts = ghosts;
     this.applyLook();
   }
 
@@ -2346,7 +2355,7 @@ export class MeshView {
     }
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
     this.ghost.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
-    this.ghost.visible = !this.bare; // (not in the preview: nothing but the model there)
+    this.ghost.visible = !this.bare || this.bareGhosts; // (not in the preview: nothing but the model there)
   }
 
   // Shows the line the brush would paint, on the surface, pixel by pixel:

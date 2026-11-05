@@ -36,6 +36,7 @@ const MAX_SIZE = 4096;
 const tidy = (value) => (Math.abs(value - Math.round(value)) < 1e-6 ? Math.round(value) : +value.toFixed(6));
 const UNFOLD_HAIR = 1e-3; // px: nearer than this, two faces of an unfolded piece only touch (see unfold())
 const PROJECT_LIMIT = 0.5; // the cosine of the most a face may be tilted in a projected piece (60 degrees: pixels drawn out twice)
+const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 const LEVEL_LIMIT = Math.sqrt(3) / 2; // how much of a direction may be height for it to be levelled (past this, no face it holds would stay within PROJECT_LIMIT)
 
 // The charts of a mesh's faces that are still to be placed, each { faces, object, normal, flat } - `flat` a Map
@@ -197,11 +198,12 @@ function keptCharts(mesh, atlas = ATLAS) {
 // object's own frame: `up` runs up the surface (on a floor or a ceiling, where
 // nothing does, along the object's Z), and `right` to the right of it for
 // someone looking at the face.
-function planeAxes(normal, turn) {
+function planeAxes(normal, turn, along = 'y') {
   const own = normal.clone().applyQuaternion(turn.clone().invert());
-  const up = Math.abs(own.y) > 0.9999
-    ? new THREE.Vector3(0, 0, 1)
-    : new THREE.Vector3(0, 1, 0).addScaledVector(own, -own.y).normalize();
+  const axis = AXES[along];
+  const up = Math.abs(own.dot(axis)) > 0.9999
+    ? AXES[along === 'y' ? 'z' : 'y'].clone()
+    : axis.clone().addScaledVector(own, -own.dot(axis)).normalize();
   const right = new THREE.Vector3().crossVectors(up, own).applyQuaternion(turn);
   up.applyQuaternion(turn);
   return { right, up };
@@ -298,15 +300,16 @@ function areaVector(mesh, i) {
 // pixel grid is one for all of them, straight on the atlas and running on
 // across every edge, a vertex having one place in all its faces. What it costs
 // is pixels drawn out on a face tilted from that direction, by 1 / cos of the
-// tilt. The direction is that of the faces together, made level: looking along
-// the ground, a pixel's row is one height on the object (the object's own Y),
-// whatever the face's slope. Faces that look mostly up or down cannot be seen
-// so, and are looked at as they are. A face tilted by more than PROJECT_LIMIT,
-// or landing on what is laid, is left for a piece of its own, projected along a
-// direction of its own. Returns the pieces, each { faces, places: Map(face ->
-// [[x, y]], its corners, in pixels), width, height }, ready for unwrap() (see
-// `unfolded`).
-export function unfold(mesh, faceIndices, ppu) {
+// tilt. The direction is that of the faces together. `along` is how the grid
+// lies: 'body', as those faces look together; or 'x', 'y', 'z', an axis of the
+// object's own, which is taken out of the direction: columns of pixels run
+// along that axis and a row is one place on it, whatever the face's slope. (Faces
+// that look mostly along the axis cannot be seen so, and are looked at as they
+// are.) A face tilted by more than PROJECT_LIMIT, or landing on what is laid, is
+// left for a piece of its own, projected along a direction of its own. Returns
+// the pieces, each { faces, places: Map(face -> [[x, y]], its corners, in
+// pixels), width, height }, ready for unwrap() (see `unfolded`).
+export function unfold(mesh, faceIndices, ppu, along = 'y') {
   const { faces, vertices, vertexObject, objects } = mesh;
   const turns = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation)]));
   const normals = new Map(faceIndices.map((i) => [i, mesh.faceNormal(i)]));
@@ -330,13 +333,14 @@ export function unfold(mesh, faceIndices, ppu) {
     }
     return order;
   };
-  // A direction with its height taken out, in the object's own terms - unless it is mostly height.
+  // A direction with the chosen axis taken out, in the object's own terms - unless it is mostly that axis.
   const levelled = (axis, i) => {
+    if (along === 'body') return axis;
     const turn = turns.get(vertexObject[faces[i][0]]) ?? new THREE.Quaternion();
     const own = axis.clone().applyQuaternion(turn.clone().invert());
-    if (Math.abs(own.y) > LEVEL_LIMIT) return axis;
-    own.y = 0;
-    return own.normalize().applyQuaternion(turn);
+    const part = own.dot(AXES[along]);
+    if (Math.abs(part) > LEVEL_LIMIT) return axis;
+    return own.addScaledVector(AXES[along], -part).normalize().applyQuaternion(turn);
   };
   // Which way faces look together; a closed surface looks no way: then as `fallback`.
   const lookOf = (list, fallback) => {
@@ -356,7 +360,7 @@ export function unfold(mesh, faceIndices, ppu) {
     // Its direction settles on what it takes.
     for (let round = 0; round < 2; round++) axis = lookOf(flood(seed, axis), seed);
     if (normals.get(seed).dot(axis) < PROJECT_LIMIT) axis = normals.get(seed).clone(); // (it is always taken: not edge on)
-    const { right, up } = planeAxes(axis, turns.get(vertexObject[faces[seed][0]]) ?? new THREE.Quaternion());
+    const { right, up } = planeAxes(axis, turns.get(vertexObject[faces[seed][0]]) ?? new THREE.Quaternion(), along === 'body' ? 'y' : along);
     const flatOf = (i) => faces[i].map((vertex) => [vertices[vertex].dot(right) * ppu, -vertices[vertex].dot(up) * ppu]);
     // (The first face's top left corner on a pixel.)
     const start = flatOf(seed);

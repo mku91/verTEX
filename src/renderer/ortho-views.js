@@ -339,6 +339,7 @@ export class OrthoViews {
         return;
       }
       editor.setFineSnap(event.ctrlKey);
+      editor.setAltHeld(event.altKey); // (in the views' own window the editor's listener does not hear the pointer)
       if (editor.operation === 'cut') {
         if (editor.cut) editor.moveCut(event.clientX, event.clientY, view.viewer);
         canvas.style.cursor = editor.cut ? 'crosshair' : '';
@@ -877,7 +878,7 @@ export class OrthoViews {
     let matrix;
     if (drag.property === 'position') {
       const delta = this.unproject(view, x, y).sub(this.unproject(view, drag.x, drag.y));
-      if (snap) {
+      if (snap && !event.altKey) { // with Alt held, freely
         const step = this.editor.snapGrid.step / (event.ctrlKey ? this.editor.snapGrid.fineDivisor : 1);
         for (const axis of [view.right, view.up]) delta[axis] = Math.round(delta[axis] / step) * step;
       }

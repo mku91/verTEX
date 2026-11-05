@@ -468,7 +468,7 @@ export class Editor extends EventTarget {
         if (event.key === 'Shift') this.setShiftHeld(type === 'keydown'); // the brush's line, see setShiftHeld()
         if (event.code === 'Space') this.setSpaceHeld(type === 'keydown'); // ... along the faces
         if (event.key !== 'Alt') return;
-        if (this.tool === 'scale' || this.painting || this.extrude || this.inset || this.cut || this.gizmo.dragging) event.preventDefault(); // (an extrusion, an inset or a cut off the grid, see moveExtrude(), moveInset(), placeCut())
+        if (this.tool === 'scale' || this.painting || this.extrude || this.inset || this.cut || this.gizmo.dragging || this.drag || this.pivotDrag) event.preventDefault(); // (an extrusion, an inset, a cut or a drag off the grid, see moveExtrude(), moveInset(), placeCut(), dragTo())
         this.setAltHeld(type === 'keydown');
       });
     }
@@ -497,6 +497,8 @@ export class Editor extends EventTarget {
     if (this.inset?.pointer) this.moveInset(...this.inset.pointer);
     if (this.extrude?.pointer) this.moveExtrude(...this.extrude.pointer);
     if (this.cut?.point) this.placeCut(this.cut.point);
+    if (this.drag?.start) this.dragTo(this.drag.lastX, this.drag.lastY);
+    else if (this.pivotDrag?.before) this.dragPivotTo(this.pivotDrag.lastX, this.pivotDrag.lastY);
     if (this.picking !== picking) this.emitChange();
     this.updateLinePreview(); // the pipette shows no line
   }
@@ -900,7 +902,7 @@ export class Editor extends EventTarget {
     return true;
   }
 
-  // The point slides in the view's plane, on the grid; an axis lock keeps it on that axis.
+  // The point slides in the view's plane, on the grid (off it with Alt held); an axis lock keeps it on that axis.
   dragPivotTo(clientX, clientY) {
     const drag = this.pivotDrag;
     drag.lastX = clientX;
@@ -923,7 +925,8 @@ export class Editor extends EventTarget {
     if (hit) {
       const delta = hit.sub(drag.grab);
       if (axis) delta.projectOnVector(axis);
-      this.snapGrid.snap(point.add(delta));
+      point.add(delta);
+      if (!this.altHeld) this.snapGrid.snap(point); // with Alt held, freely
     }
     this.mesh.objects[drag.entry].pivot = point.toArray();
     this.snapGrid.focus(point);
@@ -4578,7 +4581,8 @@ export class Editor extends EventTarget {
     if (point) {
       const delta = point.sub(drag.grab);
       if (drag.axis) delta.projectOnVector(drag.axis);
-      this.snapGrid.snap(lead.add(delta));
+      lead.add(delta);
+      if (!this.altHeld) this.snapGrid.snap(lead); // with Alt held, freely
     }
     // Everything dragged follows that point rigidly.
     let offset = lead.clone().sub(from);

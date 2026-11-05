@@ -955,7 +955,7 @@
  "guide.snapping.key.toggle": "Grid snapping on or off",
  "guide.snapping.key.ctrl-on": "With snapping on: a finer grid while it is held",
  "guide.snapping.key.ctrl-off": "With snapping off: what is dragged is drawn to its like nearby — a vertex to a vertex, an edge to an edge, a face to a face; an object is laid against another's face. The target shows in green",
- "guide.snapping.key.alt": "Off the grid for as long as it is held: the move gizmo, the extrusion, the inset and the cut line follow the pointer freely",
+ "guide.snapping.key.alt": "Off the grid for as long as it is held: the move gizmo, dragging in the views, the extrusion, the inset and the cut line follow the pointer freely",
  "guide.snapping.merge": "Snapped with Ctrl, vertices left on vertices of their own object are merged when the mouse button is let go, and faces pressed together face to face go. Objects only touch: to make them one, use Join in the scene list.",
  "guide.knife.title": "Knife",
  "guide.knife.intro": "Cuts one face in two, along a line between two points of its border.",

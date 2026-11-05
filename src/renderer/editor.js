@@ -1501,17 +1501,17 @@ export class Editor extends EventTarget {
     return true;
   }
 
-  // Lays the charts that hold any of the given faces out as they lie on the
-  // object, next to each other (see unfold()): every face upright, its pixel
-  // grid straight. They come to new rooms, filled in like new ones; what was
-  // painted for them stays where it was, until the
-  // atlas is cleaned (see cleanAtlas()). One undo step. Returns how many
-  // pieces they made, or 0 if nothing joined: then nothing is changed -
-  // unless `spread`: charts lying on one another are parted even so.
+  // Lays the given faces out on one pixel grid (see unfold()); the rest of their
+  // charts stay where they are. They come to new rooms, filled in like new
+  // ones; what was painted for them stays where it was, until the atlas is
+  // cleaned (see cleanAtlas()). One undo step. Returns how many pieces they
+  // made, or 0 if nothing joined: then nothing is changed - unless `spread`:
+  // charts lying on one another are parted even so.
   unfoldCharts(faces, spread = false) {
     const charts = this.chartsOfFaces(faces);
-    if (charts.length < 2 || this.busy()) return 0;
-    const members = charts.flatMap((chart) => chart.faces);
+    const whole = charts.flatMap((chart) => chart.faces);
+    const members = faces.filter((index) => whole.includes(index));
+    if (members.length < 2 || this.busy()) return 0;
     const ownerOf = (index) => this.mesh.objects.find((object) => object.id === this.mesh.vertexObject[this.mesh.faces[index][0]]);
     const byAtlas = new Map();
     for (const index of members) {
@@ -1522,7 +1522,7 @@ export class Editor extends EventTarget {
     }
     const unfolded = new Map([...byAtlas].map(([atlas, list]) => [atlas, unfold(this.mesh, list, this.atlasById(atlas).ppu)]));
     const pieces = [...unfolded.values()].flat();
-    if (pieces.length === 0 || (!spread && pieces.length >= charts.length)) return 0;
+    if (pieces.length === 0 || (!spread && charts.length > 1 && pieces.length >= charts.length)) return 0;
     const before = this.snapshot();
     for (const piece of pieces) {
       for (const index of piece.faces) {

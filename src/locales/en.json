@@ -1127,7 +1127,7 @@
  "guide.textures.keys0.0.text": "The UV editor on or off",
  "guide.textures.keys0.1.keys": "F1 (held)",
  "guide.textures.keys0.1.text": "Dim the picture except the face under the pointer",
- "guide.textures.p1": "Above the picture: the shape lock (open — a chart's corners can be moved pixel by pixel), Unfold (lay the picked charts out as they lie on the object, each upright, its pixel grid straight), Regenerate (lay the picked charts out anew), Clean (erase what no face shows), Repack (lay everything out tightly), and pasting a picture from the clipboard. A right click on charts: Stack (the charts on one spot, sharing its picture: for what is one colour) and Lay out (as they lie on the object, next to each other).",
+ "guide.textures.p1": "Above the picture: the shape lock (open — a chart's corners can be moved pixel by pixel), Unfold (lay the picked faces out on one pixel grid, its rows level along Y), Regenerate (lay the picked charts out anew), Clean (erase what no face shows), Repack (lay everything out tightly), and pasting a picture from the clipboard. A right click on charts: Stack (the charts on one spot, sharing its picture: for what is one colour) and Lay out (as they lie on the object, next to each other).",
  "guide.painting.title": "Painting",
  "guide.painting.p0": "The painting tools work on the model or on the UV editor's picture, pixel by pixel.",
  "guide.painting.keys0.0.name": "Brush",
@@ -1166,10 +1166,10 @@
  "outliner.field.thickness": "Thickness",
  "outliner.isolate.on": "Only this object: the others become a faint wireframe that cannot be picked",
  "outliner.isolate.off": "Back to all the objects",
- "html.uv-editor.uv-bar.uv-unfold.title": "Unfold: lay the picked charts out as they lie on the object, next to each other. Every face stays upright, its pixel grid straight: faces are only shifted, never turned or stretched. They get new places, filled with the template; what was painted for them stays at the old place until «Clean» is pressed",
+ "html.uv-editor.uv-bar.uv-unfold.title": "Unfold: all the picked faces on one pixel grid, its rows level along Y. The grid meets across every edge; pixels stretch on sloping faces. Faces tilted over 60° go to a piece of their own. They get new places, filled with the template; what was painted for them stays at the old place until «Clean» is pressed",
  "uv.chart-menu.stack": "Stack",
  "uv.chart-menu.stack.title": "Put these charts on one spot: they share its picture. For what is painted one colour",
  "uv.chart-menu.spread": "Lay out",
- "uv.chart-menu.spread.title": "Lay these charts out as they lie on the object, next to each other. They get new places, filled with the template",
+ "uv.chart-menu.spread.title": "Lay these faces out on one pixel grid, its rows level along Y. They get new places, filled with the template",
  "html.uv-editor.uv-bar.uv-stack.title": "Stack: put the charts on one spot, the biggest one's, where they share its picture - for what is painted one colour. With an object picked, all its charts; with faces picked, theirs. What was painted at their old places stays until «Clean» is pressed"
 }

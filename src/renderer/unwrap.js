@@ -35,7 +35,8 @@ const MAX_SIZE = 4096;
 
 const tidy = (value) => (Math.abs(value - Math.round(value)) < 1e-6 ? Math.round(value) : +value.toFixed(6));
 const UNFOLD_HAIR = 1e-3; // px: nearer than this, two faces of an unfolded piece only touch (see unfold())
-const NEAR_SHIFTS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]; // whole pixels, the nearest first
+const PROJECT_LIMIT = 0.5; // the cosine of the most a face may be tilted in a projected piece (60 degrees: pixels drawn out twice)
+const LEVEL_LIMIT = Math.sqrt(3) / 2; // how much of a direction may be height for it to be levelled (past this, no face it holds would stay within PROJECT_LIMIT)
 
 // The charts of a mesh's faces that are still to be placed, each { faces, object, normal, flat } - `flat` a Map
 // from a vertex of the chart to its place [x, y] in pixels, and `width`,
@@ -253,113 +254,125 @@ function overlapping(p, q) {
   return false;
 }
 
-// The given faces laid out as they lie on the object, next to each other. For
-// pixel art: each face stays as a chart is laid (see chartsOf()), upright on
-// its plane's axes, its pixel grid straight - never turned, never stretched -
-// and is only shifted, by whole pixels, up against a face it shares an edge
-// with, the middles of that edge as near as they come. An upright edge meets
-// its neighbour's whole; a slanting one leaves a wedge between them: on a
-// curved surface a straight grid and meeting edges cannot both be had. The
-// biggest face comes first, and the rest by how near they are to the plane
-// of the one they join. A face that would land on what is laid does not join
-// there: by another edge, or in a piece of its own. Returns the pieces, each
-// { faces, places: Map(face -> [[x, y]], its corners, in pixels), width,
-// height }, ready for unwrap() (see `unfolded`).
-export function unfold(mesh, faceIndices, ppu) {
-  const { faces, vertices, vertexObject, objects } = mesh;
-  const turns = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation)]));
-  const normals = new Map(faceIndices.map((i) => [i, mesh.faceNormal(i)]));
-  const sound = faceIndices.filter((i) => normals.get(i).lengthSq() > 0.5);
-  // A face flat, in pixels, by the axes of its own plane.
-  const flatOf = (i) => {
-    const { right, up } = planeAxes(normals.get(i), turns.get(vertexObject[faces[i][0]]) ?? new THREE.Quaternion());
-    const flat = faces[i].map((vertex) => [vertices[vertex].dot(right) * ppu, -vertices[vertex].dot(up) * ppu]);
-    const left = Math.min(...flat.map(([x]) => x));
-    const top = Math.min(...flat.map(([, y]) => y));
-    return flat.map(([x, y]) => [tidy(x - left), tidy(y - top)]); // (its own top left corner on a pixel, as a chart's)
+// A piece of laid faces, its top left at nought (on a whole pixel: the faces'
+// corners keep their fractions, and so the grid they lie on).
+function pieceFrom(places) {
+  const all = [...places.values()].flat();
+  const minX = Math.floor(Math.min(...all.map(([x]) => x)) + 1e-6);
+  const minY = Math.floor(Math.min(...all.map(([, y]) => y)) + 1e-6);
+  const moved = new Map([...places].map(([i, polygon]) => [i, polygon.map(([x, y]) => [tidy(x - minX), tidy(y - minY)])]));
+  const shifted = [...moved.values()].flat();
+  return {
+    faces: [...moved.keys()],
+    places: moved,
+    width: Math.max(...shifted.map(([x]) => x)),
+    height: Math.max(...shifted.map(([, y]) => y)),
   };
-  const area = (polygon) => Math.abs(polygon.reduce((sum, [x, y], k) => {
-    const [nx, ny] = polygon[(k + 1) % polygon.length];
-    return sum + x * ny - nx * y;
-  }, 0)) / 2;
-  const flats = new Map(sound.map((i) => [i, flatOf(i)]));
+}
+
+// The faces by the edges they have, each edge's list of faces.
+function facesByEdge(faces, indices) {
   const byEdge = new Map();
-  for (const i of sound) {
+  for (const i of indices) {
     faces[i].forEach((a, k) => {
       const key = edgeKey(a, faces[i][(k + 1) % faces[i].length]);
       if (!byEdge.has(key)) byEdge.set(key, []);
       byEdge.get(key).push(i);
     });
   }
+  return byEdge;
+}
+
+// A face's area along its normal (Newell's formula): its length is the area,
+// and several added up lean as those faces do together.
+function areaVector(mesh, i) {
+  const face = mesh.faces[i];
+  const sum = new THREE.Vector3();
+  face.forEach((vertex, k) => {
+    sum.add(new THREE.Vector3().crossVectors(mesh.vertices[vertex], mesh.vertices[face[(k + 1) % face.length]]));
+  });
+  return sum.multiplyScalar(0.5);
+}
+
+// The given faces projected along one direction (planar projection): the
+// pixel grid is one for all of them, straight on the atlas and running on
+// across every edge, a vertex having one place in all its faces. What it costs
+// is pixels drawn out on a face tilted from that direction, by 1 / cos of the
+// tilt. The direction is that of the faces together, made level: looking along
+// the ground, a pixel's row is one height on the object (the object's own Y),
+// whatever the face's slope. Faces that look mostly up or down cannot be seen
+// so, and are looked at as they are. A face tilted by more than PROJECT_LIMIT,
+// or landing on what is laid, is left for a piece of its own, projected along a
+// direction of its own. Returns the pieces, each { faces, places: Map(face ->
+// [[x, y]], its corners, in pixels), width, height }, ready for unwrap() (see
+// `unfolded`).
+export function unfold(mesh, faceIndices, ppu) {
+  const { faces, vertices, vertexObject, objects } = mesh;
+  const turns = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation)]));
+  const normals = new Map(faceIndices.map((i) => [i, mesh.faceNormal(i)]));
+  const sound = faceIndices.filter((i) => normals.get(i).lengthSq() > 0.5);
+  const areas = new Map(sound.map((i) => [i, areaVector(mesh, i)]));
+  const byEdge = facesByEdge(faces, sound);
   const left = new Set(sound);
-  const seeds = [...sound].sort((a, b) => area(flats.get(b)) - area(flats.get(a)) || a - b);
-  const pieces = [];
-  for (const seed of seeds) {
-    if (!left.has(seed)) continue;
-    const places = new Map();
-    const boxes = []; // what is laid: { polygon, box }, for telling overlaps quickly
-    // What can join: a face left, over an edge of one laid - the nearest in
-    // plane last, to be taken first. An offer is tried once: what lands on
-    // what is laid now will land on it still.
-    const offers = [];
-    const lay = (i, polygon) => {
-      places.set(i, polygon);
-      left.delete(i);
-      boxes.push({ polygon, box: boxOf(polygon) });
+  // The faces left that hang together with `seed`, over edges, those tilted too far from `axis` out.
+  const flood = (seed, axis) => {
+    const reached = new Set([seed]);
+    const order = [seed];
+    for (const i of order) {
       faces[i].forEach((a, k) => {
-        const l = (k + 1) % faces[i].length;
-        for (const other of byEdge.get(edgeKey(a, faces[i][l]))) {
-          if (!left.has(other)) continue;
-          const offer = { other, a, b: faces[i][l], from: polygon[k], to: polygon[l], near: normals.get(i).dot(normals.get(other)), order: offers.count++ };
-          // (Kept in order: a binary search for its place.)
-          let low = 0;
-          let high = offers.length;
-          while (low < high) {
-            const middle = (low + high) >> 1;
-            const there = offers[middle];
-            if (there.near < offer.near || (there.near === offer.near && there.order > offer.order)) low = middle + 1;
-            else high = middle;
-          }
-          offers.splice(low, 0, offer);
+        for (const other of byEdge.get(edgeKey(a, faces[i][(k + 1) % faces[i].length]))) {
+          if (reached.has(other) || !left.has(other)) continue;
+          if (axis && normals.get(other).dot(axis) < PROJECT_LIMIT) continue;
+          reached.add(other);
+          order.push(other);
         }
       });
-    };
-    offers.count = 0;
-    lay(seed, flats.get(seed));
-    while (offers.length) {
-      const { other, a, b, from, to } = offers.pop();
-      if (!left.has(other)) continue;
-      const own = flats.get(other);
-      const corners = faces[other];
-      const p = own[corners.indexOf(a)];
-      const q = own[corners.indexOf(b)];
-      // The shift that brings the edge's middles together, in whole pixels; a
-      // pixel either way, if rounding it lands on what is laid.
-      const dx = Math.round((from[0] + to[0] - p[0] - q[0]) / 2);
-      const dy = Math.round((from[1] + to[1] - p[1] - q[1]) / 2);
-      let laid = null;
-      for (const [nx, ny] of NEAR_SHIFTS) {
-        const moved = own.map(([x, y]) => [x + dx + nx, y + dy + ny]);
-        const box = boxOf(moved);
-        const lands = boxes.some((there) => box.x0 < there.box.x1 && there.box.x0 < box.x1 && box.y0 < there.box.y1 && there.box.y0 < box.y1 && overlapping(moved, there.polygon));
-        if (!lands) {
-          laid = moved;
-          break;
-        }
-      }
-      if (laid) lay(other, laid); // (otherwise a seam here)
     }
-    const all = [...places.values()].flat();
-    const minX = Math.floor(Math.min(...all.map(([x]) => x)) + 1e-6);
-    const minY = Math.floor(Math.min(...all.map(([, y]) => y)) + 1e-6);
-    const moved = new Map([...places].map(([i, polygon]) => [i, polygon.map(([x, y]) => [tidy(x - minX), tidy(y - minY)])]));
-    const shifted = [...moved.values()].flat();
-    pieces.push({
-      faces: [...moved.keys()],
-      places: moved,
-      width: Math.max(...shifted.map(([x]) => x)),
-      height: Math.max(...shifted.map(([, y]) => y)),
-    });
+    return order;
+  };
+  // A direction with its height taken out, in the object's own terms - unless it is mostly height.
+  const levelled = (axis, i) => {
+    const turn = turns.get(vertexObject[faces[i][0]]) ?? new THREE.Quaternion();
+    const own = axis.clone().applyQuaternion(turn.clone().invert());
+    if (Math.abs(own.y) > LEVEL_LIMIT) return axis;
+    own.y = 0;
+    return own.normalize().applyQuaternion(turn);
+  };
+  // Which way faces look together; a closed surface looks no way: then as `fallback`.
+  const lookOf = (list, fallback) => {
+    const sum = new THREE.Vector3();
+    let whole = 0;
+    for (const i of list) {
+      sum.add(areas.get(i));
+      whole += areas.get(i).length();
+    }
+    return levelled(sum.length() > whole * 0.01 ? sum.normalize() : normals.get(fallback).clone(), fallback);
+  };
+  const pieces = [];
+  while (left.size) {
+    const biggest = [...left].reduce((a, b) => (areas.get(b).lengthSq() > areas.get(a).lengthSq() ? b : a));
+    let axis = lookOf(flood(biggest, null), biggest);
+    const seed = flood(biggest, null).reduce((a, b) => (normals.get(b).dot(axis) > normals.get(a).dot(axis) ? b : a));
+    // Its direction settles on what it takes.
+    for (let round = 0; round < 2; round++) axis = lookOf(flood(seed, axis), seed);
+    if (normals.get(seed).dot(axis) < PROJECT_LIMIT) axis = normals.get(seed).clone(); // (it is always taken: not edge on)
+    const { right, up } = planeAxes(axis, turns.get(vertexObject[faces[seed][0]]) ?? new THREE.Quaternion());
+    const flatOf = (i) => faces[i].map((vertex) => [vertices[vertex].dot(right) * ppu, -vertices[vertex].dot(up) * ppu]);
+    // (The first face's top left corner on a pixel.)
+    const start = flatOf(seed);
+    const originX = Math.min(...start.map(([x]) => x));
+    const originY = Math.min(...start.map(([, y]) => y));
+    const places = new Map();
+    const boxes = [];
+    for (const i of flood(seed, axis)) {
+      const polygon = flatOf(i).map(([x, y]) => [x - originX, y - originY]);
+      const box = boxOf(polygon);
+      if (boxes.some((there) => box.x0 < there.box.x1 && there.box.x0 < box.x1 && box.y0 < there.box.y1 && there.box.y0 < box.y1 && overlapping(polygon, there.polygon))) continue;
+      places.set(i, polygon);
+      boxes.push({ polygon, box });
+      left.delete(i);
+    }
+    pieces.push(pieceFrom(places));
   }
   return pieces;
 }

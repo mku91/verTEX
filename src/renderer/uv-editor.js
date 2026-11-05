@@ -191,8 +191,8 @@ export class UVEditor {
     for (const name of ['map-flip-h', 'map-flip-v']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || charts.length === 0;
     // (Stacking is of several charts: those of the faces picked, or of the objects.)
     this.container.querySelector('[data-uv="stack"]').disabled = none || this.editor.chartsOfFaces(this.facesInHand()).length < 2;
-    // (Unfolding is of several charts: one has nothing to join.)
-    this.container.querySelector('[data-uv="unfold"]').disabled = none || charts.length < 2;
+    // (Unfolding is of several faces: one has nothing to meet.)
+    this.container.querySelector('[data-uv="unfold"]').disabled = none || charts.length === 0 || this.pickedFaces().length < 2;
     const turn = this.container.querySelector('[data-uv="map-turn"]');
     turn.disabled = none;
     turn.classList.toggle('active', this.turning);

@@ -2541,6 +2541,54 @@ input.refused {
   cursor: grabbing;
 }
 
+/* Dragged: what stays behind for as long as it is, and the row a copy is on its way to. */
+.outliner-row.drag-source {
+  opacity: 0.4;
+}
+
+.outliner-row.arriving {
+  visibility: hidden;
+}
+
+/* The stack that goes along with the pointer, see outliner-drag.js. */
+.outliner-stack {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.outliner-row.outliner-flyer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg));
+  box-shadow: 0 3px 8px color-mix(in srgb, var(--border) 70%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  will-change: transform;
+}
+
+.outliner-stack-count {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  z-index: 21;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
 /* Folds an object's children; empty, but taking its place, on rows without any. */
 .outliner-arrow {
   flex: none;

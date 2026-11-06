@@ -5,6 +5,7 @@ import { latinOnly } from './names.js';
 import { boundByNode, selectBound } from './skin.js';
 import { ask, confirmIt } from './ask-dialog.js';
 import { t } from './i18n.js';
+import { DragStack } from './outliner-drag.js';
 
 // Objects joined - asked first when they are on different atlases: the
 // joined one is on the first one's, and the others' faces are laid out on
@@ -186,6 +187,8 @@ export class Outliner {
       const picked = whole && selected.has(index);
       if (within) row.classList.add('implied'); // selected through its node: marked faintly
       else if (selected.has(index)) row.classList.add(whole ? 'selected' : 'active');
+      if (this.press?.carried?.has(index)) row.classList.add('drag-source'); // left behind for as long as it is dragged
+      if (this.arriving?.has(island.id)) row.classList.add('arriving'); // on its way here, see finishDrag()
 
       const object = this.editor.mesh.objects[index];
       const shapes = this.editor.collisions ? object.colliders ?? [] : [];
@@ -299,6 +302,21 @@ export class Outliner {
     this.list.replaceChildren(...rows);
   }
 
+  // The objects (indices) from the one picked by hand last to `row`, in the
+  // order the list shows them, those hidden left out. Null if that one is not
+  // in the list as it is shown (none yet, or inside something folded).
+  rangeTo(row) {
+    const { islands } = this.editor.topology;
+    const rows = [...this.list.querySelectorAll('.outliner-row[data-object]')];
+    const anchor = rows.findIndex((line) => islands[Number(line.dataset.object)]?.id === this.editor.activeObject);
+    if (anchor < 0) return null;
+    const end = rows.indexOf(row);
+    return rows
+      .slice(Math.min(anchor, end), Math.max(anchor, end) + 1)
+      .map((line) => Number(line.dataset.object))
+      .filter((index) => !islands[index].hidden);
+  }
+
   bindList() {
     const { list, editor } = this;
     const rowAt = (target) => target.closest?.('[data-object]') ?? null;
@@ -355,7 +373,12 @@ export class Outliner {
         return;
       }
       const row = rowAt(event.target);
-      if (row && !this.renaming) editor.selectObject(Number(row.dataset.object), event.shiftKey);
+      if (!row || this.renaming) return;
+      const index = Number(row.dataset.object);
+      const ctrl = event.ctrlKey || event.metaKey;
+      const range = event.shiftKey ? this.rangeTo(row) : null;
+      if (range) editor.selectObjects(range, ctrl);
+      else editor.selectObject(index, ctrl);
     });
     list.addEventListener('dblclick', (event) => {
       const row = rowAt(event.target);
@@ -368,7 +391,8 @@ export class Outliner {
       if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
     });
 
-    // Dragging a row onto a node puts it into that node.
+    // Dragging a row onto a node puts it into that node: and if the row is one
+    // of those picked, all of them.
     list.addEventListener('pointerdown', (event) => {
       this.suppressClick = false; // the last drag's click never came
       const row = rowAt(event.target);
@@ -380,21 +404,97 @@ export class Outliner {
       if (!press) return;
       if (!press.dragging) {
         if (Math.hypot(event.clientX - press.x, event.clientY - press.y) < DRAG_THRESHOLD) return;
-        press.dragging = true;
-        list.classList.add('dragging');
+        this.beginDrag(press, event);
+      } else if (!(event.buttons & 1)) {
+        this.finishDrag(undefined); // the release was missed (outside the window): nothing done
+        return;
       }
-      this.markDropTarget(this.dropTarget(event));
+      press.stack.move(event.clientX, event.clientY);
+      this.markDropTarget(this.dropTarget(event, press.roots));
     });
     window.addEventListener('pointerup', (event) => {
       const press = this.press;
-      this.press = null;
-      if (!press?.dragging) return;
-      list.classList.remove('dragging');
-      const target = this.dropTarget(event);
-      this.markDropTarget(undefined);
+      if (!press?.dragging) {
+        this.press = null;
+        return;
+      }
       this.suppressClick = rowAt(event.target) !== null; // the click that follows the release
-      if (target !== undefined) editor.setParent(press.index, target);
+      this.finishDrag(this.dropTarget(event, press.roots));
     });
+  }
+
+  // What a drag from a row takes: the row, or, if it is one of those picked,
+  // all of them - without what is inside another of them, which goes along
+  // with it and stays inside.
+  dragRoots(index) {
+    const { editor } = this;
+    const { islands } = editor.topology;
+    const group = editor.mode === 'object' && editor.picked.has(index) ? new Set(editor.picked) : new Set([index]);
+    const insideAnother = (entry) => {
+      for (let up = islands[entry].parentIndex; up !== null; up = islands[up].parentIndex) if (group.has(up)) return true;
+      return false;
+    };
+    return [...group].filter((entry) => !insideAnother(entry));
+  }
+
+  beginDrag(press, event) {
+    const { list, editor } = this;
+    const { islands } = editor.topology;
+    press.dragging = true;
+    press.roots = this.dragRoots(press.index);
+    // They and all they hold are left pale behind.
+    press.carried = new Set();
+    const carry = (entry) => {
+      press.carried.add(entry);
+      islands[entry].children.forEach(carry);
+    };
+    press.roots.forEach(carry);
+    const rows = [...list.querySelectorAll('.outliner-row[data-object]')];
+    for (const row of rows) if (press.carried.has(Number(row.dataset.object))) row.classList.add('drag-source');
+    list.classList.add('dragging');
+    const flying = rows.filter((row) => press.roots.includes(Number(row.dataset.object)));
+    press.stack = new DragStack(flying, press.roots.length, event.clientX, event.clientY, list.getBoundingClientRect());
+  }
+
+  // The drag is over: into `target` (as in setParents()), or, undefined,
+  // nothing done. It is done at once and the list is as it should be; over
+  // that, the rows fly from the stack to their places in it - or back to where
+  // they were - and show when they are there.
+  finishDrag(target) {
+    const { list, editor } = this;
+    const { press } = this;
+    this.press = null;
+    list.classList.remove('dragging');
+    this.markDropTarget(undefined);
+    const idOf = (flyer) => editor.topology.islands[Number(flyer.id)].id;
+    this.arriving = new Set(press.stack.flyers.map(idOf));
+    if (target !== undefined) editor.setParents(press.roots, target);
+    this.shown = null; // (the rows lose their paleness, whether anything moved or not)
+    this.update();
+    press.stack.land(
+      (flyer) => this.landingPlace(idOf(flyer)),
+      list.getBoundingClientRect(),
+      (flyer) => {
+        const id = idOf(flyer);
+        this.arriving.delete(id);
+        const entry = editor.topology.islands.findIndex((island) => island.id === id);
+        list.querySelector(`.outliner-row[data-object="${entry}"]`)?.classList.remove('arriving');
+      },
+    );
+  }
+
+  // Where an entry (by id) lands: its row, or if it is folded away, the row of
+  // the nearest node above it that shows, going out there. Null: no such.
+  landingPlace(id) {
+    const { islands } = this.editor.topology;
+    const entry = islands.findIndex((island) => island.id === id);
+    let fade = false;
+    for (let at = entry; at !== null && at !== -1; at = islands[at].parentIndex) {
+      const row = this.list.querySelector(`.outliner-row[data-object="${at}"]`);
+      if (row) return { row, fade };
+      fade = true;
+    }
+    return null;
   }
 
   // The menu of a row, opened with the right button. It acts on that row,
@@ -518,16 +618,21 @@ export class Outliner {
   // Where a dragged row would land: a node's index, null for the top level
   // (empty space of the list), undefined outside the list. Over an object's
   // row that is the node the object is in: the row lands next to it.
-  dropTarget(event) {
+  dropTarget(event, roots) {
+    const { mesh, topology } = this.editor;
     const element = document.elementFromPoint(event.clientX, event.clientY);
     if (element?.closest('[data-shape]')) return undefined; // a shape's row holds nothing
     const row = element?.closest('[data-object]');
+    let target;
     if (row && this.list.contains(row)) {
       const index = Number(row.dataset.object);
-      const island = this.editor.topology.islands[index];
-      return island.kind === 'node' ? index : island.parentIndex;
-    }
-    return element && this.list.contains(element) ? null : undefined;
+      const island = topology.islands[index];
+      target = island.kind === 'node' ? index : island.parentIndex;
+    } else if (element && this.list.contains(element)) target = null;
+    else return undefined;
+    // All of them or none: not a node into itself, while the others go.
+    const parent = target === null ? null : mesh.objects[target].id;
+    return roots.every((entry) => mesh.canParent(mesh.objects[entry].id, parent)) ? target : undefined;
   }
 
   markDropTarget(target) {

@@ -5403,6 +5403,19 @@ export class Editor extends EventTarget {
     this.select(index, additive);
   }
 
+  // Several at once (a range in the list of the scene), in place of what is
+  // picked or, `additive`, beside it. The object picked by hand last stays
+  // so: the next range is from it again.
+  selectObjects(indices, additive) {
+    if (this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    if (this.mode !== 'object') this.setMode('object');
+    if (!additive) this.picked.clear();
+    for (const index of indices) this.picked.add(index);
+    this.syncSelection();
+    this.selectionChanged();
+  }
+
   // Where a new object goes, if it is to be put up against the selection
   // (`side`; null: it is not, and stays at the origin): on the side of the
   // selection given as { axis, sign } - or, with 'auto', on that of a
@@ -5644,17 +5657,19 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
-  // Puts an object or a node into a node (indices in the objects list), or,
-  // with null, back on the top level. Only a node takes anything in, and not
-  // itself or a node it is inside of.
-  setParent(index, parentIndex) {
-    const child = this.mesh.objects[index];
+  // Puts objects and nodes into a node (indices in the objects list), or, with
+  // null, back on the top level, as one undo step. Only a node takes anything
+  // in, and not itself or a node it is inside of.
+  setParents(indices, parentIndex) {
     const parent = parentIndex === null ? null : this.mesh.objects[parentIndex];
-    if (!child || parent === undefined || this.busy()) return;
+    if (parent === undefined || this.busy()) return;
     const parentId = parent?.id ?? null;
-    if ((child.parent ?? null) === parentId || !this.mesh.canParent(child.id, parentId)) return;
+    const children = indices
+      .map((index) => this.mesh.objects[index])
+      .filter((child) => child && (child.parent ?? null) !== parentId && this.mesh.canParent(child.id, parentId));
+    if (children.length === 0) return;
     this.history.push(this.snapshot());
-    child.parent = parentId;
+    for (const child of children) child.parent = parentId;
     // Nodes changed, and with them what "selected" means - and what is seen,
     // if the node is a hidden one.
     this.updateTopology();

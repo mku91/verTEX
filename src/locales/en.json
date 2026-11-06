@@ -183,7 +183,7 @@
  "html.add-menu.button.text5": "Node",
  "html.add-form.form-buttons.type-button.text": "Cancel",
  "html.add-form.form-buttons.type-submit.text": "Create",
- "html.outliner.title": "Click — pick an object · Shift+click — add or remove · double-click — rename · drag onto an object — put it inside, onto an empty place — take it to the top",
+ "html.outliner.title": "Click — pick an object · Ctrl+click — add or remove · Shift+click — everything from the last picked to this one · double-click — rename · drag onto an object — put it inside, onto an empty place — take it to the top",
  "html.dimensions.properties-header.p.text": "Size",
  "html.copy-size.title": "Copy the X, Y, Z sizes as one line",
  "html.paste-size.title": "Paste the X, Y, Z sizes from the clipboard",

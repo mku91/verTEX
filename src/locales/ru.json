@@ -183,7 +183,7 @@
  "html.add-menu.button.text5": "Узел",
  "html.add-form.form-buttons.type-button.text": "Отмена",
  "html.add-form.form-buttons.type-submit.text": "Создать",
- "html.outliner.title": "Клик — выбрать объект · Shift+клик — добавить или убрать · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх",
+ "html.outliner.title": "Клик — выбрать объект · Ctrl+клик — добавить или убрать · Shift+клик — всё от последнего выбранного до этого · двойной клик — переименовать · перетащить на объект — вложить в него, на пустое место — вынести наверх",
  "html.dimensions.properties-header.p.text": "Размер",
  "html.copy-size.title": "Скопировать размеры X, Y, Z одной строкой",
  "html.paste-size.title": "Вставить размеры X, Y, Z из буфера обмена",

@@ -4,6 +4,7 @@ import { bones, kite } from './node-bones.js';
 import { theme, axisColor, onThemeChange } from './theme.js';
 import { edgeKey } from './mesh.js';
 import { t } from './i18n.js';
+import { ViewGizmo } from './view-gizmo.js';
 
 // The surface as these views (and the window of views, see views-window.js)
 // draw it: lit, painted with the atlases where it is on them, the rest in
@@ -87,6 +88,7 @@ export class OrthoViews {
     // views show the whole model posed and painted, and pose it.
     this.animation = null;
     this.poseDrag = null;
+    this.gizmo = new ViewGizmo(this); // the editor's gizmo, on the views
     this.views = VIEWS.map((definition) => this.createView(definition));
     this.listeners = [
       [editor, 'change', () => this.update()],
@@ -264,6 +266,17 @@ export class OrthoViews {
         }
         return;
       }
+      // The gizmo's handles come before what is under them. (With Shift a drag
+      // draws a box - but a ring is taken: there Shift is the turn's step.)
+      {
+        const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+        const handle = this.gizmo.handleAt(view, x, y);
+        if (handle && (!event.shiftKey || handle.kind === 'ring') && this.gizmo.press(view, handle, x, y)) {
+          canvas.setPointerCapture(event.pointerId);
+          this.drawView(view);
+          return;
+        }
+      }
       // The pivot point comes before the vertices under it.
       if (!event.shiftKey && onPivot(event) && editor.pressPivot(event.clientX, event.clientY, view.viewer)) {
         canvas.setPointerCapture(event.pointerId);
@@ -340,6 +353,15 @@ export class OrthoViews {
       }
       editor.setFineSnap(event.ctrlKey);
       editor.setAltHeld(event.altKey); // (in the views' own window the editor's listener does not hear the pointer)
+      if (this.gizmo.drag) {
+        if (event.buttons & 1) {
+          const { x, y } = this.localPoint(this.gizmo.drag.view, event.clientX, event.clientY);
+          this.gizmo.move(x, y);
+        } else {
+          this.gizmo.end(); // the release was missed
+        }
+        return;
+      }
       if (editor.operation === 'cut') {
         if (editor.cut) editor.moveCut(event.clientX, event.clientY, view.viewer);
         canvas.style.cursor = editor.cut ? 'crosshair' : '';
@@ -356,6 +378,17 @@ export class OrthoViews {
       if (editor.drag) {
         editor.dragTo(event.clientX, event.clientY);
       } else if (event.buttons === 0) {
+        const { x, y } = this.localPoint(view, event.clientX, event.clientY);
+        const hot = this.gizmo.handleAt(view, x, y)?.name ?? null;
+        if (hot !== view.gizmoHot) {
+          view.gizmoHot = hot;
+          this.drawView(view);
+        }
+        if (hot) {
+          this.setHovered(null, null);
+          canvas.style.cursor = 'grab';
+          return;
+        }
         const pivotOnly = editor.tool === 'pivot';
         const element = pivotOnly ? null : elementAt(event);
         this.setHovered(pivotOnly ? null : vertexAt(event), element);
@@ -364,11 +397,17 @@ export class OrthoViews {
     });
     canvas.addEventListener('pointerleave', () => {
       if (!editor.drag) this.setHovered(null, null);
+      if (view.gizmoHot) {
+        view.gizmoHot = null;
+        this.drawView(view);
+      }
     });
     canvas.addEventListener('pointerup', (event) => {
       if (view.pan && event.button !== 0) {
         view.pan = null;
         canvas.style.cursor = '';
+      } else if (event.button === 0 && this.gizmo.drag) {
+        this.gizmo.end();
       } else if (event.button === 0 && this.poseDrag) {
         this.poseDrag = null;
         this.animation.endPose();
@@ -389,6 +428,7 @@ export class OrthoViews {
     canvas.addEventListener('pointercancel', () => {
       view.pan = null;
       view.box = null;
+      this.gizmo.end();
       editor.cancelDrag();
     });
     canvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -698,6 +738,8 @@ export class OrthoViews {
       this.drawContent(view);
     }
     this.drawNodes(view);
+    // (`axis`: the handle being dragged, in any view - the real gizmo's too)
+    this.gizmo.draw(view, this.editor.gizmo.axis ?? view.gizmoHot);
     this.drawGizmo(view);
   }
 

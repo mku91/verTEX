@@ -46,6 +46,9 @@ export const PAINT_TOOLS = ['paint', 'pipette', 'fill', 'fillObject', 'rect', 'e
 
 const PIVOT_MARKER_SIZE = 18; // px
 const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected node holds
+const PIVOT_LINK_DASH = 4; // px; a dash of the line to a pivot point away from its object, and the gap
+const PIVOT_LINK_MARGIN = 1e-4; // world units; a point on the bounds is not away from them
+const PIVOT_LINK_COLOR = 0x9a9a9a; // a plain grey, in every theme
 const NODE_COLOR = 0xffb86c; // a picked node's bounds (see updateNodeBounds())
 const NODE_DOT_SIZE = 11; // px; a picked node that holds nothing
 
@@ -363,6 +366,28 @@ export class Editor extends EventTarget {
     this.pivotMarker.renderOrder = 8;
     this.pivotMarker.visible = false;
     scene.add(this.pivotMarker);
+    // A pivot point away from what it belongs to, perhaps out of the view (and
+    // the gizmo with it): a thin dashed line from the one to the other, see
+    // updatePivotMarker(). Its dashes are a fixed size on the screen: the
+    // material measures them in the world, so they are set as each frame is drawn.
+    this.pivotLink = new THREE.Line(
+      new THREE.BufferGeometry()
+        .setAttribute('position', new THREE.Float32BufferAttribute(6, 3))
+        .setAttribute('lineDistance', new THREE.Float32BufferAttribute(2, 1)),
+      new THREE.LineDashedMaterial({ color: PIVOT_LINK_COLOR, depthTest: false, transparent: true }),
+    );
+    this.pivotLink.renderOrder = 7;
+    this.pivotLink.frustumCulled = false;
+    this.pivotLink.visible = false;
+    this.pivotLink.onBeforeRender = () => {
+      const { camera, container } = this.viewport;
+      const position = this.pivotLink.geometry.getAttribute('position');
+      const middle = new THREE.Vector3().fromBufferAttribute(position, 0).add(new THREE.Vector3().fromBufferAttribute(position, 1)).multiplyScalar(0.5);
+      const pixel = (middle.distanceTo(camera.position) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / container.clientHeight;
+      this.pivotLink.material.dashSize = PIVOT_LINK_DASH * pixel;
+      this.pivotLink.material.gapSize = PIVOT_LINK_DASH * pixel;
+    };
+    scene.add(this.pivotLink);
     // What a drag with Ctrl held has snapped to (see element-snap.js): its
     // edges and its point, thick (plain GL lines are one pixel wide), seen
     // through everything.
@@ -495,6 +520,7 @@ export class Editor extends EventTarget {
     const picking = this.picking;
     this.altHeld = on;
     if (this.gizmo.dragging && this.gizmo.mode === 'scale') this.applyGizmo();
+    this.redriveGizmo?.(); // (worked from a view, see beginDrivenGizmo(): at once there, the pointer's place known)
     if (this.inset?.pointer) this.moveInset(...this.inset.pointer);
     if (this.extrude?.pointer) this.moveExtrude(...this.extrude.pointer);
     if (this.cut?.point) this.placeCut(this.cut.point);
@@ -518,6 +544,27 @@ export class Editor extends EventTarget {
       center[axis] = grabbed[axis] >= 0 ? this.scaleBox.min[axis] : this.scaleBox.max[axis];
     }
     return center;
+  }
+
+  // The gizmo worked from elsewhere (the three views, see view-gizmo.js): as
+  // if its handle `axis` had been taken, for the code that hears of the real
+  // one. Follow with the gizmo's place, turn or pull set and applyGizmo(), then
+  // endDrivenGizmo(). `outward`: which way pulling the scale's middle handle
+  // makes it bigger. False if it can't be taken now.
+  beginDrivenGizmo(axis, outward) {
+    if (!this.gizmo.object || this.busy()) return false;
+    this.gizmoOutward = outward;
+    this.gizmo.axis = axis;
+    this.gizmo.dragging = true;
+    this.gizmo.dispatchEvent({ type: 'mouseDown', mode: this.gizmo.mode });
+    return true;
+  }
+
+  endDrivenGizmo() {
+    this.gizmoOutward = null;
+    this.gizmo.dragging = false;
+    this.gizmo.axis = null;
+    this.gizmo.dispatchEvent({ type: 'mouseUp', mode: this.gizmo.mode });
   }
 
   // Applies the gizmo's drag, as it stands, to what is being dragged.
@@ -588,7 +635,7 @@ export class Editor extends EventTarget {
     };
     const pulled = this.gizmo.pointEnd.clone().sub(this.gizmo.pointStart);
     if (handle.length === 3) {
-      const outward = new THREE.Vector3(1, 1, 0).transformDirection(this.gizmo.camera.matrixWorld);
+      const outward = this.gizmoOutward ?? new THREE.Vector3(1, 1, 0).transformDirection(this.gizmo.camera.matrixWorld);
       scale.setScalar(1 + pulled.dot(outward) / Math.max(reach('x'), reach('y'), reach('z')));
       return;
     }
@@ -1062,11 +1109,33 @@ export class Editor extends EventTarget {
       ring.scale.set(ringSize, ringSize, 1);
     });
     this.pivotMarker.visible = entry !== null;
+    this.updatePivotLink(entry);
     if (entry === null) return;
     this.pivotMarker.position.copy(this.pivotPoint(entry));
     const { camera, container } = this.viewport;
     const size = (PIVOT_MARKER_SIZE / container.clientHeight) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     this.pivotMarker.scale.set(size, size, 1);
+  }
+
+  // Shows the line from an entry's bounds to its pivot point, if that is outside them.
+  updatePivotLink(entry) {
+    const line = this.pivotLink;
+    line.visible = false;
+    if (entry === null) return;
+    const { vertices } = this.contents([entry]);
+    if (vertices.size === 0) return;
+    const point = this.pivotPoint(entry);
+    const box = new THREE.Box3().setFromPoints([...vertices].map((i) => this.mesh.vertices[i]));
+    if (box.clone().expandByScalar(PIVOT_LINK_MARGIN).containsPoint(point)) return;
+    const from = box.clampPoint(point, new THREE.Vector3());
+    const position = line.geometry.getAttribute('position');
+    position.setXYZ(0, from.x, from.y, from.z);
+    position.setXYZ(1, point.x, point.y, point.z);
+    position.needsUpdate = true;
+    const distance = line.geometry.getAttribute('lineDistance');
+    distance.setX(1, from.distanceTo(point));
+    distance.needsUpdate = true;
+    line.visible = true;
   }
 
   // --- vertices in one place ----------------------------------------------------
@@ -5382,6 +5451,7 @@ export class Editor extends EventTarget {
     }
     // Takes effect on the next pointer move of a gizmo drag.
     if (this.gizmo.dragging && this.gizmo.mode === 'translate') this.beginGizmoSnap();
+    this.redriveGizmo?.(); // (see setAltHeld())
     // (and on the modes' own gizmos, see AnimationMode.applySnap())
     this.dispatchEvent(new Event('finesnap'));
   }

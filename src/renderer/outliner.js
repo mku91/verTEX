@@ -48,6 +48,7 @@ const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
 const ISOLATE_ICON = '<i class="fa-solid fa-crosshairs"></i>';
 const INDENT = 14; // px per nesting level
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
+const FORM_KEPT_HEIGHT = 40; // px of the form that stay in the window: its title
 // Ctrl combinations that still work in the fields of the modal form.
 const CLIPBOARD_KEYS = new Set(['KeyA', 'KeyC', 'KeyV', 'KeyX', 'KeyZ', 'KeyY']);
 
@@ -710,7 +711,7 @@ export class Outliner {
         closeMenu();
         const kind = item.dataset.primitive;
         if (PRIMITIVES[kind].fields.length) this.openForm(kind);
-        else this.editor.addPrimitive(kind, {}, null, this.into);
+        else this.editor.addPrimitive(kind, {}, null, this.into, this.floor);
       });
     }
     menu.querySelector('[data-node]').addEventListener('click', () => {
@@ -731,12 +732,14 @@ export class Outliner {
       const side = this.attachSide();
       const into = this.into;
       this.closeForm();
-      this.editor.addPrimitive(form.dataset.kind, options, side, into);
+      this.editor.addPrimitive(form.dataset.kind, options, side, into, this.floor);
     });
     // Put up against the selection, or not; and on which side. Off at every
     // launch (it is not always wanted); what was chosen stays while the program runs.
     this.attach = false;
     this.side = 'auto';
+    this.floor = true; // stands on the floor, or has its middle on the place it is made at
+    this.bindFormDrag();
     // The wireframe in the scene follows the fields.
     form.addEventListener('input', () => this.showPreview());
     form.addEventListener('keydown', (event) => {
@@ -791,6 +794,42 @@ export class Outliner {
     }
   }
 
+  // The form is dragged by its grip (as the key popup is, see timeline.js), out
+  // of the way of what it previews. It stays where it is put while the program runs.
+  bindFormDrag() {
+    const { form } = this;
+    const grip = form.querySelector('.kp-grip');
+    let grab = null;
+    grip.addEventListener('mousedown', (event) => event.preventDefault()); // the field keeps the keyboard
+    grip.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const at = form.getBoundingClientRect();
+      grab = { dx: event.clientX - at.left, dy: event.clientY - at.top };
+      grip.setPointerCapture(event.pointerId);
+      form.classList.add('dragging');
+    });
+    grip.addEventListener('pointermove', (event) => {
+      if (grab) this.placeForm(event.clientX - grab.dx, event.clientY - grab.dy);
+    });
+    const drop = () => {
+      grab = null;
+      form.classList.remove('dragging');
+    };
+    grip.addEventListener('pointerup', drop);
+    grip.addEventListener('pointercancel', drop);
+  }
+
+  // Puts the form's corner at a place, kept in the window: its title always is.
+  placeForm(x, y) {
+    const { form } = this;
+    // (Its size as laid out and the place remembered, not as seen: it grows into place as it opens.)
+    const { offsetWidth: width, offsetHeight: height } = form;
+    form.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width))}px`;
+    form.style.top = `${Math.max(0, Math.min(y, window.innerHeight - Math.min(height, FORM_KEPT_HEIGHT)))}px`;
+    form.style.transform = 'none';
+    this.formPlace = { x, y };
+  }
+
   // The form's values as options for the primitive, kept within each field's limits.
   formOptions() {
     const options = {};
@@ -812,16 +851,30 @@ export class Outliner {
   }
 
   showPreview() {
-    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions(), this.attachSide(), this.into);
+    this.editor.previewPrimitive(this.form.dataset.kind, this.formOptions(), this.attachSide(), this.into, this.floor);
   }
 
-  // The form's part that says where the object goes: a box - up against the
-  // selected object, or not - and, only while it is ticked, a row of the
-  // sides it may go on, which slides open and shut with it.
+  // The form's part that says where the object goes: a box - on the floor, or
+  // not - and another - up against the selected object, or not, which leaves
+  // the floor no say - and, only while it is ticked, a row of the sides it
+  // may go on, which slides open and shut with it.
   attachRow() {
     const selected = this.editor.selection.size > 0;
     const block = document.createElement('div');
     block.className = 'attach';
+    const floorLabel = document.createElement('label');
+    floorLabel.className = 'choice';
+    floorLabel.title = t('outliner.floor.title');
+    const floorBox = document.createElement('input');
+    floorBox.type = 'checkbox';
+    floorBox.checked = this.floor;
+    const floorCaption = document.createElement('span');
+    floorCaption.textContent = t('outliner.floor.caption');
+    floorLabel.append(floorBox, floorCaption);
+    floorBox.addEventListener('change', () => {
+      this.floor = floorBox.checked;
+      this.showPreview();
+    });
     const label = document.createElement('label');
     label.className = 'choice';
     label.title = selected ? t('outliner.attach.title') : t('outliner.attach.none.title');
@@ -843,6 +896,7 @@ export class Outliner {
     const open = () => {
       block.classList.toggle('open', box.checked);
       inner.inert = !box.checked; // out of reach of the keyboard while shut
+      floorBox.disabled = box.checked;
     };
     const show = () => {
       for (const button of sides.children) button.classList.toggle('active', button.dataset.side === this.side);
@@ -867,7 +921,7 @@ export class Outliner {
       this.attach = box.checked;
       show();
     });
-    block.append(label, slide);
+    block.append(floorLabel, label, slide);
     for (const button of sides.children) button.classList.toggle('active', button.dataset.side === this.side);
     open();
     return block;
@@ -910,6 +964,8 @@ export class Outliner {
       this.attachRow(),
     );
     form.hidden = false;
+    // Where it was put, as far as the window (it may be smaller now) and this form's height let it.
+    if (this.formPlace) this.placeForm(this.formPlace.x, this.formPlace.y);
     this.showPreview();
     const first = form.querySelector('input');
     first.focus();

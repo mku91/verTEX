@@ -5456,19 +5456,29 @@ export class Editor extends EventTarget {
     for (const i of vertices) mesh.vertices[i].add(offset);
   }
 
+  // Where a freshly built primitive goes: up against the selection (`anchor`),
+  // or the middle of it on the node's pivot point (`node`, its index), turned
+  // with the node, or else on the origin; with `floor`, its lowest point then
+  // brought to Y = 0. `object`: the new entry, if it is one of the model.
+  placePrimitive(mesh, vertices, { anchor, node, floor, object = null }) {
+    if (anchor) {
+      this.attachPrimitive(mesh, vertices, anchor);
+      return;
+    }
+    this.centerPrimitive(mesh, vertices, node === null ? new THREE.Vector3() : this.pivotPoint(node));
+    if (node !== null) this.turnWithNode(mesh, vertices, node, object);
+    if (!floor) return;
+    const lowest = Math.min(...vertices.map((i) => mesh.vertices[i].y));
+    for (const i of vertices) mesh.vertices[i].y -= lowest;
+  }
+
   // Shows, as a wireframe in the scene, the object addPrimitive() would make
   // with these arguments; a null kind takes the preview away. Nothing is added
   // to the model.
-  previewPrimitive(kind, options = {}, side = null, into = null) {
+  previewPrimitive(kind, options = {}, side = null, into = null, floor = true) {
     const draft = new EditableMesh();
     const made = kind && buildPrimitive(draft, kind, options);
-    const anchor = this.primitiveAnchor(side);
-    const node = this.nodeIndex(into);
-    if (made && anchor) this.attachPrimitive(draft, made, anchor);
-    else if (made && node !== null) {
-      this.centerPrimitive(draft, made, this.pivotPoint(node));
-      this.turnWithNode(draft, made, node);
-    }
+    if (made) this.placePrimitive(draft, made, { anchor: this.primitiveAnchor(side), node: this.nodeIndex(into), floor });
     this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
     this.viewport.requestRender();
   }
@@ -5970,7 +5980,8 @@ export class Editor extends EventTarget {
   // at the origin, or with `side` up against the selection (see primitiveAnchor()).
   // `into`: a node's id - the object is made in it, in the middle of it
   // (where its pivot point is), unless it is put up against the selection.
-  addPrimitive(kind, options = {}, side = null, into = null) {
+  // `floor`: it stands on the floor there. See placePrimitive().
+  addPrimitive(kind, options = {}, side = null, into = null, floor = true) {
     if (this.busy()) return;
     this.previewPrimitive(null);
     const before = this.snapshot();
@@ -5978,12 +5989,9 @@ export class Editor extends EventTarget {
     const node = this.nodeIndex(into);
     const vertices = buildPrimitive(this.mesh, kind, options);
     if (!vertices) return;
-    if (anchor) this.attachPrimitive(this.mesh, vertices, anchor);
-    else if (node !== null) {
-      this.centerPrimitive(this.mesh, vertices, this.pivotPoint(node));
-      this.turnWithNode(this.mesh, vertices, node, this.mesh.objects[this.mesh.objects.length - 1]);
-    }
-    if (node !== null) this.mesh.objects[this.mesh.objects.length - 1].parent = into;
+    const object = this.mesh.objects[this.mesh.objects.length - 1];
+    this.placePrimitive(this.mesh, vertices, { anchor, node, floor, object });
+    if (node !== null) object.parent = into;
     this.selection = new Set(vertices);
     this.commit(before);
     this.rebuildView();

@@ -1279,7 +1279,8 @@ body {
 /* The grip the popup is dragged by: nine dots, three by three, in the colour
    of the key's track. (The same on the popup of "Искажение".) */
 .key-popup .kp-grip,
-#retro-popup .kp-grip {
+#retro-popup .kp-grip,
+#add-form .kp-grip {
   flex: none;
   width: 14px;
   height: 14px;
@@ -1291,7 +1292,8 @@ body {
 }
 
 .key-popup.dragged .kp-grip,
-#retro-popup.dragging .kp-grip {
+#retro-popup.dragging .kp-grip,
+#add-form.dragging .kp-grip {
   cursor: grabbing;
 }
 
@@ -2342,6 +2344,26 @@ body {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
+}
+
+/* It is dragged by its grip, see Outliner.bindFormDrag(). */
+#add-form .add-form-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#add-form .kp-grip {
+  margin: 0;
+  color: var(--accent);
+}
+
+#add-form .attach .choice + .choice {
+  margin-top: 6px;
+}
+
+#add-form .attach label:has(input:disabled) span {
+  color: var(--text-dim);
 }
 
 #add-form label {

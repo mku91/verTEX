@@ -16,7 +16,9 @@
 // converted.
 //
 //   - glTF knows triangles only: the faces are cut the way the editor draws
-//     them (`triangles`, see EditableMesh.triangulate()).
+//     them (`triangles`, see EditableMesh.triangulate()). How many corners
+//     each face had goes along as the primitive's `extras.verTEXFaces`,
+//     which other programs pass over and verTEX's import reads back.
 //   - Every corner of a face is a vertex of its own, with the normal the
 //     editor lights it by: the face's, or for a smooth-shaded object the
 //     mean of its neighbours' (see normals.js).
@@ -181,7 +183,8 @@ export function gltfOf(model, { name, triangles, pictures = null, picture = null
 
   // What is hidden, itself or by a node above it, is left out.
   const byId = new Map(model.objects.map((object) => [object.id, object]));
-  const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(byId.get(object.parent)));
+  // (So is a reference - a shape the model was built over, see Editor.setReference().)
+  const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || Boolean(object.reference) || hidden(byId.get(object.parent)));
   const shown = model.objects.filter((object) => !hidden(object));
   const numbers = new Map(shown.map((object, i) => [object.id, i]));
 
@@ -230,9 +233,11 @@ export function gltfOf(model, { name, triangles, pictures = null, picture = null
     const normals = [];
     const places = [];
     const indices = [];
+    const loops = []; // how many corners each face has: they are its vertices, in a row (see gltf-import.js)
     model.faces.forEach((face, i) => {
       if (model.vertexObject[face[0]] !== object.id) return;
       const first = positions.length / 3;
+      loops.push(face.length);
       face.forEach((vertex, corner) => {
         const normal = cornerNormal[i][corner];
         positions.push(...model.vertices[vertex]);
@@ -268,6 +273,8 @@ export function gltfOf(model, { name, triangles, pictures = null, picture = null
         },
         indices: accessor(count > 65535 ? new Uint32Array(indices) : new Uint16Array(indices), 'SCALAR', indices.length),
         material: materialFor(textured ? object.atlas : null, !object.oneSided),
+        // The faces as they were, for verTEX to read back: glTF has triangles only.
+        extras: { verTEXFaces: loops },
       }],
     }) - 1;
   };

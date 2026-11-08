@@ -63,6 +63,15 @@ export class Mirror {
     return this.globalAxes.size > 0 || this.editor.mesh.objects.some((object) => object.mirror?.length);
   }
 
+  // The references (see Editor.setReference()), by id: no part of the model,
+  // so nothing of the mirror's - not an image, not a twin, not a holder of
+  // images. (A reference is mostly symmetric: the image of a vertex snapped
+  // onto it would be found among its vertices, and it taken for the image of
+  // the edited object - and cut down to that.)
+  outside() {
+    return new Set((this.editor.topology?.islands ?? []).filter((island) => island.referenced).map((island) => island.id));
+  }
+
   // The planes an object's edits are mirrored across, as { axis, value, local }:
   // its own, through its pivot point, or else the scene's. Empty = none.
   planesFor(objectIndex) {
@@ -87,8 +96,9 @@ export class Mirror {
     if (this.globalAxes.size === 0) return result;
     const lists = subsets([...this.globalAxes].map((axis) => ({ axis, value: 0 })));
     const points = new Map(); // object id -> where its vertices stand
+    const outside = this.outside();
     for (const object of objects) {
-      if (object.kind !== 'node' && !object.mirror?.length) points.set(object.id, []);
+      if (object.kind !== 'node' && !object.mirror?.length && !outside.has(object.id)) points.set(object.id, []);
     }
     vertices.forEach((p, i) => points.get(vertexObject[i])?.push(p));
     const placeOf = (list) => list.map(keyOf).sort().join(';');
@@ -139,8 +149,9 @@ export class Mirror {
       this.stillFor = old;
       this.still = new Map();
       this.partly = new Set();
+      const outside = this.outside();
       mesh.vertices.forEach((vertex, i) => {
-        if (old.has(i)) return;
+        if (old.has(i) || outside.has(mesh.vertexObject[i])) return;
         const key = keyOf(vertex);
         if (!this.still.has(key)) this.still.set(key, []);
         this.still.get(key).push(i);
@@ -198,15 +209,19 @@ export class Mirror {
   reconcile(before) {
     if (!this.active()) return null;
     const { mesh } = this.editor;
+    const outside = this.outside();
     const beforeIndex = new Map();
-    before.vertices.forEach((p, i) => beforeIndex.set(keyOf(p), i));
-    const afterKeys = new Set(mesh.vertices.map(keyOf));
+    before.vertices.forEach((p, i) => {
+      if (!outside.has(before.vertexObject[i])) beforeIndex.set(keyOf(p), i);
+    });
+    const afterKeys = new Set(mesh.vertices.filter((_, i) => !outside.has(mesh.vertexObject[i])).map(keyOf));
 
     // What the edit touched, by object: the positions of vertices that are
     // new or moved (after), removed (before), and of the corners of faces and
     // wires that changed.
     const touched = new Map();
     const touch = (objectId, p) => {
+      if (outside.has(objectId)) return;
       if (!touched.has(objectId)) touched.set(objectId, []);
       touched.get(objectId).push(p);
     };
@@ -282,6 +297,7 @@ export class Mirror {
         const imageKeys = new Set([...gone].map((key) => keyOf(mirrorPoint(pointOf(key), some))));
         // An object that is exactly that image goes.
         for (const object of mesh.objects) {
+          if (outside.has(object.id)) continue;
           const own = [];
           mesh.vertexObject.forEach((id, i) => {
             if (id === object.id) own.push(i);
@@ -419,7 +435,9 @@ export class Mirror {
     }
 
     const positions = new Map(); // position -> indices of the vertices there
+    const outside = this.outside();
     mesh.vertices.forEach((p, i) => {
+      if (outside.has(mesh.vertexObject[i])) return;
       const key = keyOf(p);
       if (!positions.has(key)) positions.set(key, []);
       positions.get(key).push(i);

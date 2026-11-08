@@ -2738,6 +2738,37 @@ input.refused {
   color: #fff;
 }
 
+/* The reference switch (see Editor.setReference()): on the row under the
+   pointer, or always while it is on; the switches after it beside it. */
+.outliner-reference + .outliner-isolate,
+.outliner-reference + .outliner-eye {
+  margin-left: 2px;
+}
+
+.outliner-reference:not(.active) {
+  visibility: hidden;
+}
+
+.outliner-row:hover .outliner-reference {
+  visibility: visible;
+}
+
+.outliner-reference.active,
+.outliner-reference.active:hover {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.outliner-reference.active i {
+  color: #fff;
+}
+
+/* A reference's name: faint and slanted - it is there to build over, not to edit. */
+.outliner-row.reference .outliner-name {
+  font-style: italic;
+  opacity: 0.6;
+}
+
 .outliner-row.hidden .outliner-name,
 .outliner-row.hidden > i {
   opacity: 0.4;

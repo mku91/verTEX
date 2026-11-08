@@ -12,6 +12,7 @@ import { THEMES, theme, setTheme, savedTheme } from './theme.js';
 import { Hotkeys, comboOf, comboLabel } from './hotkeys.js';
 import { Project, projectFiles, modelOf, scaledModel } from './project.js';
 import { gltfOf } from './gltf.js';
+import { sceneOfGlb, ImportError } from './gltf-import.js';
 import { ColorPopup } from './color-popup.js';
 import { AtlasLink, EXTERNAL_EDITOR_KEY } from './atlas-link.js';
 import { UVEditor } from './uv-editor.js';
@@ -125,6 +126,7 @@ const ACTIONS = {
   'project-close': () => project.close(), // the window wants to close
   'project-close-file': () => project.closeProject(), // back to the welcome screen
   'export-gltf': () => exportModel('gltf'),
+  'import-glb': () => importModel(),
   'render-sprites': () => renderMode.show(),
   new: () => project.newProject(), // the menu of a program not yet restarted
   undo: () => editor.undo(),
@@ -1250,6 +1252,66 @@ function askExport(title) {
   });
 }
 
+// File -> Import glTF (.glb): its objects and nodes added to the project,
+// their pictures new atlases (see gltf-import.js, Editor.importModel()).
+let importing = false;
+async function importModel() {
+  const api = window.vertex?.import;
+  if (!api) {
+    await tell(t('app.import.restart'));
+    return;
+  }
+  if (importing || editor.busy()) return;
+  importing = true;
+  try {
+    let file;
+    try {
+      file = await api.pick([{ name: t('app.import.glb'), extension: 'glb' }]);
+    } catch (error) {
+      await tell(t('app.import.failed'), String(error?.message ?? error));
+      return;
+    }
+    if (!file) return;
+    let scene;
+    try {
+      scene = sceneOfGlb(file.bytes);
+    } catch (error) {
+      const known = error instanceof ImportError;
+      await tell(t('app.import.failed'), known ? t(`app.import.error.${error.code}`, { detail: error.detail }) : String(error?.message ?? error));
+      return;
+    }
+    if (!scene.entries.some((entry) => entry.kind === 'mesh')) {
+      await tell(t('app.import.nothing'), t('app.import.nothing.detail'));
+      return;
+    }
+    // The pictures' pixels; one that can't be read is none.
+    const pictures = await Promise.all(scene.images.map(async (image) => {
+      if (!image.bytes) return null;
+      try {
+        const bitmap = await createImageBitmap(new Blob([image.bytes], { type: image.mimeType }), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d');
+        context.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        return context.getImageData(0, 0, canvas.width, canvas.height);
+      } catch {
+        return null;
+      }
+    }));
+    const made = editor.importModel(scene, pictures);
+    if (!made) return;
+    const notes = [];
+    if (scene.skipped.length) notes.push(t('app.import.skipped', { list: scene.skipped.map((name) => t(`app.import.skipped.${name.replace(' ', '-')}`)).join(', ') }));
+    if (made.intoAtlas) notes.push(t('app.import.into-atlas', { count: made.intoAtlas }));
+    if (made.tooBig) notes.push(t('app.import.too-big', { count: made.tooBig }));
+    const done = [t('app.import.done', { count: made.objects })];
+    if (made.atlases) done.push(t('app.import.atlases', { count: made.atlases }));
+    toast([...done, ...notes].join(' '));
+  } finally {
+    importing = false;
+  }
+}
+
 // File -> Export to glTF: one file with the atlas' picture in it, a .glb
 // or - if the user picks that - a .gltf (see gltf.js). (glTF only: it is
 // what Godot reads best.)
@@ -1270,7 +1332,7 @@ async function exportModel(format) {
   exporting = true;
   try {
     const model = modelOf(editor);
-    const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || hidden(model.objects.find((other) => other.id === object.parent)));
+    const hidden = (object) => Boolean(object) && (Boolean(object.hidden) || Boolean(object.reference) || hidden(model.objects.find((other) => other.id === object.parent)));
     const meshes = model.objects.filter((object) => object.kind !== 'node' && !hidden(object));
     if (!model.faces.some((face) => meshes.some((object) => object.id === model.vertexObject[face[0]]))) {
       await tell(t('app.export.nothing'), t('app.export.nothing.detail'));

@@ -6,6 +6,7 @@
  "menu.file.save": "Save",
  "menu.file.save-as": "Save as…",
  "menu.file.close": "Close project",
+ "menu.file.import-glb": "Import glTF (.glb)…",
  "menu.file.export-gltf": "Export to glTF…",
  "menu.file.render-sprites": "Sprite render…",
  "menu.file.settings": "Settings…",
@@ -33,6 +34,7 @@
  "dialog.program.filter": "Programs",
  "dialog.all-files": "All files",
  "dialog.export.title": "Export",
+ "dialog.import.title": "Import",
  "html.modes.title": "Selection mode: keys 1, 2, 3, 4 or Tab / Shift+Tab",
  "html.modes.mode-object.text": "Object",
  "html.modes.mode-face.text": "Face",
@@ -599,6 +601,38 @@
  "app.export.nothing": "Nothing to export",
  "app.export.nothing.detail": "The scene has no visible faces.",
  "app.export.failed": "Could not export the model",
+ "app.import.glb": "glTF, one binary file",
+ "app.import.restart": "Import will work after the program is restarted.",
+ "app.import.failed": "Could not import the file",
+ "app.import.nothing": "Nothing to import",
+ "app.import.nothing.detail": "The file has no surfaces: only points, lines or empty nodes.",
+ "app.import.error.not-glb": "It is not a .glb file.",
+ "app.import.error.version": "It is glTF version {detail}; only version 2 is read.",
+ "app.import.error.extensions": "It needs what is not read here: {detail}. Export it again without compression.",
+ "app.import.error.external": "Its data is in another file ({detail}): export it as one .glb.",
+ "app.import.error.broken": "The file is damaged ({detail}).",
+ "app.import.done": {
+  "one": "{count} object imported.",
+  "other": "{count} objects imported."
+ },
+ "app.import.atlases": {
+  "one": "Its picture is a new atlas.",
+  "other": "Its pictures are {count} new atlases."
+ },
+ "app.import.skipped": "Left out: {list}.",
+ "app.import.skipped.animations": "animations",
+ "app.import.skipped.skins": "skins",
+ "app.import.skipped.colors": "vertex colours",
+ "app.import.skipped.lines": "points and lines",
+ "app.import.skipped.external-pictures": "pictures in other files",
+ "app.import.into-atlas": {
+  "one": "Its picture is on the atlas, under what was there.",
+  "other": "Its {count} pictures are on the atlas, under what was there."
+ },
+ "app.import.too-big": {
+  "one": "A picture did not fit on the atlas: its faces were given new places.",
+  "other": "{count} pictures did not fit on the atlas: their faces were given new places."
+ },
  "app.atlas.row.title": "Atlas «{name}»: {ppu} px per unit, {width} × {height}. Click — work with it, double-click the name — rename",
  "app.atlas.remove.title": "Delete the atlas: its objects are left without a texture (can be undone)",
  "app.atlas.add.title": "New atlas: empty, with a pixel size of its own. Objects are moved onto it — in their properties or with a button in the UV editor",
@@ -1173,6 +1207,8 @@
  "outliner.field.thickness": "Thickness",
  "outliner.isolate.on": "Only this object: the others become a faint wireframe that cannot be picked",
  "outliner.isolate.off": "Back to all the objects",
+ "outliner.reference.on": "Reference: see-through with black edges, not picked or exported; the pencil's new vertices snap to its vertices",
+ "outliner.reference.off": "Back from a reference to an object to edit",
  "html.uv-editor.uv-bar.uv-unfold.title": "Unfold: choose how the pixel grid lies, see it on the model, and lay the picked faces out on it. The grid meets across every edge; pixels stretch on sloping faces. Faces tilted over 60° go to a piece of their own. They get new places, filled with the template; what was painted for them stays at the old place until «Clean» is pressed",
  "uv.chart-menu.stack": "Stack",
  "uv.unfold.body": "Along body",

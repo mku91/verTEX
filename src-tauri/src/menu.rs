@@ -26,6 +26,7 @@ pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
         .item(&item("project-save-as", "menu.file.save-as", Some("Ctrl+Shift+S"))?)
         .item(&item("project-close-file", "menu.file.close", Some("Ctrl+Shift+Q"))?)
         .separator()
+        .item(&item("import-glb", "menu.file.import-glb", None)?)
         .item(&item("export-gltf", "menu.file.export-gltf", None)?)
         .item(&item("render-sprites", "menu.file.render-sprites", None)?)
         .separator()

@@ -49,6 +49,7 @@ const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected node hol
 const PIVOT_LINK_DASH = 4; // px; a dash of the line to a pivot point away from its object, and the gap
 const PIVOT_LINK_MARGIN = 1e-4; // world units; a point on the bounds is not away from them
 const PIVOT_LINK_COLOR = 0x9a9a9a; // a plain grey, in every theme
+const REFERENCE_SNAP = 12; // px: how near the pointer the pencil's new vertex is drawn to a vertex (see pencilSnap())
 const NODE_COLOR = 0xffb86c; // a picked node's bounds (see updateNodeBounds())
 const NODE_DOT_SIZE = 11; // px; a picked node that holds nothing
 
@@ -182,6 +183,24 @@ function buildPrimitive(mesh, kind, options) {
 // Editor state: mesh, selection, selection mode, active tool. Dispatches 'change' on any update.
 // A picture made `w` × `h` pixels, each the nearest of the original's (no
 // smoothing: pixel art stays pixel art).
+const IMPORT_MAX_ATLAS = 4096; // px; a larger picture is made smaller to be an atlas (see importModel())
+
+// The area of a flat polygon ([[x, y]]), and of one in space ([Vector3]).
+function polygonArea(points) {
+  let twice = 0;
+  points.forEach(([x, y], k) => {
+    const [nx, ny] = points[(k + 1) % points.length];
+    twice += x * ny - nx * y;
+  });
+  return Math.abs(twice) / 2;
+}
+
+function spaceArea(points) {
+  const sum = new THREE.Vector3();
+  points.forEach((point, k) => sum.add(point.clone().cross(points[(k + 1) % points.length])));
+  return sum.length() / 2;
+}
+
 function scaledImage(image, w, h) {
   const out = new ImageData(w, h);
   for (let y = 0; y < h; y++) {
@@ -4702,7 +4721,14 @@ export class Editor extends EventTarget {
       if (drag.axis) offset.projectOnVector(drag.axis);
       lead.copy(from).add(offset);
     }
-    this.showSnapMark(snapped?.mark);
+    // The pencil's new vertex: onto a vertex near the pointer - of its own
+    // object, or of a reference (not with Alt held: then freely), whatever the grid says.
+    const onReference = drag.parent !== undefined && !this.altHeld ? this.pencilSnap(clientX, clientY, drag) : null;
+    if (onReference) {
+      offset = onReference.clone().sub(from);
+      lead.copy(onReference);
+    }
+    this.showSnapMark(onReference ? { points: [onReference], lines: [] } : snapped?.mark);
     vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();
@@ -4864,6 +4890,46 @@ export class Editor extends EventTarget {
 
   // --- pencil ------------------------------------------------------------
 
+  // Where the pencil's new vertex snaps to, near the pointer (REFERENCE_SNAP
+  // px, in the view of the drag): a vertex of its own object - the nearest on
+  // the screen; let go there, it closes a loop (see finishPencil()) - or else
+  // of a reference (see setReference()) - of several, the one nearest the
+  // viewer, not one behind the shape. A point (a copy), or null.
+  pencilSnap(clientX, clientY, drag) {
+    const { viewer } = drag;
+    if (!viewer.project) return null;
+    const { vertices, vertexObject } = this.mesh;
+    const { hiddenVertices, referenced } = this.topology;
+    const own = vertexObject[drag.parent];
+    let near = null;
+    let nearest = REFERENCE_SNAP;
+    vertices.forEach((point, index) => {
+      if (index === drag.index || vertexObject[index] !== own || hiddenVertices.has(index)) return;
+      const at = viewer.project(point);
+      const distance = at ? Math.hypot(at.x - clientX, at.y - clientY) : Infinity;
+      if (distance <= nearest) {
+        near = point;
+        nearest = distance;
+      }
+    });
+    if (near) return near.clone();
+    if (!referenced?.size) return null;
+    const camera = this.viewport.camera.position;
+    let best = null;
+    let bestDepth = Infinity;
+    for (const index of referenced) {
+      const point = this.mesh.vertices[index];
+      const at = viewer.project(point);
+      if (!at || Math.hypot(at.x - clientX, at.y - clientY) > REFERENCE_SNAP) continue;
+      const depth = viewer === this.mainViewer ? point.distanceTo(camera) : point.dot(viewer.viewDirection(point));
+      if (depth < bestDepth) {
+        best = point;
+        bestDepth = depth;
+      }
+    }
+    return best ? best.clone() : null;
+  }
+
   // Pencil: a drag that starts on a vertex does not move it but pulls a new
   // vertex out of it, joined to it by an edge. Called as the drag begins.
   sproutVertex(drag) {
@@ -4899,10 +4965,12 @@ export class Editor extends EventTarget {
   pencilTarget(vertex, viewer) {
     const position = this.mesh.vertices[vertex];
     const flat = viewer.planeAxes ? [...viewer.planeAxes] : ['x', 'y', 'z'];
+    // (Not one of what is hidden, or a reference's: one it was snapped onto, see pencilSnap(), is no target.)
+    const { hiddenVertices } = this.topology;
     let best = null;
     let bestDistance = Infinity;
     this.mesh.vertices.forEach((other, i) => {
-      if (i === vertex || flat.some((axis) => Math.abs(other[axis] - position[axis]) > 1e-6)) return;
+      if (i === vertex || hiddenVertices.has(i) || flat.some((axis) => Math.abs(other[axis] - position[axis]) > 1e-6)) return;
       const distance = other.distanceTo(position);
       if (distance >= bestDistance) return;
       best = i;
@@ -5017,10 +5085,29 @@ export class Editor extends EventTarget {
         for (const vertex of island.vertices) hiddenVertices.add(vertex);
       }
     }
+    // References (see setReference()), an entry's own switch or a node's above
+    // it: as hidden to picking and to what a node holds, but drawn - see-through.
+    const referenced = new Set();
+    const refer = (index, under) => {
+      const island = islands[index];
+      island.referenceOwn = Boolean(this.mesh.objects[index]?.reference);
+      island.referenced = under || island.referenceOwn;
+      if (island.referenced && !island.hidden) {
+        for (const vertex of island.vertices) {
+          referenced.add(vertex);
+          hiddenVertices.add(vertex);
+        }
+      }
+      for (const child of island.children) refer(child, island.referenced);
+    };
+    islands.forEach((island, index) => {
+      if (island.parentIndex === null) refer(index, false);
+    });
     const collect = (island) => {
       if (island.node) return;
-      island.node = island.hidden ? [] : [...island.vertices];
-      island.nodeFaces = island.hidden ? [] : [...island.faces];
+      const out = island.hidden || island.referenced;
+      island.node = out ? [] : [...island.vertices];
+      island.nodeFaces = out ? [] : [...island.faces];
       for (const child of island.children) {
         collect(islands[child]);
         island.node.push(...islands[child].node);
@@ -5029,8 +5116,9 @@ export class Editor extends EventTarget {
     };
     islands.forEach(collect);
     const edges = this.mesh.edges().filter(([a]) => !hiddenVertices.has(a));
-    this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices };
+    this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices, referenced };
     this.view.hidden = hiddenVertices; // takes effect at the view's next rebuild
+    this.view.referenced = referenced; // likewise
     this.view.ghosted = ghosted; // likewise
   }
 
@@ -5467,7 +5555,7 @@ export class Editor extends EventTarget {
   // Selects a whole object, by its index in the objects list; from any mode
   // this goes to object mode. `additive` toggles it in the selection.
   selectObject(index, additive) {
-    if (this.busy() || this.topology.islands[index]?.hidden) return;
+    if (this.busy() || this.topology.islands[index]?.hidden || this.topology.islands[index]?.referenced) return; // (a reference is picked by nothing)
     if (this.operation) this.setOperation(null);
     if (this.mode !== 'object') this.setMode('object');
     this.select(index, additive);
@@ -5772,6 +5860,23 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
+  // Makes an object or a node (index in the objects list), with all it holds,
+  // a reference - or not: a shape to build over, drawn see-through with black
+  // edges, that nothing picks or edits, that the pencil's new vertices snap to
+  // (see pencilSnap()) and that is not exported. One undo step.
+  setReference(index, on) {
+    const object = this.mesh.objects[index];
+    if (!object || Boolean(object.reference) === on || this.busy()) return;
+    if (this.operation) this.setOperation(null);
+    this.history.push(this.snapshot());
+    if (on) object.reference = true;
+    else delete object.reference;
+    this.updateTopology();
+    this.dropHidden();
+    this.rebuildView();
+    this.selectionChanged();
+  }
+
   // Works on one entry of the objects list alone (Blender's Local View,
   // Maya's Isolate Select), or - on the one that is, or with null - goes back:
   // the others are set aside, a faint wireframe that nothing can pick. A way
@@ -5996,6 +6101,131 @@ export class Editor extends EventTarget {
     this.refreshHighlight();
     this.setTool('move');
     return true;
+  }
+
+  // Adds a scene read from a file (see gltf-import.js) as new objects and
+  // nodes, where the file has them, and picks them, with the move tool in
+  // hand. `pictures`: an ImageData for each of the scene's images that could
+  // be read (or null) - each one a face shows is a new atlas, at the pixels
+  // per unit its faces have on it, or in a project of one atlas is put on
+  // that one, under what it has. An object goes on the atlas of the picture
+  // most of its faces show; a face that shows none, or another, gets a place
+  // there as a new face does. One undo step. Returns { objects, atlases,
+  // intoAtlas, tooBig } - the objects and atlases made, the pictures put on
+  // the one atlas and those it could not grow for; null if nothing was made.
+  importModel(scene, pictures) {
+    if (this.busy() || !scene.entries.some((entry) => entry.kind === 'mesh')) return null;
+    this.commitFloating();
+    if (this.operation) this.setOperation(null);
+    this.setMode('object');
+    if (this.mode !== 'object') return null;
+    const before = this.snapshot();
+    const { mesh } = this;
+
+    // The picture each object shows most.
+    const pictureOf = (entry) => {
+      const counts = new Map();
+      for (const face of entry.faces) if (face.uv && pictures[face.image]) counts.set(face.image, (counts.get(face.image) ?? 0) + 1);
+      return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    };
+    const shown = new Set(scene.entries.map(pictureOf).filter((image) => image !== null));
+
+    // Where each picture goes: in a project of several atlases, an atlas of
+    // its own, as big as it is (or as big as an atlas can be: then smaller);
+    // in one of one, onto that one, under all it has - which grows, its sides
+    // doubled, for it (a picture it can't grow for is not taken).
+    const atlasOf = new Map(); // image -> { atlas, x, y, width, height, made, densities }
+    let tooBig = 0;
+    for (const image of shown) {
+      const picture = pictures[image];
+      const scale = Math.min(1, IMPORT_MAX_ATLAS / picture.width, IMPORT_MAX_ATLAS / picture.height);
+      const width = Math.max(1, Math.floor(picture.width * scale));
+      const height = Math.max(1, Math.floor(picture.height * scale));
+      const pixels = scale < 1 ? scaledImage(picture, width, height) : picture;
+      if (this.multiAtlas) {
+        const latin = latinName(scene.images[image]?.name ?? '').replace(/\.[a-z]+$/i, '').trim() || 'imported';
+        const id = freeName(latin.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 56), new Set(this.atlases.map((atlas) => atlas.id)));
+        const atlas = this.addAtlas(new Atlas({ id, name: freeName(latin, new Set(this.atlases.map((other) => other.name))) }));
+        atlas.resize(width, height);
+        atlas.setPicture(pixels);
+        atlasOf.set(image, { atlas, x: 0, y: 0, width, height, made: true, densities: [] });
+        continue;
+      }
+      const atlas = this.atlasById(ATLAS) ?? this.atlases[0];
+      const y = atlas.height + PADDING;
+      const grown = (side, need) => {
+        while (side < need) side *= 2;
+        return side;
+      };
+      const w = grown(atlas.width, width);
+      const h = grown(atlas.height, y + height + PADDING);
+      if (!atlas || w > IMPORT_MAX_ATLAS || h > IMPORT_MAX_ATLAS) {
+        tooBig++;
+        continue;
+      }
+      atlas.resize(w, h);
+      atlas.stamp(pixels, 0, y);
+      atlasOf.set(image, { atlas, x: 0, y, width, height, made: false, densities: [] });
+    }
+
+    const made = []; // the new objects, in the scene's order
+    const base = mesh.vertices.length;
+    let count = 0;
+    for (const entry of scene.entries) {
+      mesh.addObject(latinName(entry.name).trim() || (entry.kind === 'node' ? 'Node' : 'Mesh'), entry.kind);
+      const object = mesh.objects[mesh.objects.length - 1];
+      if (entry.parent !== null) object.parent = made[entry.parent].id;
+      // Its frame: the node's place and turn in the world (its size is in the vertices).
+      const place = new THREE.Vector3();
+      const turn = new THREE.Quaternion();
+      entry.matrix.decompose(place, turn, new THREE.Vector3());
+      object.pivot = place.toArray().map((n) => +n.toFixed(6));
+      setRotation(object, rotationOf(turn));
+      made.push(object);
+      const image = entry.kind === 'mesh' ? pictureOf(entry) : null;
+      const on = image === null ? null : atlasOf.get(image);
+      if (on) object.atlas = on.atlas.id;
+      else delete object.atlas;
+      const first = mesh.vertices.length;
+      for (const point of entry.points) mesh.addVertex(point.x, point.y, point.z, object.id);
+      count += entry.points.length;
+      for (const face of entry.faces) {
+        const loop = face.loop.map((i) => first + i);
+        if (on && face.uv && face.image === image) {
+          // Fractions of the picture to its pixels; a face beyond it (a picture
+          // that repeats) brought back, whole tiles at a time.
+          const shift = [0, 1].map((axis) => Math.floor(Math.min(...face.uv.map((place) => place[axis])) + 1e-6));
+          loop.uv = face.uv.map(([u, v]) => [+(on.x + (u - shift[0]) * on.width).toFixed(4), +(on.y + (v - shift[1]) * on.height).toFixed(4)]);
+          // How many pixels a unit of length is on it: the root of the areas' ratio.
+          const pixels = polygonArea(loop.uv);
+          const space = spaceArea(loop.map((i) => mesh.vertices[i]));
+          if (pixels > 0 && space > 1e-12) on.densities.push(Math.sqrt(pixels / space));
+        }
+        mesh.addFace(loop);
+      }
+    }
+    for (const { atlas, densities, made: own } of atlasOf.values()) {
+      if (!own) continue; // (the project's one keeps its own)
+      densities.sort((a, b) => a - b);
+      const middle = densities[Math.floor(densities.length / 2)];
+      atlas.ppu = middle ? Math.min(256, Math.max(1, Math.round(middle))) : 16;
+    }
+    if (atlasOf.size) this.atlasId = [...atlasOf.values()][0].atlas.id;
+
+    this.selection = new Set(Array.from({ length: count }, (_, k) => base + k));
+    this.edited(before);
+    this.rebuildView();
+    this.pinNodes();
+    // What is picked: the new entries at the top of what came.
+    const roots = made.filter((_, i) => scene.entries[i].parent === null);
+    this.picked = new Set(roots.map((object) => mesh.objects.indexOf(object)));
+    this.activeObject = roots[roots.length - 1].id;
+    this.syncSelection();
+    this.refreshHighlight();
+    this.setTool('move');
+    this.viewport.frame(mesh.vertices.slice(base), true);
+    const placed = [...atlasOf.values()];
+    return { objects: made.filter((object) => object.kind !== 'node').length, atlases: placed.filter((on) => on.made).length, intoAtlas: placed.filter((on) => !on.made).length, tooBig };
   }
 
   // Copies of these entries (objects or nodes, indices in the objects list),

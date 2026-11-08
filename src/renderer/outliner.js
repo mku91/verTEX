@@ -46,6 +46,7 @@ const NODE_ICON = '<i class="fa-solid fa-circle-nodes"></i>'; // a node (the kin
 const EYE_ICON = '<i class="fa-solid fa-eye"></i>';
 const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
 const ISOLATE_ICON = '<i class="fa-solid fa-crosshairs"></i>';
+const REFERENCE_ICON = '<i class="fa-solid fa-ghost"></i>';
 const INDENT = 14; // px per nesting level
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
 const FORM_KEPT_HEIGHT = 40; // px of the form that stay in the window: its title
@@ -160,7 +161,7 @@ export class Outliner {
     const bound = boundByNode(this.editor.mesh);
     const focus = this.editor.mode === 'vertex' ? this.editor.skinFocus ?? null : null;
     const signature = JSON.stringify([
-      islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden]),
+      islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden, island.referenceOwn, island.referenced]),
       [...bound].map(([node, objects]) => [node, objects.map(({ object, vertices }) => [object, vertices.length])]), focus,
       [...selected],
       whole,
@@ -243,6 +244,15 @@ export class Outliner {
       }
       // Hidden, by its own eye or by a node's above it.
       row.classList.toggle('hidden', island.hidden);
+      // A reference (see Editor.setReference()), by its own switch or a node's
+      // above it: the switch shows on the row under the pointer, or when it is on.
+      row.classList.toggle('reference', island.referenced);
+      const reference = document.createElement('span');
+      reference.className = `outliner-eye outliner-reference${island.referenceOwn ? ' active' : ''}`;
+      reference.dataset.reference = '';
+      reference.title = island.referenceOwn ? t('outliner.reference.off') : t('outliner.reference.on');
+      reference.innerHTML = REFERENCE_ICON;
+      row.append(reference);
       // On what is picked (and on what is worked on alone, to go back): the others set aside.
       const alone = this.editor.isolation?.id === island.id;
       if (alone || picked) {
@@ -342,6 +352,12 @@ export class Outliner {
         this.openAddMenu(Number(plus.dataset.addInto), plus);
         return;
       }
+      const reference = event.target.closest('[data-reference]');
+      if (reference) {
+        const index = Number(rowAt(reference).dataset.object);
+        editor.setReference(index, !editor.topology.islands[index].referenceOwn);
+        return;
+      }
       const isolate = event.target.closest('[data-isolate]');
       if (isolate) {
         editor.setIsolated(Number(rowAt(isolate).dataset.object));
@@ -383,7 +399,7 @@ export class Outliner {
     });
     list.addEventListener('dblclick', (event) => {
       const row = rowAt(event.target);
-      if (row && !event.target.closest('[data-fold], [data-eye], [data-add-into], [data-lock]')) this.rename(row);
+      if (row && !event.target.closest('[data-fold], [data-eye], [data-reference], [data-add-into], [data-lock]')) this.rename(row);
       const shape = event.target.closest('[data-shape]');
       if (shape) this.rename(shape);
     });
@@ -397,7 +413,7 @@ export class Outliner {
     list.addEventListener('pointerdown', (event) => {
       this.suppressClick = false; // the last drag's click never came
       const row = rowAt(event.target);
-      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye], [data-add-into], [data-lock]')) return;
+      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye], [data-reference], [data-add-into], [data-lock]')) return;
       this.press = { index: Number(row.dataset.object), x: event.clientX, y: event.clientY, dragging: false };
     });
     window.addEventListener('pointermove', (event) => {

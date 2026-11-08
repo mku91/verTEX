@@ -40,6 +40,7 @@ const MIN_GRID_SPACING = 8; // px; denser grid lines and snap dots are not drawn
 const DOT_OPACITY = 0.26;
 const AROUND_WIDTH = 1.5; // px; the other objects of the shown object's node
 const FAR_EDGE_OPACITY = 0.35; // brightness of lines at the farthest point of the object
+const EDGE_LEVELS = 16; // steps of that brightness, a path of lines each (see drawEdges())
 const ZOOM_SPEED = 0.0015; // per wheel delta unit
 const MIN_SCALE = 2; // px per world unit
 const MAX_SCALE = 20000;
@@ -92,9 +93,9 @@ export class OrthoViews {
     this.views = VIEWS.map((definition) => this.createView(definition));
     this.listeners = [
       [editor, 'change', () => this.update()],
-      [editor, 'cutframe', () => this.draw()], // the cut line is animated
+      [editor, 'cutframe', () => this.requestDraw()], // the cut line is animated
       // The corner gizmos follow the main view's rotation.
-      [editor.viewport.orbit, 'change', () => this.draw()],
+      [editor.viewport.orbit, 'change', () => this.requestDraw()],
     ];
     for (const [target, type, listener] of this.listeners) target.addEventListener(type, listener);
     onThemeChange(() => this.draw());
@@ -517,7 +518,7 @@ export class OrthoViews {
         this.shownKey = 'posed';
         for (const view of this.views) this.fit(view);
       }
-      this.draw();
+      this.requestDraw();
       return;
     }
     if (this.shownKey === 'posed') this.shownKey = '';
@@ -560,7 +561,7 @@ export class OrthoViews {
       this.shownKey = key;
       for (const view of this.views) this.fit(view);
     }
-    this.draw();
+    this.requestDraw();
   }
 
   // Frames the shown objects in every view.
@@ -711,8 +712,22 @@ export class OrthoViews {
   // --- drawing -----------------------------------------------------------
 
   draw() {
+    this.drawPending = false;
     if (!this.open) return;
     for (const view of this.views) this.drawView(view);
+  }
+
+  // The views drawn anew in time for the next frame, once however many
+  // changes come before it: the editor tells of a change many times in one
+  // action, and the main view's camera on every move. (What is shown and
+  // what is under the pointer are known at once, see update(): only the
+  // drawing waits.)
+  requestDraw() {
+    if (this.drawPending || this.disposed) return;
+    this.drawPending = true;
+    (this.container.ownerDocument.defaultView ?? window).requestAnimationFrame(() => {
+      if (this.drawPending) this.draw();
+    });
   }
 
   // Whether what is shown is of a model that is gone: the model was replaced
@@ -1151,7 +1166,11 @@ export class OrthoViews {
   // The wireframe, with a depth cue: the nearer a vertex is to the viewer of
   // this view, the brighter the lines at it, from full brightness at the
   // nearest point of the object down to FAR_EDGE_OPACITY (never black) at the
-  // farthest. Every edge is a gradient between its two ends.
+  // farthest. The brightness goes in EDGE_LEVELS steps, a path of lines each,
+  // stroked at once - not a gradient an edge, which is thousands of strokes
+  // on a model of some size, every time it is drawn. An edge that goes from
+  // near to far is cut into pieces, each in its own step, so it still fades
+  // along its length.
   drawEdges(view) {
     const { context } = view;
     const { vertices } = this.editor.mesh;
@@ -1160,26 +1179,37 @@ export class OrthoViews {
     const depths = this.shown.vertices.map(depth);
     const farthest = Math.min(...depths);
     const range = Math.max(...depths) - farthest;
-    const opacity = (index) =>
-      range < 1e-9 ? 1 : FAR_EDGE_OPACITY + (1 - FAR_EDGE_OPACITY) * ((depth(index) - farthest) / range);
-
-    // Far edges first, so that the near, brighter ones lie on top of them.
-    const edges = [...this.shown.edges].sort((e, f) => depth(e[0]) + depth(e[1]) - depth(f[0]) - depth(f[1]));
-    context.lineWidth = 1;
-    for (const [a, b] of edges) {
+    const nearness = (index) => (range < 1e-9 ? 1 : (depth(index) - farthest) / range); // 0 farthest .. 1 nearest
+    const levels = Array.from({ length: EDGE_LEVELS }, () => []);
+    const levelOf = (near) => Math.min(EDGE_LEVELS - 1, Math.floor(near * EDGE_LEVELS));
+    for (const [a, b] of this.shown.edges) {
       const p = this.project(view, vertices[a]);
       const q = this.project(view, vertices[b]);
-      // An edge seen end-on is just a dot, and a gradient needs some length.
+      // An edge seen end-on is just a dot.
       if (Math.hypot(q.x - p.x, q.y - p.y) < 0.5) continue;
-      const gradient = context.createLinearGradient(p.x, p.y, q.x, q.y);
-      gradient.addColorStop(0, withAlpha(theme.text, opacity(a)));
-      gradient.addColorStop(1, withAlpha(theme.text, opacity(b)));
-      context.strokeStyle = gradient;
-      context.beginPath();
-      context.moveTo(p.x, p.y);
-      context.lineTo(q.x, q.y);
-      context.stroke();
+      const from = nearness(a);
+      const to = nearness(b);
+      const pieces = Math.max(1, Math.ceil(Math.abs(to - from) * EDGE_LEVELS));
+      for (let k = 0; k < pieces; k++) {
+        const t0 = k / pieces;
+        const t1 = (k + 1) / pieces;
+        levels[levelOf(from + (to - from) * (t0 + t1) / 2)].push(
+          p.x + (q.x - p.x) * t0, p.y + (q.y - p.y) * t0, p.x + (q.x - p.x) * t1, p.y + (q.y - p.y) * t1,
+        );
+      }
     }
+    // Far steps first, so that the near, brighter lines lie on top of them.
+    context.lineWidth = 1;
+    levels.forEach((lines, level) => {
+      if (!lines.length) return;
+      context.strokeStyle = withAlpha(theme.text, FAR_EDGE_OPACITY + (1 - FAR_EDGE_OPACITY) * ((level + 0.5) / EDGE_LEVELS));
+      context.beginPath();
+      for (let i = 0; i < lines.length; i += 4) {
+        context.moveTo(lines[i], lines[i + 1]);
+        context.lineTo(lines[i + 2], lines[i + 3]);
+      }
+      context.stroke();
+    });
   }
 
   // Corner gizmo: the world axes as the main view sees them, with the axis

@@ -131,6 +131,19 @@ if (tauri) {
     }
   }
 
+  // --- imported files ----------------------------------------------------------------
+  // A file to import, of one of the `kinds` ({ name, extension }[]): { path,
+  // name (without the extension), bytes }, or null if none was chosen. A
+  // file that can't be read rejects with its message.
+  async function pickImport(kinds) {
+    const source = await invoke('ask_open', {
+      ask: { title: word('dialog.import.title'), filters: kinds.map((kind) => ({ name: kind.name, extensions: [kind.extension] })) },
+    });
+    if (!source) return null;
+    const file = baseName(source);
+    return { path: source, name: file.slice(0, file.length - extensionOf(file).length), bytes: await read(source) };
+  }
+
   // The atlases' working files, for painting them in another program.
   const atlas = atlasFiles({ invoke, listen, word });
 
@@ -168,6 +181,7 @@ if (tauri) {
       close: () => invoke('window_close'),
     },
     export: { pick: pickExport, write: writeExport },
+    import: { pick: pickImport },
     recent: {
       // [{ path, name, opened, missing, preview }], the latest first;
       // `preview` is the picture inside the project file (PNG bytes), or null.

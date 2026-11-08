@@ -1644,6 +1644,11 @@ const TEXELS_FRAGMENT = /* glsl */ `
 `;
 
 const GHOST_OPACITY = 0.1; // the objects set aside while one is worked on alone, see `ghost`
+// An object used as a reference (see Editor.setReference()): see-through, its edges black and see-through too.
+const REFERENCE_SURFACE = 0xd8d8d8;
+const REFERENCE_SURFACE_OPACITY = 0.3;
+const REFERENCE_EDGE_OPACITY = 0.2;
+const REFERENCE_POINT_SIZE = 4; // px, its vertices: small black squares
 
 // How much of the picture shows in the focus look, on a textured model (see applyLook()).
 const XRAY_OPACITY = 0.65;
@@ -1811,6 +1816,24 @@ export class MeshView {
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: COLOR_WIRE, transparent: true, opacity: GHOST_OPACITY, depthWrite: false }),
     );
+    // The objects used as references (see Editor.setReference()): nothing of
+    // theirs is picked; they are drawn see-through, a surface lit as the
+    // model is and black edges, for something to be built over them.
+    this.referenceSurface = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshStandardMaterial({ color: REFERENCE_SURFACE, roughness: 1, transparent: true, opacity: REFERENCE_SURFACE_OPACITY, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.referenceEdges = new THREE.LineSegments(
+      new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: REFERENCE_EDGE_OPACITY, depthWrite: false }),
+    );
+    this.referencePoints = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.PointsMaterial({ color: 0x000000, size: REFERENCE_POINT_SIZE, sizeAttenuation: false }),
+    );
+    this.referenceSurface.renderOrder = 3;
+    this.referenceEdges.renderOrder = 4;
+    this.referencePoints.renderOrder = 4;
     this.points = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
     // Drawn last: over the edges, the face highlights and the cut line.
     this.points.renderOrder = 5;
@@ -1940,6 +1963,9 @@ export class MeshView {
       this.sketchPoints,
       this.previewLine,
       this.ghost,
+      this.referenceSurface,
+      this.referenceEdges,
+      this.referencePoints,
     ];
     for (const object of objects) {
       object.frustumCulled = false;
@@ -1978,6 +2004,7 @@ export class MeshView {
 
     this.setPositions(this.wire, this.edgeIndices.length);
     this.setPositions(this.ghost, this.ghostIndices.length);
+    this.buildReference();
     this.setPositions(this.points, vertices.length);
     this.points.geometry.setAttribute(
       'color',
@@ -2202,6 +2229,34 @@ export class MeshView {
     return this.posed?.length === this.mesh.vertices.length ? this.posed : this.mesh.vertices;
   }
 
+  // The references' surface and edges, where their vertices are (`referenced`,
+  // set by the owner before a rebuild, as `hidden`). Nothing of theirs moves
+  // meanwhile - nothing of theirs can be picked - so this is done at a rebuild only.
+  buildReference() {
+    const referenced = this.referenced ?? new Set();
+    const { vertices, faces } = this.mesh;
+    const triangles = [];
+    faces.forEach((face, i) => {
+      if (!referenced.has(face[0])) return;
+      for (const triangle of this.mesh.triangulate(i)) for (const vertex of triangle) triangles.push(vertices[vertex].x, vertices[vertex].y, vertices[vertex].z);
+    });
+    const lines = [];
+    if (referenced.size) {
+      for (const [a, b] of this.mesh.edges()) {
+        if (referenced.has(a)) lines.push(vertices[a].x, vertices[a].y, vertices[a].z, vertices[b].x, vertices[b].y, vertices[b].z);
+      }
+    }
+    const surface = this.referenceSurface.geometry;
+    surface.setAttribute('position', new THREE.Float32BufferAttribute(triangles, 3));
+    surface.computeVertexNormals(); // (each triangle its own corners: flat)
+    this.referenceEdges.geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
+    const points = [];
+    for (const vertex of referenced) points.push(vertices[vertex].x, vertices[vertex].y, vertices[vertex].z);
+    this.referencePoints.geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    // (as applyLook() has it)
+    this.referenceSurface.visible = this.referenceEdges.visible = this.referencePoints.visible = referenced.size > 0 && !this.bare;
+  }
+
   // Call after vertices moved without topology changes.
   updatePositions() {
     const vertices = this.shown;
@@ -2356,6 +2411,11 @@ export class MeshView {
     this.wire.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
     this.ghost.material.color.copy(wireframe ? COLOR_WIRE_FOCUS : COLOR_WIRE);
     this.ghost.visible = !this.bare || this.bareGhosts; // (not in the preview: nothing but the model there)
+    // (a reference is no part of the model: neither in the preview)
+    const referenced = (this.referenced?.size ?? 0) > 0;
+    this.referenceSurface.visible = referenced && !this.bare;
+    this.referenceEdges.visible = referenced && !this.bare;
+    this.referencePoints.visible = referenced && !this.bare;
   }
 
   // Shows the line the brush would paint, on the surface, pixel by pixel:

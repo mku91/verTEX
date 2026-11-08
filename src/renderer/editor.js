@@ -49,6 +49,7 @@ const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected node hol
 const PIVOT_LINK_DASH = 4; // px; a dash of the line to a pivot point away from its object, and the gap
 const PIVOT_LINK_MARGIN = 1e-4; // world units; a point on the bounds is not away from them
 const PIVOT_LINK_COLOR = 0x9a9a9a; // a plain grey, in every theme
+const SAME_SPOT = 3; // px: vertices this near one another on the screen are one spot, the nearest to the viewer taken (see pencilSnap())
 const REFERENCE_SNAP = 12; // px: how near the pointer the pencil's new vertex is drawn to a vertex (see pencilSnap())
 const NODE_COLOR = 0xffb86c; // a picked node's bounds (see updateNodeBounds())
 const NODE_DOT_SIZE = 11; // px; a picked node that holds nothing
@@ -4728,7 +4729,12 @@ export class Editor extends EventTarget {
       offset = onReference.clone().sub(from);
       lead.copy(onReference);
     }
-    this.showSnapMark(onReference ? { points: [onReference], lines: [] } : snapped?.mark);
+    // And onto a mirror plane it is near on the screen (Blender's "clipping"):
+    // there it is its own image, one vertex for both sides, not a pair a hair
+    // apart. (A reference's vertex by the middle is seldom right on it.)
+    const onPlane = drag.parent !== undefined && !this.altHeld && this.mirrorPlaneSnap(lead, drag);
+    if (onPlane) offset = lead.clone().sub(from);
+    this.showSnapMark(onReference || onPlane ? { points: [lead.clone()], lines: [] } : snapped?.mark);
     vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();
@@ -4890,11 +4896,31 @@ export class Editor extends EventTarget {
 
   // --- pencil ------------------------------------------------------------
 
+  // Puts `point` (the pencil's new vertex, being dragged) onto each plane its
+  // object is mirrored across that it is within REFERENCE_SNAP px of on the
+  // screen of the drag. Returns whether it was put on one.
+  mirrorPlaneSnap(point, drag) {
+    if (!drag.viewer.project || !this.mirror.active()) return false;
+    const index = this.mesh.objects.findIndex((object) => object.id === this.mesh.vertexObject[drag.parent]);
+    let moved = false;
+    for (const { axis, value } of this.mirror.planesFor(index)) {
+      const on = point.clone();
+      on[axis] = value;
+      const a = drag.viewer.project(point);
+      const b = drag.viewer.project(on);
+      if (a && b && Math.hypot(a.x - b.x, a.y - b.y) <= REFERENCE_SNAP) {
+        point[axis] = value;
+        moved = true;
+      }
+    }
+    return moved;
+  }
+
   // Where the pencil's new vertex snaps to, near the pointer (REFERENCE_SNAP
   // px, in the view of the drag): a vertex of its own object - the nearest on
   // the screen; let go there, it closes a loop (see finishPencil()) - or else
-  // of a reference (see setReference()) - of several, the one nearest the
-  // viewer, not one behind the shape. A point (a copy), or null.
+  // of a reference (see setReference()) - the nearest on the screen, or of
+  // several in one spot the nearest the viewer. A point (a copy), or null.
   pencilSnap(clientX, clientY, drag) {
     const { viewer } = drag;
     if (!viewer.project) return null;
@@ -4916,14 +4942,21 @@ export class Editor extends EventTarget {
     if (!referenced?.size) return null;
     const camera = this.viewport.camera.position;
     let best = null;
+    let bestDistance = Infinity;
     let bestDepth = Infinity;
     for (const index of referenced) {
       const point = this.mesh.vertices[index];
       const at = viewer.project(point);
-      if (!at || Math.hypot(at.x - clientX, at.y - clientY) > REFERENCE_SNAP) continue;
+      const distance = at ? Math.hypot(at.x - clientX, at.y - clientY) : Infinity;
+      if (distance > REFERENCE_SNAP) continue;
       const depth = viewer === this.mainViewer ? point.distanceTo(camera) : point.dot(viewer.viewDirection(point));
-      if (depth < bestDepth) {
+      // The square aimed at: the nearest to the pointer; of ones as near as
+      // that on the screen, the nearest to the viewer, not one behind it.
+      const nearer = distance < bestDistance - SAME_SPOT;
+      const asNear = Math.abs(distance - bestDistance) <= SAME_SPOT;
+      if (nearer || (asNear && depth < bestDepth)) {
         best = point;
+        bestDistance = Math.min(distance, bestDistance);
         bestDepth = depth;
       }
     }

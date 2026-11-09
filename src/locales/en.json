@@ -89,7 +89,7 @@
  "html.shape-tools.tool-flyout.shape-ellipse.filled-0.title": "Ellipse (O)",
  "html.shape-tools.tool-flyout.shape-ellipse.filled-1.title": "Filled ellipse",
  "html.toolbar.tool-marquee.title": "Pixel selection — on the unwrap only: drag — select a rectangle; drag from inside — move it (with Alt — a copy); Delete — erase, Ctrl+C / Ctrl+X / Ctrl+V — copy, cut, paste; the unwrap's turn and flip buttons turn the selection. Enter — put down, Esc — put back",
- "html.toolbar.action-make-face.title": "Make a face through the selected vertices or edges; from two vertices — an edge (Ctrl+D)",
+ "html.toolbar.action-make-face.title": "Make a face through the selected vertices or edges; from two vertices, an edge. Vertices not in one plane make as few flat faces as there can be (Ctrl+D)",
  "html.toolbar.action-flip-faces.title": "Flip faces: swap the front and back of the selected faces, or of all faces of the picked objects (Ctrl+I)",
  "html.toolbar.action-delete.title": "Delete the selected vertices (Delete)",
  "html.toolbar.action-frame.title": "Frame the selection (F)",

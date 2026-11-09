@@ -89,7 +89,7 @@
  "html.shape-tools.tool-flyout.shape-ellipse.filled-0.title": "Эллипс (O)",
  "html.shape-tools.tool-flyout.shape-ellipse.filled-1.title": "Закрашенный эллипс",
  "html.toolbar.tool-marquee.title": "Выделение пикселей — только на развёртке: протянуть — выделить прямоугольник; тянуть изнутри — перенести (с Alt — копию); Delete — стереть, Ctrl+C / Ctrl+X / Ctrl+V — копировать, вырезать, вставить; кнопки поворота и отражения на развёртке — повернуть выделенное. Enter — положить, Esc — вернуть",
- "html.toolbar.action-make-face.title": "Создать грань через выделенные вершины или рёбра; из двух вершин — ребро (Ctrl+D)",
+ "html.toolbar.action-make-face.title": "Создать грань через выделенные вершины или рёбра; из двух вершин — ребро. Вершины не в одной плоскости дают наименьшее число плоских граней (Ctrl+D)",
  "html.toolbar.action-flip-faces.title": "Инвертировать грань: поменять местами лицевую и обратную стороны выделенных граней или всех граней выбранных объектов (Ctrl+I)",
  "html.toolbar.action-delete.title": "Удалить выделенные вершины (Delete)",
  "html.toolbar.action-frame.title": "Показать выделенное (F)",

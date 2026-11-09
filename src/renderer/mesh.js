@@ -1834,6 +1834,9 @@ export class MeshView {
     this.referenceSurface.renderOrder = 3;
     this.referenceEdges.renderOrder = 4;
     this.referencePoints.renderOrder = 4;
+    // Only what of them is turned to the camera: worked out as a frame is drawn, if the camera moved.
+    this.referenceEdges.onBeforeRender = (renderer, scene, camera) => this.showReferenceFront(camera);
+    this.referencePoints.onBeforeRender = (renderer, scene, camera) => this.showReferenceFront(camera);
     this.points = new THREE.Points(new THREE.BufferGeometry(), pointsMaterial());
     // Drawn last: over the edges, the face highlights and the cut line.
     this.points.renderOrder = 5;
@@ -2236,25 +2239,81 @@ export class MeshView {
     const referenced = this.referenced ?? new Set();
     const { vertices, faces } = this.mesh;
     const triangles = [];
+    // Its faces, for what of it is turned to the viewer (see referenceFront()):
+    // each one's normal and middle; its edges and vertices with the faces at them.
+    const own = []; // { normal, middle }
+    const edges = new Map(); // edge key -> { a, b, faces: [indices into own] }
+    const vertexFaces = new Map(); // vertex -> [indices into own]
     faces.forEach((face, i) => {
       if (!referenced.has(face[0])) return;
       for (const triangle of this.mesh.triangulate(i)) for (const vertex of triangle) triangles.push(vertices[vertex].x, vertices[vertex].y, vertices[vertex].z);
+      const k = own.length;
+      const middle = new THREE.Vector3();
+      for (const vertex of face) middle.add(vertices[vertex]);
+      own.push({ normal: this.mesh.faceNormal(i), middle: middle.multiplyScalar(1 / face.length) });
+      face.forEach((a, n) => {
+        const b = face[(n + 1) % face.length];
+        const key = edgeKey(a, b);
+        if (!edges.has(key)) edges.set(key, { a, b, faces: [] });
+        edges.get(key).faces.push(k);
+        if (!vertexFaces.has(a)) vertexFaces.set(a, []);
+        vertexFaces.get(a).push(k);
+      });
     });
-    const lines = [];
+    // Edges no face has (drawn on their own): always shown.
     if (referenced.size) {
       for (const [a, b] of this.mesh.edges()) {
-        if (referenced.has(a)) lines.push(vertices[a].x, vertices[a].y, vertices[a].z, vertices[b].x, vertices[b].y, vertices[b].z);
+        const key = edgeKey(a, b);
+        if (referenced.has(a) && !edges.has(key)) edges.set(key, { a, b, faces: [] });
       }
     }
     const surface = this.referenceSurface.geometry;
     surface.setAttribute('position', new THREE.Float32BufferAttribute(triangles, 3));
     surface.computeVertexNormals(); // (each triangle its own corners: flat)
-    this.referenceEdges.geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-    const points = [];
-    for (const vertex of referenced) points.push(vertices[vertex].x, vertices[vertex].y, vertices[vertex].z);
-    this.referencePoints.geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    // The edges and the points share the reference's vertices, by number; what
+    // is shown of them is an index, made anew as the camera moves (see referenceFront()).
+    const order = [...referenced];
+    const slot = new Map(order.map((vertex, k) => [vertex, k]));
+    const places = new THREE.Float32BufferAttribute(order.flatMap((vertex) => [vertices[vertex].x, vertices[vertex].y, vertices[vertex].z]), 3);
+    for (const geometry of [this.referenceEdges.geometry, this.referencePoints.geometry]) {
+      geometry.setAttribute('position', places);
+      geometry.setIndex([]);
+    }
+    this.referenceData = { own, edges: [...edges.values()], vertexFaces, slot, shownFor: null };
     // (as applyLook() has it)
     this.referenceSurface.visible = this.referenceEdges.visible = this.referencePoints.visible = referenced.size > 0 && !this.bare;
+  }
+
+  // What of the references is turned to a viewer: `toViewer(point)` is the
+  // way from a point to the viewer. A face is turned to it when its normal
+  // points that way; an edge or a vertex is shown when a face at it is (an
+  // edge no face has, always). { edges: [[a, b]], vertices: Set }.
+  referenceFront(toViewer) {
+    const data = this.referenceData;
+    if (!data) return { edges: [], vertices: new Set() };
+    const front = data.own.map(({ normal, middle }) => normal.dot(toViewer(middle)) > 0);
+    const edges = data.edges.filter(({ faces }) => faces.length === 0 || faces.some((k) => front[k])).map(({ a, b }) => [a, b]);
+    const vertices = new Set();
+    for (const [vertex, list] of data.vertexFaces) if (list.some((k) => front[k])) vertices.add(vertex);
+    for (const [a, b] of edges) {
+      if (!data.vertexFaces.has(a)) vertices.add(a);
+      if (!data.vertexFaces.has(b)) vertices.add(b);
+    }
+    return { edges, vertices };
+  }
+
+  // Shows of the references' edges and vertices those turned to `camera`, when it has moved.
+  showReferenceFront(camera) {
+    const data = this.referenceData;
+    if (!data || !this.referenceEdges.visible) return;
+    const key = camera.matrixWorld.elements.join(',');
+    if (data.shownFor === key) return;
+    data.shownFor = key;
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    const along = camera.isOrthographicCamera ? camera.getWorldDirection(new THREE.Vector3()).negate() : null;
+    const { edges, vertices } = this.referenceFront((point) => along ?? eye.clone().sub(point));
+    this.referenceEdges.geometry.setIndex(edges.flatMap(([a, b]) => [data.slot.get(a), data.slot.get(b)]));
+    this.referencePoints.geometry.setIndex([...vertices].map((vertex) => data.slot.get(vertex)));
   }
 
   // Call after vertices moved without topology changes.

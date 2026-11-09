@@ -1846,23 +1846,50 @@ export class Editor extends EventTarget {
   // which is the one thing the unwrap is there to rule out. `faces`: the
   // faces it is about, which splitFaces() puts right.
   problems() {
-    const { faces, vertices, vertexObject, objects } = this.mesh;
+    const { faces, vertexObject, objects } = this.mesh;
     const bent = new Map(); // object id -> its bent faces
     faces.forEach((face, index) => {
-      if (face.length < 4) return;
-      const normal = this.mesh.faceNormal(index);
-      if (normal.lengthSq() < 0.5) return;
-      const heights = face.map((i) => normal.dot(vertices[i]));
-      // Out of its plane by more than a tenth of a pixel (of its atlas).
+      if (!this.isBent(index)) return;
       const owner = vertexObject[face[0]];
-      const ppu = this.atlasById(objects.find((object) => object.id === owner)?.atlas)?.ppu ?? this.atlases[0]?.ppu ?? 16;
-      if ((Math.max(...heights) - Math.min(...heights)) * ppu <= 0.1) return;
       bent.set(owner, [...(bent.get(owner) ?? []), index]);
     });
     return [...bent].map(([id, list]) => ({
       text: t('editor.warning.bent-faces', { count: list.length, object: objects.find((object) => object.id === id)?.name ?? '' }),
       faces: list,
     }));
+  }
+
+  // Whether a face (by index) is not flat: out of its plane by more than a
+  // tenth of a pixel of its atlas (see problems()).
+  isBent(index) {
+    const { faces, vertices, vertexObject, objects } = this.mesh;
+    const face = faces[index];
+    if (!face || face.length < 4) return false;
+    const normal = this.mesh.faceNormal(index);
+    if (normal.lengthSq() < 0.5) return false;
+    const heights = face.map((i) => normal.dot(vertices[i]));
+    const owner = vertexObject[face[0]];
+    const ppu = this.atlasById(objects.find((object) => object.id === owner)?.atlas)?.ppu ?? this.atlases[0]?.ppu ?? 16;
+    return (Math.max(...heights) - Math.min(...heights)) * ppu > 0.1;
+  }
+
+  // A face (by index) cut into as few flat pieces as there can be (see
+  // EditableMesh.flatPieces()), each keeping its corners' places on the
+  // atlas and the face's pinning: the first in its place, the rest at the end
+  // of the faces. Not an undo step of its own.
+  splitFace(index) {
+    const { faces } = this.mesh;
+    const face = faces[index];
+    const piece = (loop) => {
+      const made = [...loop];
+      if (face.uv) made.uv = loop.map((vertex) => [...face.uv[face.indexOf(vertex)]]);
+      if (face.pin) made.pin = true;
+      if (face.shaped) made.shaped = true;
+      return made;
+    };
+    const pieces = this.mesh.flatPieces(index).map(piece);
+    faces[index] = pieces[0];
+    faces.push(...pieces.slice(1));
   }
 
   // Faces (by index) split into as few flat pieces as there can be (see
@@ -1875,21 +1902,7 @@ export class Editor extends EventTarget {
     const list = [...new Set(indices)].filter((index) => faces[index]?.length > 3);
     if (this.busy() || list.length === 0) return false;
     const before = this.snapshot();
-    const added = [];
-    for (const index of list) {
-      const face = faces[index];
-      const piece = (triangle) => {
-        const made = [...triangle];
-        if (face.uv) made.uv = triangle.map((vertex) => [...face.uv[face.indexOf(vertex)]]);
-        if (face.pin) made.pin = true;
-        if (face.shaped) made.shaped = true;
-        return made;
-      };
-      const pieces = this.mesh.flatPieces(index).map(piece);
-      faces[index] = pieces[0];
-      added.push(...pieces.slice(1));
-    }
-    faces.push(...added);
+    for (const index of list) this.splitFace(index); // (the new pieces go at the end: the indices listed stay)
     this.edited(before);
     this.rebuildView();
     this.emitChange();
@@ -4941,10 +4954,14 @@ export class Editor extends EventTarget {
     if (near) return near.clone();
     if (!referenced?.size) return null;
     const camera = this.viewport.camera.position;
+    // Only those turned to the viewer, as they are shown (see MeshView.referenceFront()).
+    const { vertices: front } = this.view.referenceFront(
+      viewer === this.mainViewer ? (point) => camera.clone().sub(point) : (point) => viewer.viewDirection(point).negate(),
+    );
     let best = null;
     let bestDistance = Infinity;
     let bestDepth = Infinity;
-    for (const index of referenced) {
+    for (const index of front) {
       const point = this.mesh.vertices[index];
       const at = viewer.project(point);
       const distance = at ? Math.hypot(at.x - clientX, at.y - clientY) : Infinity;
@@ -6364,12 +6381,18 @@ export class Editor extends EventTarget {
   }
 
   // Joins the selected vertices (or the ends of the selected edges): two with
-  // an edge, more with one face through them all. See EditableMesh.fill().
+  // an edge, more with one face through them all - or, if they are not in one
+  // plane, with as few flat faces as there can be. See EditableMesh.fill().
   makeFace() {
     if (!this.canMakeFace() || this.busy()) return;
     const before = this.snapshot();
     const facing = this.viewport.camera.getWorldDirection(new THREE.Vector3());
+    const count = this.mesh.faces.length;
     if (!this.mesh.fill([...this.selection], facing)) return;
+    // A face through vertices that are not in one plane: cut at once into as
+    // few flat pieces as there can be, as the warning's put-right would - not
+    // made only to be warned about. (The same undo step.)
+    if (this.mesh.faces.length > count && this.isBent(this.mesh.faces.length - 1)) this.splitFace(this.mesh.faces.length - 1);
     this.edited(before);
     this.rebuildView();
     this.placeGizmo();

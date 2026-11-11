@@ -493,7 +493,8 @@ export function unwrap(mesh, { atlas = ATLAS, ppu, width = START_SIZE, height = 
       face.pin = true;
     }
     changed = true;
-    return { faces: piece.faces, rect, pinned: true, shaped: false };
+    // (`solid`: filled with one colour, no outlines of its faces - see Atlas.paintTemplate())
+    return { faces: piece.faces, rect, pinned: true, shaped: false, solid: true };
   });
 
   // The faces without places, in charts, each laid flat and given free room.

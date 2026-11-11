@@ -307,13 +307,17 @@ export class Atlas extends EventTarget {
         pixels = new Set();
         for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
       }
-      return { rect: chart.rect, polygons: polygons.map((polygon) => polygon.map((point) => [...point])), pixels, faces: chart.faces, pinned: chart.pinned, shaped: Boolean(chart.shaped) };
+      return { rect: chart.rect, polygons: polygons.map((polygon) => polygon.map((point) => [...point])), pixels, faces: chart.faces, pinned: chart.pinned, shaped: Boolean(chart.shaped), solid: Boolean(chart.solid) };
     });
     if (this.template) {
       // New rooms, and those a chart has moved to: it moved because it grew,
       // and what it grew by is as bare as a new one.
       const within = (rect) => [...result.fresh, ...result.moved.map(({ to }) => to)].some((f) => f.x === rect.x && f.y === rect.y);
-      for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart);
+      // The pieces of an unfold (see unfold() in unwrap.js) are one thing made:
+      // one colour for them all, that of the first.
+      const pieces = result.charts.filter((chart) => chart.solid && within(chart.rect));
+      const one = pieces.length ? tint(pieces[0].rect) : null;
+      for (const chart of this.charts) if (within(chart.rect)) this.paintTemplate(chart, chart.solid ? one : null);
     }
     if (painted) this.touch();
     // Where the faces are has changed, painted or not: the guide is another picture now.
@@ -367,12 +371,13 @@ export class Atlas extends EventTarget {
     this.touch();
   }
 
-  // Fills a chart's room with its colour and outlines its faces - only where
-  // nothing is painted yet.
-  paintTemplate(chart) {
+  // Fills a chart's room with its colour (or `color`) and outlines its faces
+  // - a piece of an unfold (`solid`) only filled - only where nothing is
+  // painted yet.
+  paintTemplate(chart, color = null) {
     const { rect, polygons } = chart;
     const image = this.context.getImageData(rect.x, rect.y, rect.w, rect.h);
-    const fill = tint(rect);
+    const fill = color ?? tint(rect);
     const put = (x, y, color) => {
       const px = x - rect.x;
       const py = y - rect.y;
@@ -404,8 +409,11 @@ export class Atlas extends EventTarget {
       const [x, y] = key.split(',').map(Number);
       put(x, y, body);
     }
-    for (const pixels of faces) {
-      for (const [x, y] of outlineOf(pixels)) if (blank.has(`${x},${y}`)) put(x, y, edge);
+    // (A piece of an unfold is one colour, all of it: no faces drawn on it.)
+    if (!chart.solid) {
+      for (const pixels of faces) {
+        for (const [x, y] of outlineOf(pixels)) if (blank.has(`${x},${y}`)) put(x, y, edge);
+      }
     }
     this.context.putImageData(image, rect.x, rect.y);
   }

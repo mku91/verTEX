@@ -49,6 +49,7 @@ const PIVOT_INNER_SIZE = 13; // px; the pivot points of what a selected node hol
 const PIVOT_LINK_DASH = 4; // px; a dash of the line to a pivot point away from its object, and the gap
 const PIVOT_LINK_MARGIN = 1e-4; // world units; a point on the bounds is not away from them
 const PIVOT_LINK_COLOR = 0x9a9a9a; // a plain grey, in every theme
+const MIRROR_REACH = 3; // pixels of an object's atlas: how far off its surface a point's mirror image may be and still be painted, see mirroredPixels()
 const SAME_SPOT = 3; // px: vertices this near one another on the screen are one spot, the nearest to the viewer taken (see pencilSnap())
 const REFERENCE_SNAP = 12; // px: how near the pointer the pencil's new vertex is drawn to a vertex (see pencilSnap())
 const NODE_COLOR = 0xffb86c; // a picked node's bounds (see updateNodeBounds())
@@ -2835,13 +2836,19 @@ export class Editor extends EventTarget {
     const place = at?.point ? { point: at.point, face: this.view.triangleFaces[at.triangle] } : this.placeOfPixel(x, y);
     if (!place) return [];
     const owner = this.mesh.vertexObject[this.mesh.faces[place.face]?.[0]];
-    const planes = this.mirror.planesFor(this.mesh.objects.findIndex((object) => object.id === owner));
+    const index = this.mesh.objects.findIndex((object) => object.id === owner);
+    const planes = this.mirror.planesFor(index);
+    // A model is seldom its own mirror image to a hair (one built by hand
+    // over a reference, one imported): the image of a point may be a little
+    // off its surface. Taken there - the nearest point of the surface - if
+    // that is within MIRROR_REACH pixels of the object's atlas.
+    const reach = MIRROR_REACH / (this.atlasById(this.mesh.objects[index]?.atlas)?.ppu ?? this.atlas.ppu ?? 16);
     const pixels = [];
     for (let mask = 1; mask < 1 << planes.length; mask++) {
       const image = mirrorPoint(place.point, planes.filter((_, i) => mask & (1 << i)));
-      const found = this.surfacePlace(image);
+      const found = this.surfacePlace(image, reach);
       if (!found) continue;
-      const spot = this.atlasPlaceAt(found.triangle, image);
+      const spot = this.atlasPlaceAt(found.triangle, found.point);
       const face = this.view.triangleFaces[found.triangle];
       const pixel = spot && this.facePixelAt(face, spot.x, spot.y);
       const atlas = this.view.atlasOfFace(this.mesh.faces[face]);
@@ -2871,21 +2878,22 @@ export class Editor extends EventTarget {
     return null;
   }
 
-  // The triangle of the view (that is drawn) a point of the world lies on,
-  // nearest to it within a hair: { triangle }; null if it is on none.
-  surfacePlace(point) {
+  // The triangle of the view (that is drawn) nearest to a point of the world,
+  // within `reach` of it (a hair, unless told): { triangle, point - the
+  // nearest point of it }; null if there is none so near.
+  surfacePlace(point, reach = 1e-3) {
     const { vertices } = this.mesh;
     const { triangleIndices } = this.view;
     const triangle = new THREE.Triangle();
     const nearest = new THREE.Vector3();
     let best = null;
-    let least = 1e-3;
+    let least = reach;
     for (let t = 0; t < triangleIndices.length / 3; t++) {
       triangle.set(vertices[triangleIndices[t * 3]], vertices[triangleIndices[t * 3 + 1]], vertices[triangleIndices[t * 3 + 2]]);
       const gap = triangle.closestPointToPoint(point, nearest).distanceTo(point);
       if (gap < least) {
         least = gap;
-        best = { triangle: t };
+        best = { triangle: t, point: nearest.clone() };
       }
     }
     return best;

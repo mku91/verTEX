@@ -60,20 +60,61 @@ function crosses(ax, ay, bx, by, x, y) {
 
 // The pixels a face covers, however little of them: every pixel it shows any
 // part of must be painted, or its edge shows a hole. As a Set of "x,y".
+// A pixel is the face's when its middle is inside (see inside()) or a side
+// of the face crosses it (see crosses()). Worked out row by row: the middles
+// inside are the runs between the outline's crossings of the row's middle
+// line - the very sums inside() does - and only the pixels along a side are
+// tried for crossing; not every pixel of the face's box against every side,
+// which on a large face is millions of tries.
 export function facePixels(polygon) {
-  const xs = polygon.map(([x]) => x);
-  const ys = polygon.map(([, y]) => y);
   const pixels = new Set();
-  for (let y = Math.floor(Math.min(...ys)); y < Math.ceil(Math.max(...ys)); y++) {
-    for (let x = Math.floor(Math.min(...xs)); x < Math.ceil(Math.max(...xs)); x++) {
-      const covered = inside(polygon, x + 0.5, y + 0.5) ||
-        polygon.some(([ax, ay], k) => {
-          const [bx, by] = polygon[(k + 1) % polygon.length];
-          return crosses(ax, ay, bx, by, x, y);
-        });
-      if (covered) pixels.add(`${x},${y}`);
+  const count = polygon.length;
+  const ys = polygon.map(([, y]) => y);
+  const top = Math.floor(Math.min(...ys));
+  const bottom = Math.ceil(Math.max(...ys));
+  const xs = polygon.map(([x]) => x);
+  const left = Math.floor(Math.min(...xs));
+  const right = Math.ceil(Math.max(...xs)); // (the box inside() was tried in: nothing outside it is the face's)
+  // The middles inside: a middle (x + 0.5) is inside when an odd number of
+  // crossings lie beyond it (c > x + 0.5): from one crossing to the next, every other run.
+  for (let y = top; y < bottom; y++) {
+    const middle = y + 0.5;
+    const cuts = [];
+    for (let i = 0, j = count - 1; i < count; j = i++) {
+      const [ax, ay] = polygon[i];
+      const [bx, by] = polygon[j];
+      if ((ay > middle) !== (by > middle)) cuts.push(((bx - ax) * (middle - ay)) / (by - ay) + ax);
+    }
+    cuts.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < cuts.length; k += 2) {
+      const from = Math.max(left, Math.ceil(cuts[k] - 0.5));
+      const to = Math.min(right - 1, Math.ceil(cuts[k + 1] - 0.5) - 1);
+      for (let x = from; x <= to; x++) pixels.add(`${x},${y}`);
     }
   }
+  // The pixels a side crosses: of each row it passes through, those under its part there.
+  polygon.forEach(([ax, ay], k) => {
+    const [bx, by] = polygon[(k + 1) % count];
+    const low = Math.max(top, Math.floor(Math.min(ay, by)) - 1);
+    const high = Math.min(bottom - 1, Math.ceil(Math.max(ay, by)));
+    for (let y = low; y <= high; y++) {
+      // Where along the side it is in this row (all of it, if it runs along it).
+      let x0 = Math.min(ax, bx);
+      let x1 = Math.max(ax, bx);
+      if (ay !== by) {
+        const t0 = Math.min(1, Math.max(0, (y - ay) / (by - ay)));
+        const t1 = Math.min(1, Math.max(0, (y + 1 - ay) / (by - ay)));
+        x0 = Math.min(ax + (bx - ax) * t0, ax + (bx - ax) * t1);
+        x1 = Math.max(ax + (bx - ax) * t0, ax + (bx - ax) * t1);
+      }
+      const from = Math.max(left, Math.floor(x0) - 1);
+      const to = Math.min(right - 1, Math.ceil(x1));
+      for (let x = from; x <= to; x++) {
+        const key = `${x},${y}`;
+        if (!pixels.has(key) && crosses(ax, ay, bx, by, x, y)) pixels.add(key);
+      }
+    }
+  });
   return pixels;
 }
 
@@ -254,12 +295,19 @@ export class Atlas extends EventTarget {
       context.putImageData(lifted[k], to.x, to.y);
     });
     painted ||= result.moved.length > 0 || result.fresh.length > 0;
+    // The pixels a chart's faces show, by where they are: a chart whose faces
+    // have not moved on the atlas (most of them, after an edit) has them already.
+    const placeOf = (polygons) => polygons.map((polygon) => polygon.map((point) => point.join(',')).join(' ')).join('|');
+    const known = new Map(this.charts.map((chart) => [placeOf(chart.polygons), chart.pixels]));
     this.charts = result.charts.map((chart) => {
       const polygons = chart.faces.map((i) => mesh.faces[i].uv);
       // The pixels the chart's faces show: what is the painter's in its room.
-      const pixels = new Set();
-      for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
-      return { rect: chart.rect, polygons, pixels, faces: chart.faces, pinned: chart.pinned, shaped: Boolean(chart.shaped) };
+      let pixels = known.get(placeOf(polygons));
+      if (!pixels) {
+        pixels = new Set();
+        for (const polygon of polygons) for (const key of facePixels(polygon)) pixels.add(key);
+      }
+      return { rect: chart.rect, polygons: polygons.map((polygon) => polygon.map((point) => [...point])), pixels, faces: chart.faces, pinned: chart.pinned, shaped: Boolean(chart.shaped) };
     });
     if (this.template) {
       // New rooms, and those a chart has moved to: it moved because it grew,

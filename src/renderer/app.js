@@ -1252,6 +1252,114 @@ function askExport(title) {
   });
 }
 
+// How big an imported model's pictures are to be: as they are, or 2, 4, 8
+// times smaller each way - or none, the objects on no atlas. `pictures`: the
+// ImageData of each (null where one could not be read). { divide (1, 2, 4, 8;
+// 0: none), nearest }, or null if the user thinks better of the import.
+// Smaller by averaging each block of pixels (a big picture's detail is not
+// torn up); with `nearest`, by taking one pixel of each block - its colours
+// kept as they are, as pixel art wants.
+const IMPORT_DIVIDE = [1, 2, 4, 8];
+const IMPORT_NEAREST_KEY = 'vertex.importNearest';
+function askImport(pictures) {
+  const dialog = $('import-dialog');
+  const form = dialog.querySelector('form');
+  const shown = pictures.filter(Boolean);
+  const largest = shown.reduce((best, image) => (image.width * image.height > best.width * best.height ? image : best));
+  const sizes = form.querySelector('.import-sizes');
+  const option = (value, label, detail, checked) => {
+    const row = document.createElement('label');
+    row.className = 'choice';
+    row.innerHTML = '<input type="radio" name="divide"><span><i18n-text></i18n-text><small></small></span>';
+    row.querySelector('input').value = String(value);
+    row.querySelector('input').checked = checked;
+    row.querySelector('i18n-text').textContent = label;
+    row.querySelector('small').textContent = detail;
+    return row;
+  };
+  const size = (divide) => `${Math.max(1, Math.floor(largest.width / divide))} × ${Math.max(1, Math.floor(largest.height / divide))}`;
+  sizes.replaceChildren(
+    ...IMPORT_DIVIDE.map((divide) => option(divide, divide === 1 ? t('app.import.size.as-is') : t('app.import.size.smaller', { count: divide }), size(divide), divide === 1)),
+    option(0, t('app.import.size.none'), t('app.import.size.none.small'), false),
+  );
+  dialog.querySelector('h3').textContent = shown.length > 1
+    ? t('app.import.pictures', { count: shown.length, size: size(1) })
+    : t('app.import.picture', { size: size(1) });
+  form.elements.nearest.checked = localStorage.getItem(IMPORT_NEAREST_KEY) === '1';
+  dialog.hidden = false;
+  form.querySelector('[type=submit]').focus();
+  return new Promise((resolve) => {
+    const done = (options) => {
+      dialog.hidden = true;
+      form.removeEventListener('submit', submit);
+      form.querySelector('[data-cancel]').removeEventListener('click', cancel);
+      window.removeEventListener('keydown', escape, true);
+      resolve(options);
+    };
+    const submit = (event) => {
+      event.preventDefault();
+      const nearest = form.elements.nearest.checked;
+      localStorage.setItem(IMPORT_NEAREST_KEY, nearest ? '1' : '0');
+      done({ divide: Number(form.elements.divide.value), nearest });
+    };
+    const cancel = () => done(null);
+    const escape = (event) => {
+      // As in askExport(): the dialog owns the keyboard while it is open.
+      event.stopImmediatePropagation();
+      if (event.code !== 'Escape') return;
+      event.preventDefault();
+      cancel();
+    };
+    form.addEventListener('submit', submit);
+    form.querySelector('[data-cancel]').addEventListener('click', cancel);
+    window.addEventListener('keydown', escape, true);
+  });
+}
+
+// A picture (ImageData) `divide` times smaller each way: each new pixel the
+// mean of its block - weighted by how opaque each pixel is, so that clear
+// ones lend no colour - or, `nearest`, the block's middle pixel.
+function smallerPicture(image, divide, nearest) {
+  const width = Math.max(1, Math.floor(image.width / divide));
+  const height = Math.max(1, Math.floor(image.height / divide));
+  const out = new ImageData(width, height);
+  const from = image.data;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = (y * width + x) * 4;
+      if (nearest) {
+        const sx = Math.min(image.width - 1, x * divide + (divide >> 1));
+        const sy = Math.min(image.height - 1, y * divide + (divide >> 1));
+        out.data.set(from.subarray((sy * image.width + sx) * 4, (sy * image.width + sx) * 4 + 4), at);
+        continue;
+      }
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (let sy = y * divide; sy < Math.min(image.height, (y + 1) * divide); sy++) {
+        for (let sx = x * divide; sx < Math.min(image.width, (x + 1) * divide); sx++) {
+          const k = (sy * image.width + sx) * 4;
+          const alpha = from[k + 3];
+          r += from[k] * alpha;
+          g += from[k + 1] * alpha;
+          b += from[k + 2] * alpha;
+          a += alpha;
+          n++;
+        }
+      }
+      if (a > 0) {
+        out.data[at] = Math.round(r / a);
+        out.data[at + 1] = Math.round(g / a);
+        out.data[at + 2] = Math.round(b / a);
+      }
+      out.data[at + 3] = Math.round(a / n);
+    }
+  }
+  return out;
+}
+
 // File -> Import glTF (.glb): its objects and nodes added to the project,
 // their pictures new atlases (see gltf-import.js, Editor.importModel()).
 let importing = false;
@@ -1298,7 +1406,17 @@ async function importModel() {
         return null;
       }
     }));
-    const made = editor.importModel(scene, pictures);
+    // How big the pictures are to be, if there are any (see askImport()).
+    let sized = pictures;
+    if (pictures.some(Boolean)) {
+      const choice = await askImport(pictures);
+      if (!choice) return;
+      sized = pictures.map((image) => {
+        if (!image || choice.divide === 0) return null;
+        return choice.divide === 1 ? image : smallerPicture(image, choice.divide, choice.nearest);
+      });
+    }
+    const made = editor.importModel(scene, sized);
     if (!made) return;
     const notes = [];
     if (scene.skipped.length) notes.push(t('app.import.skipped', { list: scene.skipped.map((name) => t(`app.import.skipped.${name.replace(' ', '-')}`)).join(', ') }));

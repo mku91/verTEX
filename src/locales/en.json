@@ -611,6 +611,24 @@
  "app.import.error.extensions": "It needs what is not read here: {detail}. Export it again without compression.",
  "app.import.error.external": "Its data is in another file ({detail}): export it as one .glb.",
  "app.import.error.broken": "The file is damaged ({detail}).",
+ "html.import-dialog.title": "Import glTF",
+ "html.import-dialog.nearest": "Pixels as they are",
+ "html.import-dialog.nearest.small": "One pixel of each block is kept, its colour exact; otherwise the block is averaged",
+ "html.import-dialog.nearest.title": "How a picture is made smaller: by taking one pixel of each block (sharp, the colours of the picture) or by averaging the block (smooth, no detail torn up)",
+ "html.import-dialog.cancel": "Cancel",
+ "html.import-dialog.import": "Import",
+ "app.import.picture": "Picture, {size}",
+ "app.import.pictures": {
+  "one": "{count} picture, the largest {size}",
+  "other": "{count} pictures, the largest {size}"
+ },
+ "app.import.size.as-is": "As it is",
+ "app.import.size.smaller": {
+  "one": "{count} times smaller",
+  "other": "{count} times smaller"
+ },
+ "app.import.size.none": "No picture",
+ "app.import.size.none.small": "The objects come on no atlas; their faces get places when they are put on one",
  "app.import.done": {
   "one": "{count} object imported.",
   "other": "{count} objects imported."

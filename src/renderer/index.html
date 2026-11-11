@@ -810,6 +810,23 @@
     </form>
   </div>
 
+  <!-- File -> Import glTF: how big its pictures are to be (see askImport() in app.js). -->
+  <div id="import-dialog" class="modal" hidden>
+    <form class="dialog">
+      <h2 data-i18n="html.import-dialog.title"></h2>
+      <h3></h3>
+      <div class="import-sizes"></div>
+      <label class="choice" data-i18n-title="html.import-dialog.nearest.title">
+        <input type="checkbox" name="nearest">
+        <span><i18n-text data-i18n="html.import-dialog.nearest"></i18n-text><small data-i18n="html.import-dialog.nearest.small"></small></span>
+      </label>
+      <div class="form-buttons">
+        <button type="button" data-cancel data-i18n="html.import-dialog.cancel"></button>
+        <button type="submit" data-i18n="html.import-dialog.import"></button>
+      </div>
+    </form>
+  </div>
+
   <div id="guide-dialog" hidden>
     <div class="dialog settings guide">
       <div class="settings-head">

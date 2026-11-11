@@ -621,6 +621,28 @@
  "app.import.error.extensions": "Ему нужно то, что здесь не читается: {detail}. Экспортируйте его снова без сжатия.",
  "app.import.error.external": "Его данные лежат в другом файле ({detail}): экспортируйте его одним .glb.",
  "app.import.error.broken": "Файл повреждён ({detail}).",
+ "html.import-dialog.title": "Импорт glTF",
+ "html.import-dialog.nearest": "Пиксели как есть",
+ "html.import-dialog.nearest.small": "Из каждого блока берётся один пиксель, его цвет точный; иначе блок усредняется",
+ "html.import-dialog.nearest.title": "Как уменьшается картинка: одним пикселем из каждого блока (резко, цвета самой картинки) или средним блока (мягко, детали не рвутся)",
+ "html.import-dialog.cancel": "Отмена",
+ "html.import-dialog.import": "Импортировать",
+ "app.import.picture": "Картинка {size}",
+ "app.import.pictures": {
+  "one": "{count} картинка, самая большая {size}",
+  "few": "{count} картинки, самая большая {size}",
+  "many": "{count} картинок, самая большая {size}",
+  "other": "{count} картинки, самая большая {size}"
+ },
+ "app.import.size.as-is": "Как есть",
+ "app.import.size.smaller": {
+  "one": "В {count} раз меньше",
+  "few": "В {count} раза меньше",
+  "many": "В {count} раз меньше",
+  "other": "В {count} раза меньше"
+ },
+ "app.import.size.none": "Без картинки",
+ "app.import.size.none.small": "Объекты не на атласе; их грани получат места, когда их поставят на атлас",
  "app.import.done": {
   "one": "Импортирован {count} объект.",
   "few": "Импортировано {count} объекта.",

@@ -2738,6 +2738,14 @@ input.refused {
   color: #fff;
 }
 
+/* The import's sizes of its pictures, one under another (see askImport()). */
+#import-dialog .import-sizes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 /* The reference switch (see Editor.setReference()): on the row under the
    pointer, or always while it is on; the switches after it beside it. */
 .outliner-reference + .outliner-isolate,

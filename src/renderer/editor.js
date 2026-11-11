@@ -2729,16 +2729,10 @@ export class Editor extends EventTarget {
     }
     this.stroke = { before: this.snapshot(), changed: false, tool: this.tool, mask, from: { ...pixel }, base: null };
     if (this.tool === 'fill') {
-      this.stroke.changed = this.atlas.paintPixels(this.atlas.floodPixels(pixel.x, pixel.y, mask), this.paintColor);
-      // With the mirror on, the same from the mirror images of where it was begun - on
-      // the model within their charts, as the fill keeps to, in the UV editor anywhere.
-      for (const image of this.mirroredPixels(pixel.x, pixel.y, at)) {
-        const kept = mask ? this.paintMask(image.face) : null;
-        const atlas = this.atlasById(image.atlas); // (the image may be on another atlas)
-        if (atlas.paintPixels(atlas.floodPixels(image.x, image.y, kept), this.paintColor)) this.stroke.changed = true;
-      }
-      this.endPaint();
-      return false;
+      // Held down and taken on, it fills what the pointer comes to as well
+      // (see strokePixel()): one undo step for all of it.
+      this.fillAt(pixel.x, pixel.y, at, mask);
+      return true;
     }
     if (this.tool === 'fillObject') {
       // The object under the press (in the UV editor, the one whose face holds
@@ -2782,6 +2776,17 @@ export class Editor extends EventTarget {
   strokePixel(x, y, at = null) {
     const { stroke } = this;
     if (!stroke || stroke.base || stroke.pick) return;
+    // The fill, held down: what the pointer comes to is filled as well - on
+    // the model within the chart there (as a press there would be), in the
+    // UV editor anywhere.
+    if (stroke.tool === 'fill') {
+      // (In the UV editor not what the pointer passes over between the charts:
+      // the atlas' bare ground would be filled whole. Pressed there, it is.)
+      const key = `${x},${y}`;
+      if (!at && !this.atlas.charts.some((chart) => chart.pixels.has(key))) return;
+      this.fillAt(x, y, at, stroke.mask && at ? this.paintMask(at.face) : null);
+      return;
+    }
     if (this.atlas.paintPixel(x, y, this.paintColor)) stroke.changed = true;
     // With the mirror on, its images as well (see mirroredPixels()).
     for (const image of this.mirroredPixels(x, y, at)) {
@@ -2795,6 +2800,25 @@ export class Editor extends EventTarget {
       width: this.atlas.width,
       height: this.atlas.height,
     };
+  }
+
+  // The fill from pixel (x, y) of the atlas worked on, kept to `mask` (a Set
+  // of "x,y", or null: anywhere), and with the mirror on, the same from the
+  // mirror images of it - on the model within their charts, as the fill keeps
+  // to, in the UV editor anywhere. A pixel that has the colour already is
+  // passed over, the fill not even tried: a drag goes over many such, and a
+  // fill reads the whole picture.
+  fillAt(x, y, at, mask) {
+    const { stroke } = this;
+    const color = this.paintColor;
+    const has = (atlas, px, py) => atlas.colorAt(px, py).every((value, channel) => value === color[channel]);
+    if (!has(this.atlas, x, y) && this.atlas.paintPixels(this.atlas.floodPixels(x, y, mask), color)) stroke.changed = true;
+    for (const image of this.mirroredPixels(x, y, at)) {
+      const atlas = this.atlasById(image.atlas); // (the image may be on another atlas)
+      if (has(atlas, image.x, image.y)) continue;
+      const kept = mask ? this.paintMask(image.face) : null;
+      if (atlas.paintPixels(atlas.floodPixels(image.x, image.y, kept), color)) stroke.changed = true;
+    }
   }
 
   // Painting with the mirror on (see mirror.js): the pixels of the atlas that

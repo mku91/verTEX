@@ -197,6 +197,7 @@ fn main() {
             project_state,
             window_close,
             locale::locale_set,
+            menu::menu_check,
             files::file_read,
             files::file_write,
             files::ask_save,

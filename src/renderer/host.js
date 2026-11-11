@@ -182,6 +182,8 @@ if (tauri) {
     },
     export: { pick: pickExport, write: writeExport },
     import: { pick: pickImport },
+    // A switch of the window's menu ticked or not (see src-tauri/src/menu.rs).
+    menu: { check: (id, on) => invoke('menu_check', { id, on }).catch(() => {}) },
     recent: {
       // [{ path, name, opened, missing, preview }], the latest first;
       // `preview` is the picture inside the project file (PNG bytes), or null.

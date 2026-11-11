@@ -97,6 +97,7 @@ const ACTIONS = {
   },
   // (In the animation mode the timeline is what is there when they are closed.)
   'toggle-views': () => setBottomPanel(orthoViews.open ? restingPanel() : 'views'),
+  'toggle-pixel-grid': () => setPixelGrid(!editor.pixelGrid),
   'views-window': () => viewsWindow.toggle(),
   // (The UV editor is not the animation mode's: the model is not edited there.)
   'toggle-uv': () => editor.workspace !== 'animation' && setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
@@ -193,6 +194,7 @@ const hotkeys = new Hotkeys(
 
     { id: 'view.frame', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.frame'), keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.views'), keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.pixel-grid', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.pixel-grid'), keys: '', run: () => ACTIONS['toggle-pixel-grid']() },
     { id: 'view.uv', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.uv'), keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
     { id: 'view.local', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.local'), keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
     { id: 'view.preview', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.preview'), keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
@@ -1358,6 +1360,26 @@ function smallerPicture(image, divide, nearest) {
     }
   }
   return out;
+}
+
+// View -> Pixel grid: the lines between the atlas' pixels on the model while
+// painting, or none. Kept between launches; the menu's tick follows.
+const PIXEL_GRID_KEY = 'vertex.pixelGrid';
+function setPixelGrid(on) {
+  editor.pixelGrid = on;
+  try {
+    localStorage.setItem(PIXEL_GRID_KEY, on ? '1' : '0');
+  } catch {}
+  window.vertex?.menu?.check('toggle-pixel-grid', on);
+  editor.applyBare();
+  editor.viewport.requestRender();
+}
+{
+  let kept = null;
+  try {
+    kept = localStorage.getItem(PIXEL_GRID_KEY);
+  } catch {}
+  setPixelGrid(kept !== '0');
 }
 
 // File -> Import glTF (.glb): its objects and nodes added to the project,

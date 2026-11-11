@@ -5312,7 +5312,7 @@ export class Editor extends EventTarget {
   // the objects set aside still in sight, to paint with them in mind.
   applyBare() {
     this.view.setBare(this.preview || this.painting, !this.preview);
-    this.view.setTexelGrid(this.painting && !this.preview);
+    this.view.setTexelGrid(this.pixelGrid !== false && this.painting && !this.preview); // (see View -> Pixel grid in app.js)
     if (!this.painting || this.preview) this.setPaintHover(null);
   }
 

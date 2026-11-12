@@ -91,6 +91,7 @@ const ACTIONS = {
   delete: () => deleteSelection(),
   'make-face': () => editor.makeFace(),
   'flip-faces': () => editor.flipFaces(),
+  separate: () => editor.separateSelection(),
   frame: () => {
     editor.frame();
     orthoViews.frame();
@@ -147,6 +148,8 @@ const hotkeys = new Hotkeys(
 
     { id: 'tool.select', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.select'), keys: 'KeyQ', run: () => editor.setTool('select') },
     { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => editor.setTool('move') },
+    { id: 'tool.magic', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.magic'), keys: '', run: () => editor.setTool('magic') },
+    { id: 'edit.separate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.separate'), keys: '', run: () => ACTIONS.separate() },
     { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.pivot'), keys: 'KeyD', run: () => editor.setTool('pivot') },
@@ -173,6 +176,7 @@ const hotkeys = new Hotkeys(
     { id: 'edit.make-face', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.make-face'), keys: 'Ctrl+KeyD', run: () => editor.makeFace() },
     { id: 'edit.flip-faces', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.flip-faces'), keys: 'Ctrl+KeyI', run: () => editor.flipFaces() },
     { id: 'edit.delete', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.delete'), keys: 'Delete', run: () => pixelsInHand() ? editor.deletePixels() : deleteSelection() },
+    { id: 'edit.rename', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.rename'), keys: 'F2', run: () => outliner.renameActive() },
     // Copying and pasting leave the keys to the system where they have nothing to do.
     // (In the animation mode copying and pasting are the timeline's keys'.)
     { id: 'edit.copy', group: t('app.hotkeys.group.edit'), label: t('app.hotkeys.edit.copy'), keys: 'Ctrl+KeyC', run: () => editor.workspace === 'animation' ? timeline.copyKeys() : pixelsInHand() ? editor.copyPixels() : editor.copyObjects() },
@@ -739,7 +743,7 @@ const HOTKEY_TITLES = {
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
-  '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="delete"]': 'edit.delete',
+  '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="separate"]': 'edit.separate', '[data-tool="magic"]': 'tool.magic', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
 };
@@ -1360,6 +1364,43 @@ function smallerPicture(image, divide, nearest) {
     }
   }
   return out;
+}
+
+// The magic selection's angle (see Editor.magicFaces()): a field beside its
+// button while it is in hand, dragged or typed; kept between launches.
+const MAGIC_ANGLE_KEY = 'vertex.magicAngle';
+{
+  let kept = NaN;
+  try {
+    kept = Number(localStorage.getItem(MAGIC_ANGLE_KEY));
+  } catch {}
+  editor.magicAngle = kept > 0 && kept <= 180 ? kept : 180;
+  const input = $('magic-options').querySelector('input');
+  input.value = String(editor.magicAngle);
+  const set = (value) => {
+    const angle = Math.round(Math.min(180, Math.max(1, Number(String(value).replace(',', '.')))));
+    if (!Number.isFinite(angle)) return;
+    editor.magicAngle = angle;
+    input.value = String(angle);
+    try {
+      localStorage.setItem(MAGIC_ANGLE_KEY, String(angle));
+    } catch {}
+  };
+  scrubbable(input, { read: () => editor.magicAngle, write: set, whole: true, min: 1, max: 180 });
+  input.addEventListener('change', () => set(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') input.blur();
+    event.stopPropagation();
+  });
+}
+function showMagicOptions() {
+  const box = $('magic-options');
+  const shown = editor.tool === 'magic' && editor.workspace === 'model';
+  box.hidden = !shown;
+  if (!shown) return;
+  const button = document.querySelector('[data-tool="magic"]').getBoundingClientRect();
+  box.style.left = `${button.right + 6}px`;
+  box.style.top = `${button.top}px`;
 }
 
 // View -> Pixel grid: the lines between the atlas' pixels on the model while
@@ -2302,6 +2343,8 @@ function refresh() {
     ? t('app.snapping.on')
     : t('app.snapping.off');
   document.querySelector('[data-action="make-face"]').disabled = !editor.canMakeFace();
+  document.querySelector('[data-action="separate"]').disabled = !editor.canSeparate();
+  showMagicOptions();
   document.querySelector('[data-action="flip-faces"]').disabled = editor.facesToFlip().length === 0;
   // The banner keeps its last name while it slides away.
   if (editor.operation) $('operation-name').textContent = OPERATION_NAMES[editor.operation];

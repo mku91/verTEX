@@ -33,6 +33,7 @@ export const TOOLS = {
   rotate: 'rotate',
   scale: 'scale',
   pivot: 'translate', // moves the pivot point of the selected object, not the object
+  magic: null, // picks the faces of a piece of an object, as far as they hang together (see magicFaces())
   // The painting tools: they work on the atlas' picture, through the model (see pressPaint()).
   paint: null, // the brush: a pixel at a time
   pipette: null, // takes the colour of a pixel
@@ -2456,6 +2457,18 @@ export class Editor extends EventTarget {
         // The pivot tool works on the pivot point alone: nothing of the model
         // is grabbed, selected or deselected while it is in hand.
         if (this.tool === 'pivot') return;
+        // The magic selection: a press on a face picks its piece (with Shift,
+        // as well as what is picked); on nothing, it is the camera's.
+        if (this.tool === 'magic') {
+          const face = this.pickFace(event.clientX, event.clientY);
+          if (face === null) {
+            down = { x: event.clientX, y: event.clientY };
+            return;
+          }
+          event.stopImmediatePropagation();
+          this.selectMagic(face, event.shiftKey);
+          return;
+        }
         const key = this.pickElement(event.clientX, event.clientY);
         // A part of a locked node, in any mode: the node, picked whole.
         if (this.pressLocked(key, () => this.pickFace(event.clientX, event.clientY))) {
@@ -5549,6 +5562,12 @@ export class Editor extends EventTarget {
       if (this.mode !== 'object') return;
       if (owners.size === 1) this.select([...owners][0], false);
     }
+    // The magic selection picks faces: it works in face mode.
+    if (tool === 'magic' && this.mode !== 'face') {
+      if (this.busy()) return;
+      this.setMode('face');
+      if (this.mode !== 'face') return;
+    }
     // A painting tool picks nothing up, and no operation goes on beside it.
     if (PAINT_TOOLS.includes(tool)) {
       if (this.busy()) return;
@@ -6334,6 +6353,142 @@ export class Editor extends EventTarget {
     this.viewport.frame(mesh.vertices.slice(base), true);
     const placed = [...atlasOf.values()];
     return { objects: made.filter((object) => object.kind !== 'node').length, atlases: placed.filter((on) => on.made).length, intoAtlas: placed.filter((on) => !on.made).length, tooBig };
+  }
+
+  // --- the magic selection, and a part of an object made one of its own ------
+
+  // The faces of the piece of an object a face is in (Blender's Select
+  // Linked): from it, on to every face of the same object that shares an
+  // edge with one taken - but not across an edge where the two faces meet at
+  // more than `angle` degrees (180: never stopped, the whole connected piece).
+  // What is hidden, or a reference, is not taken. As a list of face indices.
+  magicFaces(start, angle = this.magicAngle) {
+    const { faces, vertexObject } = this.mesh;
+    const { hiddenVertices } = this.topology;
+    const owner = vertexObject[faces[start][0]];
+    const byEdge = new Map(); // edge key -> the object's faces along it
+    faces.forEach((face, i) => {
+      if (vertexObject[face[0]] !== owner || hiddenVertices.has(face[0])) return;
+      face.forEach((a, k) => {
+        const key = edgeKey(a, face[(k + 1) % face.length]);
+        if (!byEdge.has(key)) byEdge.set(key, []);
+        byEdge.get(key).push(i);
+      });
+    });
+    const limit = Math.cos(THREE.MathUtils.degToRad(Math.min(180, Math.max(0, angle)))) - 1e-9;
+    const normals = new Map();
+    const normal = (i) => {
+      if (!normals.has(i)) normals.set(i, this.mesh.faceNormal(i));
+      return normals.get(i);
+    };
+    const taken = new Set([start]);
+    const open = [start];
+    while (open.length) {
+      const i = open.pop();
+      const face = faces[i];
+      face.forEach((a, k) => {
+        for (const j of byEdge.get(edgeKey(a, face[(k + 1) % face.length])) ?? []) {
+          if (taken.has(j) || normal(i).dot(normal(j)) < limit) continue;
+          taken.add(j);
+          open.push(j);
+        }
+      });
+    }
+    return [...taken];
+  }
+
+  // The magic selection's press on a face: its piece picked (see
+  // magicFaces()) - in place of what was, or (`additive`) beside it.
+  selectMagic(face, additive) {
+    if (this.mode !== 'face') this.setMode('face');
+    if (this.mode !== 'face') return;
+    if (!additive) this.picked.clear();
+    for (const index of this.magicFaces(face)) this.picked.add(index);
+    this.syncSelection();
+    this.selectionChanged();
+  }
+
+  // The faces "Separate" would take: in face mode the picked ones; in vertex
+  // and edge mode those all of whose corners are selected. By the object they
+  // are of, and only of an object with faces left over: Map object id -> faces.
+  facesToSeparate() {
+    const { faces, vertexObject } = this.mesh;
+    let chosen = [];
+    if (this.mode === 'face') chosen = [...this.picked];
+    else if (this.mode === 'vertex' || this.mode === 'edge') chosen = faces.map((face, i) => (face.every((v) => this.selection.has(v)) ? i : -1)).filter((i) => i >= 0);
+    const byObject = new Map();
+    for (const i of chosen) {
+      const owner = vertexObject[faces[i][0]];
+      if (!byObject.has(owner)) byObject.set(owner, []);
+      byObject.get(owner).push(i);
+    }
+    for (const [owner, list] of byObject) {
+      const all = faces.reduce((count, face) => count + (vertexObject[face[0]] === owner ? 1 : 0), 0);
+      if (list.length >= all) byObject.delete(owner); // the whole object: nothing to part from it
+    }
+    return byObject;
+  }
+
+  canSeparate() {
+    return !this.operation && this.workspace === 'model' && this.facesToSeparate().size > 0;
+  }
+
+  // Separate (Blender's P -> Selection): the faces of facesToSeparate() go,
+  // from each object, to an object of their own - beside it, in the same
+  // node, on the same atlas with the same places there, smooth and turned as
+  // it is. A vertex they share with the faces that stay is doubled: each
+  // keeps one. The new objects are picked, in object mode. One undo step.
+  // (Not put through the mirror: what is parted is no edit of the shape.)
+  // Returns how many objects were made.
+  separateSelection() {
+    if (!this.canSeparate() || this.busy()) return 0;
+    const { mesh } = this;
+    const groups = this.facesToSeparate();
+    this.history.push(this.snapshot());
+    const made = [];
+    for (const [owner, list] of groups) {
+      const source = mesh.objects.find((object) => object.id === owner);
+      const id = mesh.addObject(source.name, 'mesh');
+      const object = mesh.objects[mesh.objects.length - 1];
+      object.parent = source.parent ?? null;
+      if (source.atlas) object.atlas = source.atlas;
+      else delete object.atlas;
+      for (const field of ['smooth', 'oneSided', 'color']) if (source[field]) object[field] = source[field];
+      if (source.rotation) object.rotation = [...source.rotation];
+      if (source.mirror?.length) object.mirror = [...source.mirror];
+      const parting = new Set(list);
+      // The vertices of the faces that stay: those of the parted ones among them are doubled.
+      const staying = new Set();
+      mesh.faces.forEach((face, i) => {
+        if (mesh.vertexObject[face[0]] === owner && !parting.has(i)) for (const v of face) staying.add(v);
+      });
+      const moved = new Map(); // old vertex -> the parted faces' one
+      for (const i of list) {
+        const face = mesh.faces[i];
+        face.forEach((v, k) => {
+          if (!moved.has(v)) {
+            if (staying.has(v)) {
+              const copy = mesh.addVertex(mesh.vertices[v].x, mesh.vertices[v].y, mesh.vertices[v].z, id);
+              const weights = mesh.weights.get(v);
+              if (weights) mesh.setWeights(copy, weights.map(([node, weight]) => [node, weight]));
+              moved.set(v, copy);
+            } else {
+              mesh.vertexObject[v] = id;
+              moved.set(v, v);
+            }
+          }
+          face[k] = moved.get(v); // (in place: the face keeps its places on the atlas)
+        });
+      }
+      made.push(object);
+    }
+    this.rebuildView();
+    this.setMode('object');
+    this.picked = new Set(made.map((object) => mesh.objects.indexOf(object)));
+    this.activeObject = made[made.length - 1].id;
+    this.syncSelection();
+    this.selectionChanged();
+    return made.length;
   }
 
   // Copies of these entries (objects or nodes, indices in the objects list),

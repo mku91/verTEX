@@ -661,6 +661,25 @@ export class Outliner {
 
   // Replaces a row's name with a text field; Enter or a click away keeps the
   // new name, Esc drops it.
+  // F2: the name of the entry in hand made a field, as a double click on its
+  // row does - the one picked by hand last, or else the one being edited. Its
+  // row is brought into view. Returns whether there was one shown.
+  renameActive() {
+    const { editor } = this;
+    const { islands, islandOfVertex } = editor.topology;
+    let index = islands.findIndex((island) => island.id === editor.activeObject);
+    const picked = editor.mode === 'object' && editor.picked.has(index);
+    if (!picked) {
+      const seeds = [...(editor.selection.size ? editor.selection : editor.target)];
+      index = editor.mode === 'object' && editor.picked.size ? [...editor.picked][0] : seeds.length ? islandOfVertex[seeds[0]] : -1;
+    }
+    const row = index >= 0 ? this.list.querySelector(`.outliner-row[data-object="${index}"]`) : null;
+    if (!row || this.renaming) return false;
+    row.scrollIntoView({ block: 'nearest' });
+    this.rename(row);
+    return true;
+  }
+
   // A row's name made a field to type a new one in: an object's, a node's
   // or a collision shape's. Latin letters only (see names.js).
   rename(row) {

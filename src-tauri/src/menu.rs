@@ -7,7 +7,7 @@
 // instead, which the menu shows at the right as it would an accelerator's.
 
 use crate::locale::Language;
-use tauri::menu::{CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{CheckMenuItem, CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, MenuItemKind, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, Window, Wry};
 
 pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
@@ -55,14 +55,33 @@ pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
     MenuBuilder::new(app).items(&[&file, &edit, &view, &help]).build()
 }
 
-// A switch of the menu ticked or not, as the page has it: what it keeps
-// between launches, and what a hotkey changed.
-#[tauri::command]
-pub fn menu_check(window: tauri::WebviewWindow, id: String, on: bool) {
-    let Some(menu) = window.menu() else { return };
-    if let Some(item) = menu.get(id.as_str()).and_then(|kind| kind.as_check_menuitem().cloned()) {
-        let _ = item.set_checked(on);
+// A switch of the menu, by its id, wherever it is: in a submenu too (a menu's
+// own get() looks at its top items only).
+fn find_check(items: Vec<MenuItemKind<Wry>>, id: &str) -> Option<CheckMenuItem<Wry>> {
+    for item in items {
+        if item.id() == id {
+            if let Some(check) = item.as_check_menuitem() {
+                return Some(check.clone());
+            }
+        }
+        if let Some(submenu) = item.as_submenu() {
+            if let Some(found) = submenu.items().ok().and_then(|inner| find_check(inner, id)) {
+                return Some(found);
+            }
+        }
     }
+    None
+}
+
+// A switch of the menu ticked or not, as the page has it: what it keeps
+// between launches, and what a hotkey changed. Returns whether it is ticked
+// now - None if there is no such switch.
+#[tauri::command]
+pub fn menu_check(window: tauri::WebviewWindow, id: String, on: bool) -> Option<bool> {
+    let menu = window.menu()?;
+    let item = find_check(menu.items().ok()?, &id)?;
+    let _ = item.set_checked(on);
+    item.is_checked().ok()
 }
 
 // The window's own matters are done here; the rest goes to the page.

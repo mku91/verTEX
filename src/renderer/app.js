@@ -99,6 +99,7 @@ const ACTIONS = {
   // (In the animation mode the timeline is what is there when they are closed.)
   'toggle-views': () => setBottomPanel(orthoViews.open ? restingPanel() : 'views'),
   'toggle-pixel-grid': () => setPixelGrid(!editor.pixelGrid),
+  'toggle-edges': () => setEdgesShown(!edgesShown),
   'views-window': () => viewsWindow.toggle(),
   // (The UV editor is not the animation mode's: the model is not edited there.)
   'toggle-uv': () => editor.workspace !== 'animation' && setBottomPanel(uvEditor.open ? restingPanel() : 'uv'),
@@ -198,6 +199,7 @@ const hotkeys = new Hotkeys(
 
     { id: 'view.frame', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.frame'), keys: 'KeyF', run: () => ACTIONS.frame() },
     { id: 'view.views', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.views'), keys: 'KeyB', run: () => ACTIONS['toggle-views']() },
+    { id: 'view.edges', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.edges'), keys: '', run: () => ACTIONS['toggle-edges']() },
     { id: 'view.pixel-grid', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.pixel-grid'), keys: '', run: () => ACTIONS['toggle-pixel-grid']() },
     { id: 'view.uv', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.uv'), keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
     { id: 'view.local', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.local'), keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
@@ -1421,6 +1423,28 @@ function setPixelGrid(on) {
     kept = localStorage.getItem(PIXEL_GRID_KEY);
   } catch {}
   setPixelGrid(kept !== '0');
+}
+
+// View -> Edges: the white lines of the faces' edges over the surface, or
+// none - the surface alone, painted, to look at. Kept between launches; the
+// menu's tick follows. (In the wireframe look they stay: they are all there is.)
+const EDGES_KEY = 'vertex.edgesShown';
+let edgesShown = true;
+function setEdgesShown(on) {
+  edgesShown = on;
+  try {
+    localStorage.setItem(EDGES_KEY, on ? '1' : '0');
+  } catch {}
+  window.vertex?.menu?.check('toggle-edges', on);
+  editor.view.setEdges(on);
+  editor.viewport.requestRender();
+}
+{
+  let kept = null;
+  try {
+    kept = localStorage.getItem(EDGES_KEY);
+  } catch {}
+  setEdgesShown(kept !== '0');
 }
 
 // File -> Import glTF (.glb): its objects and nodes added to the project,

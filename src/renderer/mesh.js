@@ -2396,6 +2396,12 @@ export class MeshView {
 
   // Focus look for modal operations, on top of any shading: a wireframe.
   // The caller refreshes the vertex colours.
+  // The edges drawn over the surface (View -> Edges), or not.
+  setEdges(on) {
+    this.edgesShown = on;
+    this.applyLook();
+  }
+
   setFocus(on) {
     this.focus = on;
     this.applyLook();
@@ -2447,7 +2453,9 @@ export class MeshView {
       material.needsUpdate = true;
     }
     this.plain.visible = this.plainFront.visible = !xray;
-    this.wire.visible = !this.bare;
+    // (View -> Edges off hides them over the surface; with no surface - the
+    // wireframe look, the focus - they are all there is, and stay.)
+    this.wire.visible = !this.bare && (this.edgesShown !== false || wireframe);
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
     const painted = Boolean(this.bare || this.shading === 'textured');
     const shown = `${painted}|${this.atlases.map((atlas) => `${atlas.id}:${atlas.texture.id}`).join(',')}`;

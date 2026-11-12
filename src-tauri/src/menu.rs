@@ -43,6 +43,7 @@ pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
         .item(&item("frame", "menu.view.frame", Some("F"))?)
         // A switch: ticked here when chosen, and set from the page (see menu_check()), which keeps it.
         .item(&CheckMenuItemBuilder::with_id("toggle-pixel-grid", language.t("menu.view.pixel-grid")).checked(true).build(app)?)
+        .item(&CheckMenuItemBuilder::with_id("toggle-edges", language.t("menu.view.edges")).checked(true).build(app)?)
         .separator()
         .item(&item("reload", "menu.view.reload", Some("Ctrl+R"))?)
         .item(&item("devtools", "menu.view.devtools", Some("Ctrl+Shift+I"))?)

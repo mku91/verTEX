@@ -2731,7 +2731,9 @@ export class Editor extends EventTarget {
     this.stroke = { before: this.snapshot(), changed: false, tool: this.tool, mask, from: { ...pixel }, base: null };
     if (this.tool === 'fill') {
       // Held down and taken on, it fills what the pointer comes to as well
-      // (see strokePixel()): one undo step for all of it.
+      // (see strokePixel()): one undo step for all of it. With Shift, whole
+      // charts, whatever is painted on them (see fillAt()).
+      this.stroke.whole = Boolean(line);
       this.fillAt(pixel.x, pixel.y, at, mask);
       return true;
     }
@@ -2812,6 +2814,10 @@ export class Editor extends EventTarget {
   fillAt(x, y, at, mask) {
     const { stroke } = this;
     const color = this.paintColor;
+    if (stroke.whole) {
+      this.fillChartAt(x, y, at);
+      return;
+    }
     const has = (atlas, px, py) => atlas.colorAt(px, py).every((value, channel) => value === color[channel]);
     if (!has(this.atlas, x, y) && this.atlas.paintPixels(this.atlas.floodPixels(x, y, mask), color)) stroke.changed = true;
     for (const image of this.mirroredPixels(x, y, at)) {
@@ -2820,6 +2826,26 @@ export class Editor extends EventTarget {
       const kept = mask ? this.paintMask(image.face) : null;
       if (atlas.paintPixels(atlas.floodPixels(image.x, image.y, kept), color)) stroke.changed = true;
     }
+  }
+
+  // The fill with Shift: the whole chart the pixel is of, whatever is painted
+  // on it - on the model the chart of the face under the pointer, in the UV
+  // editor the one the pixel is on (none: nothing) - and with the mirror on,
+  // those of the mirror images too. Each chart once a stroke.
+  fillChartAt(x, y, at) {
+    const { stroke } = this;
+    stroke.charts ??= new Set();
+    const paint = (atlas, pixels) => {
+      if (!pixels?.size) return;
+      const [first] = pixels;
+      const key = `${atlas.id}|${first}|${pixels.size}`;
+      if (stroke.charts.has(key)) return;
+      stroke.charts.add(key);
+      if (atlas.paintPixels([...pixels].map((pixel) => pixel.split(',').map(Number)), this.paintColor)) stroke.changed = true;
+    };
+    const here = at ? this.paintMask(at.face) : this.atlas.charts.find((chart) => chart.pixels.has(`${x},${y}`))?.pixels;
+    paint(this.atlas, here);
+    for (const image of this.mirroredPixels(x, y, at)) paint(this.atlasById(image.atlas), this.paintMask(image.face));
   }
 
   // Painting with the mirror on (see mirror.js): the pixels of the atlas that

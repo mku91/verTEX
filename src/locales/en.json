@@ -82,7 +82,7 @@
  "html.toolbar.tool-paint.title": "Brush: paint on the model or on the unwrap, pixel by pixel. Shift+click — a straight line from the last point (with Space — along the model's faces), Alt+click picks a colour (V)",
  "html.paint-color.title": "Colour and palette",
  "html.toolbar.tool-pipette.title": "Pipette: pick a colour from the model or the unwrap. With any painting tool Alt+click does the same (I)",
- "html.toolbar.tool-fill.title": "Fill: paint over an area of one colour; held down and moved, everything the pointer goes over too. On the model — within the face's chart, on the unwrap — over the whole picture (E)",
+ "html.toolbar.tool-fill.title": "Fill: paint over an area of one colour; held down and moved, everything the pointer goes over too. With Shift — the whole chart, whatever is painted on it. On the model — within the face's chart, on the unwrap — over the whole picture (E)",
  "html.toolbar.tool-fill-object.title": "Fill object: paint over all of the clicked object, whatever colours it has. Spots of the atlas it shares with other objects change there too (Shift+E)",
  "html.shape-tool.title": "Shapes: drawn out from press to release. A press opens the choice of shape",
  "html.shape-tools.tool-flyout.shape-rect.filled-0.title": "Rectangle (M)",

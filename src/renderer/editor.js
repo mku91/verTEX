@@ -1765,6 +1765,37 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // The picture of the charts the given faces are in turned over (`flip` 'h'
+  // or 'v') or a quarter turn (`turn` 1 clockwise, -1 back) within each
+  // chart's room, the faces' places staying as they are: they show it turned
+  // (the other half of mapCharts(), which turns the places and leaves the
+  // picture). A quarter turn only for a square room: another would reach out
+  // of it. What other charts have on those pixels is left. One undo step.
+  // Returns whether anything changed.
+  turnPictures(faces, { flip = null, turn = 0 } = {}) {
+    const charts = this.chartsOfFaces(faces).filter((chart) => !turn || chart.rect.w === chart.rect.h);
+    if (charts.length === 0 || (!flip && !turn) || this.busy()) return false;
+    const before = this.snapshot();
+    const moves = charts.map(({ rect, pixels }) => ({
+      pixels,
+      place: flip === 'h'
+        ? ([x, y]) => [rect.x + rect.w - (x - rect.x), y]
+        : flip === 'v'
+          ? ([x, y]) => [x, rect.y + rect.h - (y - rect.y)]
+          : turn > 0
+            ? ([x, y]) => [rect.x + rect.h - (y - rect.y), rect.y + (x - rect.x)]
+            : ([x, y]) => [rect.x + (y - rect.y), rect.y + rect.w - (x - rect.x)],
+    }));
+    const keep = new Set();
+    for (const chart of this.atlas.charts) if (!charts.includes(chart)) for (const key of chart.pixels) keep.add(key);
+    // (a chart's own pixels are its to fill, though another's room touch them)
+    for (const { pixels } of moves) for (const key of pixels) keep.delete(key);
+    this.atlas.carry(moves, keep);
+    this.history.push(before);
+    this.emitChange();
+    return true;
+  }
+
   // Turns the given faces' places on the atlas over (`flip` 'h' or 'v') or
   // a quarter turn (`turn` 1 clockwise, -1 back), within the rooms of the
   // charts they are in, the picture staying as it is: those faces show it

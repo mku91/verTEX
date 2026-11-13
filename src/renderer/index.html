@@ -367,86 +367,92 @@
       </div>
     </section>
     <section id="uv-editor" hidden>
-      <div class="uv-bar">
-        <b>UV</b>
-        <button id="uv-atlas-new" data-i18n-title="html.uv-atlas-new.title" hidden><i class="fa-solid fa-file-circle-plus"></i></button>
-        <select id="uv-atlas" data-i18n-title="html.uv-atlas.title" hidden></select>
-        <button data-uv="add" class="worded" data-i18n-title="html.uv-editor.uv-bar.uv-add.title">
-          <i class="fa-solid fa-plus"></i><span data-i18n="html.uv-editor.uv-bar.uv-add.span.text"></span>
-        </button>
-        <button data-uv="remove" data-i18n-title="html.uv-editor.uv-bar.uv-remove.title">
-          <i class="fa-solid fa-minus"></i>
-        </button>
-        <i class="uv-divider"></i>
-        <button data-uv="turn-left" data-i18n-title="html.uv-editor.uv-bar.uv-turn-left.title">
-          <i class="fa-solid fa-rotate-left"></i>
-        </button>
-        <button data-uv="turn-right" data-i18n-title="html.uv-editor.uv-bar.uv-turn-right.title">
-          <i class="fa-solid fa-rotate-right"></i>
-        </button>
-        <button data-uv="flip-h" data-i18n-title="html.uv-editor.uv-bar.uv-flip-h.title">
-          <i class="fa-solid fa-left-right"></i>
-        </button>
-        <button data-uv="flip-v" data-i18n-title="html.uv-editor.uv-bar.uv-flip-v.title">
-          <i class="fa-solid fa-up-down"></i>
-        </button>
-        <i class="uv-divider"></i>
-        <!-- The same, of the faces' places only: the picture stays, the faces show it mirrored or turned. -->
-        <button data-uv="map-turn-left" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-left.title">
-          <i class="fa-solid fa-rotate-left"></i>
-        </button>
-        <button data-uv="map-turn-right" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-right.title">
-          <i class="fa-solid fa-rotate-right"></i>
-        </button>
-        <button data-uv="map-flip-h" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-h.title">
-          <i class="fa-solid fa-left-right"></i>
-        </button>
-        <button data-uv="map-turn" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn.title">
-          <i class="fa-solid fa-compass-drafting"></i>
-        </button>
-        <button data-uv="map-flip-v" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-v.title">
-          <i class="fa-solid fa-up-down"></i>
-        </button>
-        <button data-uv="shape" data-i18n-title="html.uv-editor.uv-bar.uv-shape.title">
-          <i class="fa-solid fa-lock"></i>
-        </button>
-        <button data-uv="stack" data-i18n-title="html.uv-editor.uv-bar.uv-stack.title">
-          <i class="fa-solid fa-layer-group"></i>
-        </button>
-        <button data-uv="unfold" data-i18n-title="html.uv-editor.uv-bar.uv-unfold.title">
-          <i class="fa-solid fa-map"></i>
-        </button>
-        <button data-uv="regenerate" data-i18n-title="html.uv-editor.uv-bar.uv-regenerate.title">
-          <i class="fa-solid fa-arrows-rotate"></i>
-        </button>
-        <button data-uv="clean" data-i18n-title="html.uv-editor.uv-bar.uv-clean.title">
-          <!-- (a broom of its own: the icon font's looks like a brush) -->
-          <svg class="icon-broom" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M14.4 1.6 8.4 7.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-            <path d="M6.5 6.3 9.7 9.5 8.5 10.7 5.3 7.5Z" fill="currentColor"/>
-            <path d="M6.9 9.1 1.4 10.2M6.9 9.1 2.3 12.3M6.9 9.1 3.7 13.7M6.9 9.1 5.8 14.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button data-uv="pack" data-i18n-title="html.uv-editor.uv-bar.uv-pack.title">
-          <i class="fa-solid fa-boxes-packing"></i>
-        </button>
-        <button data-uv="fit" data-i18n-title="html.uv-editor.uv-bar.uv-fit.title">
-          <i class="fa-solid fa-expand"></i>
-        </button>
-        <i class="uv-divider"></i>
-        <button data-uv="load" data-i18n-title="uv.load.title">
-          <i class="fa-solid fa-folder-open"></i>
-        </button>
-        <button data-uv="paste" data-i18n-title="html.uv-editor.uv-bar.uv-paste.title">
-          <i class="fa-solid fa-paste"></i>
-        </button>
-        <i class="uv-divider"></i>
-        <button data-uv="retro" data-i18n-title="html.uv-editor.uv-bar.uv-retro.title">
-          <i class="fa-solid fa-wand-magic-sparkles"></i>
-        </button>
+      <div class="uv-stage">
+        <canvas data-i18n-title="html.uv-editor.canvas.title"></canvas>
+        <!-- What the editor has to say (what is picked, why nothing is there): over the atlas' bottom left corner. -->
         <span class="uv-status"></span>
+        <!-- All the UV editor's tools: a palette over the atlas, in its top left
+             corner (there is no bar above: what the editor says is in the bottom left corner). -->
+        <div class="uv-tools">
+          <!-- The atlas: which one (with several), a new one; the objects in hand put on it, or taken off. -->
+          <select id="uv-atlas" data-i18n-title="html.uv-atlas.title" hidden></select>
+          <button id="uv-atlas-new" data-i18n-title="html.uv-atlas-new.title" hidden><i class="fa-solid fa-file-circle-plus"></i></button>
+          <button data-uv="add" class="worded" data-i18n-title="html.uv-editor.uv-bar.uv-add.title">
+            <i class="fa-solid fa-plus"></i><span data-i18n="html.uv-editor.uv-bar.uv-add.span.text"></span>
+          </button>
+          <button data-uv="remove" data-i18n-title="html.uv-editor.uv-bar.uv-remove.title">
+            <i class="fa-solid fa-minus"></i>
+          </button>
+          <i class="uv-tools-divider"></i>
+          <!-- The picture in the charts turned, their places left (with the marquee: the pixels picked). -->
+          <button data-uv="turn-left" data-i18n-title="html.uv-editor.uv-bar.uv-turn-left.title">
+            <i class="fa-solid fa-rotate-left"></i>
+          </button>
+          <button data-uv="turn-right" data-i18n-title="html.uv-editor.uv-bar.uv-turn-right.title">
+            <i class="fa-solid fa-rotate-right"></i>
+          </button>
+          <button data-uv="flip-h" data-i18n-title="html.uv-editor.uv-bar.uv-flip-h.title">
+            <i class="fa-solid fa-left-right"></i>
+          </button>
+          <button data-uv="flip-v" data-i18n-title="html.uv-editor.uv-bar.uv-flip-v.title">
+            <i class="fa-solid fa-up-down"></i>
+          </button>
+          <i class="uv-tools-divider"></i>
+          <!-- The faces' places turned, the picture left as it is. -->
+          <button data-uv="map-turn-left" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-left.title">
+            <i class="fa-solid fa-rotate-left"></i>
+          </button>
+          <button data-uv="map-turn-right" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn-right.title">
+            <i class="fa-solid fa-rotate-right"></i>
+          </button>
+          <button data-uv="map-flip-h" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-h.title">
+            <i class="fa-solid fa-left-right"></i>
+          </button>
+          <button data-uv="map-flip-v" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-flip-v.title">
+            <i class="fa-solid fa-up-down"></i>
+          </button>
+          <i class="uv-tools-divider"></i>
+          <button data-uv="map-turn" class="uv-only" data-i18n-title="html.uv-editor.uv-bar.uv-map-turn.title">
+            <i class="fa-solid fa-compass-drafting"></i>
+          </button>
+          <button data-uv="shape" data-i18n-title="html.uv-editor.uv-bar.uv-shape.title">
+            <i class="fa-solid fa-lock"></i>
+          </button>
+          <button data-uv="stack" data-i18n-title="html.uv-editor.uv-bar.uv-stack.title">
+            <i class="fa-solid fa-layer-group"></i>
+          </button>
+          <button data-uv="unfold" data-i18n-title="html.uv-editor.uv-bar.uv-unfold.title">
+            <i class="fa-solid fa-map"></i>
+          </button>
+          <button data-uv="regenerate" data-i18n-title="html.uv-editor.uv-bar.uv-regenerate.title">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+          <button data-uv="clean" data-i18n-title="html.uv-editor.uv-bar.uv-clean.title">
+            <!-- (a broom of its own: the icon font's looks like a brush) -->
+            <svg class="icon-broom" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M14.4 1.6 8.4 7.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M6.5 6.3 9.7 9.5 8.5 10.7 5.3 7.5Z" fill="currentColor"/>
+              <path d="M6.9 9.1 1.4 10.2M6.9 9.1 2.3 12.3M6.9 9.1 3.7 13.7M6.9 9.1 5.8 14.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button data-uv="pack" data-i18n-title="html.uv-editor.uv-bar.uv-pack.title">
+            <i class="fa-solid fa-boxes-packing"></i>
+          </button>
+          <i class="uv-tools-divider"></i>
+          <button data-uv="fit" data-i18n-title="html.uv-editor.uv-bar.uv-fit.title">
+            <i class="fa-solid fa-expand"></i>
+          </button>
+          <button data-uv="load" data-i18n-title="uv.load.title">
+            <i class="fa-solid fa-folder-open"></i>
+          </button>
+          <button data-uv="paste" data-i18n-title="html.uv-editor.uv-bar.uv-paste.title">
+            <i class="fa-solid fa-paste"></i>
+          </button>
+          <button data-uv="retro" data-i18n-title="html.uv-editor.uv-bar.uv-retro.title">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </button>
+        </div>
       </div>
-      <canvas data-i18n-title="html.uv-editor.canvas.title"></canvas>
     </section>
     </div>
 

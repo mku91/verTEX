@@ -200,6 +200,8 @@ export class UVEditor {
     turn.disabled = none;
     turn.classList.toggle('active', this.turning);
     for (const name of ['map-turn-left', 'map-turn-right']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || !square;
+    // The picture's quarter turn within the room: square rooms too (the pixels picked: any).
+    for (const name of ['turn-left', 'turn-right']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none || (!pixels && !square);
     // Those that ask nothing of what is picked: on with any atlas there is (back on, once there is one).
     for (const name of ['load', 'paste', 'fit', 'shape', 'clean', 'retro']) this.container.querySelector(`[data-uv="${name}"]`).disabled = none;
     this.container.querySelector('[data-uv="pack"]').disabled = none || this.editor.atlas.charts.length === 0;
@@ -279,9 +281,10 @@ export class UVEditor {
       this.editor.mapCharts(faces, how);
     } else if (['turn-left', 'turn-right', 'flip-h', 'flip-v'].includes(name)) {
       const how = { 'turn-left': { turn: -1 }, 'turn-right': { turn: 1 }, 'flip-h': { flip: 'h' }, 'flip-v': { flip: 'v' } }[name];
-      // With the marquee in hand it is the pixels picked that are turned, not the charts.
+      // With the marquee in hand it is the pixels picked that are turned; else the
+      // picture in the picked charts, their faces' places left (see Editor.turnPictures()).
       if (this.editor.tool === 'marquee' && this.editor.marquee) this.editor.turnPixels(how);
-      else this.editor.placeCharts(faces, how);
+      else this.editor.turnPictures(faces, how);
     }
     else if (name === 'clean') this.askClean();
     else if (name === 'pack') this.editor.packAtlas();

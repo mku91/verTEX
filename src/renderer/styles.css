@@ -1599,18 +1599,134 @@ body {
   background: var(--hover);
 }
 
+/* What the UV editor says, over the atlas' bottom left corner; nothing to say, not there. */
 .uv-status {
-  margin-left: 10px;
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 2px 8px;
   overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-raised) 85%, transparent);
   color: var(--text-dim);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: none;
+}
+
+.uv-status:empty {
+  display: none;
+}
+
+/* The atlas, with the palette of tools over its top left corner. */
+.uv-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 #uv-editor canvas {
-  flex: 1;
+  display: block;
   width: 100%;
-  min-height: 0;
+  height: 100%;
+}
+
+.uv-tools {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(4, 36px);
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
+}
+
+.uv-tools button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.uv-tools button:hover:enabled {
+  background: var(--hover);
+}
+
+.uv-tools button:disabled {
+  color: color-mix(in srgb, var(--text) 30%, transparent);
+  cursor: default;
+}
+
+.uv-tools i {
+  font-size: 15px;
+}
+
+.uv-tools .icon-broom {
+  width: 17px;
+  height: 17px;
+}
+
+.uv-tools button.active,
+.uv-tools button.active:hover:enabled {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* (shown or not by the attribute, whatever their display) */
+.uv-tools [hidden] {
+  display: none !important;
+}
+
+/* The atlas shown, across the palette; with one atlas only it is not there. */
+.uv-tools #uv-atlas {
+  grid-column: 1 / -1;
+  width: auto;
+  height: 28px;
+}
+
+/* «Add to atlas» with its name on it (one atlas only): wide, beside its «-». */
+.uv-tools button.worded {
+  grid-column: span 3;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.uv-tools button.worded span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.uv-tools button.worded i {
+  font-size: 12px;
+}
+
+/* Between the groups: a line across the palette. */
+.uv-tools i.uv-tools-divider {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: 2px 2px;
+  background: var(--hover);
 }
 
 .ortho-view {
@@ -5823,15 +5939,15 @@ option::checkmark {
 
 /* The UV editor's buttons that work on the faces' places alone, the picture
    left as it is: as the others, with a small "UV" in their corner. */
-.uv-bar button.uv-only {
+.uv-tools button.uv-only {
   position: relative;
 }
 
-.uv-bar button.uv-only::after {
+.uv-tools button.uv-only::after {
   content: 'UV';
   position: absolute;
-  right: 0;
-  bottom: -1px;
+  right: 2px;
+  bottom: 2px;
   color: var(--accent);
   font-size: 7px;
   font-weight: 700;
@@ -5840,7 +5956,7 @@ option::checkmark {
   pointer-events: none;
 }
 
-.uv-bar button.uv-only:disabled::after {
+.uv-tools button.uv-only:disabled::after {
   opacity: 0.4;
 }
 

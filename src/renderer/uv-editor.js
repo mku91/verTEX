@@ -60,7 +60,7 @@ const SHAPED = '#ffb86c'; // the outline of a chart whose shape was changed by h
 const DIMMED = 0.15; // how much of the picture shows with F1 held, but for the face under the pointer
 
 // A picture file's pixels (a Blob of it) as an ImageData; null if it is none.
-async function imageOf(blob) {
+export async function imageOf(blob) {
   let bitmap;
   try {
     bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
@@ -195,7 +195,7 @@ export class UVEditor {
     // (Stacking is of several charts: those of the faces picked, or of the objects.)
     this.container.querySelector('[data-uv="stack"]').disabled = none || this.editor.chartsOfFaces(this.facesInHand()).length < 2;
     // (Unfolding is of several faces: one has nothing to meet.)
-    this.container.querySelector('[data-uv="unfold"]').disabled = none || charts.length === 0 || this.pickedFaces().length < 2;
+    this.container.querySelector('[data-uv="unfold"]').disabled = !this.canUnfold();
     const turn = this.container.querySelector('[data-uv="map-turn"]');
     turn.disabled = none;
     turn.classList.toggle('active', this.turning);
@@ -959,8 +959,28 @@ export class UVEditor {
     this.editor.hideUnfoldPreview();
   }
 
+  // Unfold works on the faces picked, or in object mode on all the faces of
+  // the objects in hand (see facesInHand()) - two at least, on the atlas.
+  canUnfold() {
+    if (this.editor.atlas === this.editor.noAtlas) return false;
+    const faces = this.facesInHand();
+    return faces.length >= 2 && this.editor.chartsOfFaces(faces).length > 0;
+  }
+
+  // Unfold's popup opened (or closed) by its key: the panel shown first, the
+  // popup by its button. Returns false if there is nothing to unfold.
+  toggleUnfold() {
+    if (this.unfolding) {
+      this.closeUnfold();
+      return true;
+    }
+    if (!this.canUnfold()) return false;
+    this.openUnfold();
+    return true;
+  }
+
   showUnfold() {
-    const faces = this.pickedFaces();
+    const faces = this.facesInHand();
     if (faces.length < 2) {
       this.closeUnfold();
       return;
@@ -974,7 +994,7 @@ export class UVEditor {
 
   applyUnfold() {
     const along = this.unfolding;
-    const faces = this.pickedFaces();
+    const faces = this.facesInHand();
     this.closeUnfold();
     this.editor.unfoldCharts(faces, true, along); // (asked for by hand: done even if nothing joins)
     this.draw();
@@ -1001,6 +1021,7 @@ export class UVEditor {
     row.append(
       choice('body', t('uv.unfold.body'), t('uv.unfold.body.title'), 'unfold-body'),
       ...['x', 'y', 'z'].map((axis) => choice(axis, axis.toUpperCase(), t('uv.unfold.axis.title', { axis: axis.toUpperCase() }), `plane-button ${axis}`)),
+      choice('cylinder', t('uv.unfold.cylinder'), t('uv.unfold.cylinder.title'), 'unfold-body unfold-cylinder'),
     );
     const foot = document.createElement('div');
     foot.className = 'unfold-foot';

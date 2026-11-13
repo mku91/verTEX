@@ -10,7 +10,7 @@ import { Mirror, mirrorPoint } from './mirror.js';
 import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
-import { unwrap, unfold, START_SIZE, PADDING, packRects } from './unwrap.js';
+import { unwrap, unfold, unfoldCylinder, START_SIZE, PADDING, packRects } from './unwrap.js';
 import { theme, onThemeChange, themeGizmo } from './theme.js';
 import { cloneCollider } from './collision-fit.js';
 import { turnOf } from './pose.js';
@@ -1652,7 +1652,9 @@ export class Editor extends EventTarget {
       if (!byAtlas.has(atlas)) byAtlas.set(atlas, []);
       byAtlas.get(atlas).push(index);
     }
-    return new Map([...byAtlas].map(([atlas, list]) => [atlas, unfold(this.mesh, list, this.atlasById(atlas).ppu, along)]));
+    // ('cylinder': round each object's Y axis, see unfoldCylinder())
+    const lay = (list, ppu) => (along === 'cylinder' ? unfoldCylinder(this.mesh, list, ppu) : unfold(this.mesh, list, ppu, along));
+    return new Map([...byAtlas].map(([atlas, list]) => [atlas, lay(list, this.atlasById(atlas).ppu)]));
   }
 
   // Shows on the model the pixel grid Unfold would give the faces, nothing
@@ -2784,6 +2786,152 @@ export class Editor extends EventTarget {
       for (const key of facePixels(face.uv)) keys.add(key);
     }
     return atlas.paintPixels([...keys].map((key) => key.split(',').map(Number)), this.paintColor);
+  }
+
+  // The Texture Ripper (see photo-ripper.js): where a picture taken off a
+  // photo goes - the faces picked, on their atlases. One target an atlas:
+  // { atlas, faces, pixels: [[x, y]], quad: four places on the atlas (its
+  // pixels, y down), size: { w, h } }. The quad is what the photo's
+  // four corners go to: a single four-cornered face's own corners, else the
+  // box around the faces' pixels; its corners taken in the order that has
+  // the photo upright on the model as the camera sees it now (the top-left
+  // corner at the top left, and not mirrored). The pixels are the faces'
+  // own, and where all of a chart's faces are picked, its rim as well.
+  ripTargets() {
+    if (this.mode !== 'face') return [];
+    const groups = new Map();
+    for (const index of this.picked) {
+      const face = this.mesh.faces[index];
+      if (!face?.uv?.every(Boolean)) continue;
+      const id = this.view.atlasOfFace(face);
+      if (id === null || !this.atlasById(id)) continue;
+      if (groups.has(id)) groups.get(id).push(index);
+      else groups.set(id, [index]);
+    }
+    return [...groups].map(([id, faces]) => {
+      const atlas = this.atlasById(id);
+      const keys = new Set();
+      for (const index of faces) for (const key of facePixels(this.mesh.faces[index].uv)) keys.add(key);
+      const wanted = new Set(faces);
+      for (const chart of atlas.charts ?? []) {
+        if (chart.faces?.length && chart.pixels && chart.faces.every((face) => wanted.has(face))) for (const key of chart.pixels) keys.add(key);
+      }
+      const pixels = [...keys].map((key) => key.split(',').map(Number));
+      let left = Infinity;
+      let top = Infinity;
+      let right = -Infinity;
+      let bottom = -Infinity;
+      for (const [x, y] of pixels) {
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x + 1);
+        bottom = Math.max(bottom, y + 1);
+      }
+      const only = faces.length === 1 && this.mesh.faces[faces[0]].length === 4 ? this.mesh.faces[faces[0]] : null;
+      const corners = only
+        ? only.uv.map(([u, v]) => [u, v])
+        : [[left, top], [right, top], [right, bottom], [left, bottom]];
+      return {
+        atlas: id,
+        faces,
+        pixels,
+        quad: this.uprightQuad(corners, faces),
+        size: { w: Math.max(0, right - left), h: Math.max(0, bottom - top) },
+      };
+    });
+  }
+
+  // The four corners of a place on the atlas, put in the order top-left,
+  // top-right, bottom-right, bottom-left as they are seen on the model from
+  // the camera now: of the 8 orders (4 turns, mirrored or not) the one whose
+  // sides go most nearly right and down on the screen. Where on the screen
+  // a place of the atlas is, is found from a face's triangle (the first
+  // picked one that is seen edge-on the least).
+  uprightQuad(corners, faces) {
+    let frame = null;
+    let best = 0;
+    for (const index of faces) {
+      const face = this.mesh.faces[index];
+      for (let k = 1; k + 1 < face.length; k++) {
+        const ids = [0, k, k + 1];
+        const screen = ids.map((i) => this.screenOf(this.mesh.vertices[face[i]]));
+        if (screen.some((point) => !point)) continue;
+        const uv = ids.map((i) => face.uv[i]);
+        // uv -> screen, linear part: [a b; c d] from the triangle's two sides
+        const du1 = uv[1][0] - uv[0][0], dv1 = uv[1][1] - uv[0][1];
+        const du2 = uv[2][0] - uv[0][0], dv2 = uv[2][1] - uv[0][1];
+        const det = du1 * dv2 - du2 * dv1;
+        if (Math.abs(det) < 1e-9) continue;
+        const sx1 = screen[1].x - screen[0].x, sy1 = screen[1].y - screen[0].y;
+        const sx2 = screen[2].x - screen[0].x, sy2 = screen[2].y - screen[0].y;
+        const a = (sx1 * dv2 - sx2 * dv1) / det, b = (sx2 * du1 - sx1 * du2) / det;
+        const c = (sy1 * dv2 - sy2 * dv1) / det, d = (sy2 * du1 - sy1 * du2) / det;
+        const area = Math.abs(a * d - b * c); // how much of the screen a pixel of it covers
+        if (area > best) {
+          best = area;
+          frame = { a, b, c, d };
+        }
+      }
+    }
+    if (!frame) return corners;
+    const toScreen = ([u, v]) => [frame.a * u + frame.b * v, frame.c * u + frame.d * v];
+    const along = (from, to, axis) => {
+      const [p, q] = [toScreen(from), toScreen(to)];
+      const length = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+      return (q[axis] - p[axis]) / length;
+    };
+    let chosen = corners;
+    let score = -Infinity;
+    for (const order of [corners, [...corners].reverse()]) {
+      for (let turn = 0; turn < 4; turn++) {
+        const q = [0, 1, 2, 3].map((k) => order[(k + turn) % 4]);
+        const value = along(q[0], q[1], 0) + along(q[3], q[2], 0) + along(q[0], q[3], 1) + along(q[1], q[2], 1);
+        if (value > score + 1e-9) {
+          score = value;
+          chosen = q;
+        }
+      }
+    }
+    return chosen.map(([u, v]) => [u, v]);
+  }
+
+  // The objects of the faces picked that are on no atlas yet (indices into
+  // mesh.objects): the Texture Ripper puts them on the atlas worked on first.
+  ripOffAtlas() {
+    if (this.mode !== 'face') return [];
+    const { faces, vertexObject, objects } = this.mesh;
+    const found = new Set();
+    for (const index of this.picked) {
+      const face = faces[index];
+      if (!face) continue;
+      const k = objects.findIndex((object) => object.id === vertexObject[face[0]]);
+      if (k >= 0 && objects[k].kind !== 'node' && !objects[k].atlas) found.add(k);
+    }
+    return [...found];
+  }
+
+  // Puts what the Texture Ripper makes onto the atlases: `make(targets)`
+  // gives [{ atlas, pixels, colors }] (see Atlas.paintColors()) for the
+  // targets (see ripTargets()). The faces' objects that are on no atlas are
+  // put on the one worked on first, as «Add to atlas» would. One undo step
+  // for all of it. Returns whether anything changed.
+  applyRip(make) {
+    if (this.busy()) return false;
+    const before = this.snapshot();
+    const off = this.atlas === this.noAtlas ? [] : this.ripOffAtlas();
+    for (const index of off) this.mesh.objects[index].atlas = this.atlas.id;
+    if (off.length) {
+      this.rebuildView(); // lays the atlas out: the faces get their places
+      this.placeGizmo();
+    }
+    let changed = off.length > 0;
+    for (const { atlas, pixels, colors } of make(this.ripTargets())) {
+      if (this.atlasById(atlas)?.paintColors(pixels, colors)) changed = true;
+    }
+    if (!changed) return false;
+    this.history.push(before);
+    this.emitChange();
+    return true;
   }
 
   // The brush's stroke takes in a pixel - `at`, where on the model's surface

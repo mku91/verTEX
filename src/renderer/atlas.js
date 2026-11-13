@@ -547,6 +547,40 @@ export class Atlas extends EventTarget {
     return true;
   }
 
+  // Gives each of a list of pixels ([x, y]) a colour of its own - `colors`,
+  // four bytes (RGBA) a pixel, in the list's order - as one change. Returns
+  // whether the picture changed.
+  paintColors(pixels, colors) {
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const [x, y] of pixels) {
+      if (x < 0 || y < 0 || x >= this.width || y >= this.height) continue;
+      if (x < left) left = x;
+      if (y < top) top = y;
+      if (x > right) right = x;
+      if (y > bottom) bottom = y;
+    }
+    if (left === Infinity) return false;
+    const width = right - left + 1;
+    const image = this.context.getImageData(left, top, width, bottom - top + 1);
+    let changed = false;
+    pixels.forEach(([x, y], k) => {
+      if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
+      const at = ((y - top) * width + (x - left)) * 4;
+      for (let channel = 0; channel < 4; channel++) {
+        if (image.data[at + channel] === colors[k * 4 + channel]) continue;
+        image.data[at + channel] = colors[k * 4 + channel];
+        changed = true;
+      }
+    });
+    if (!changed) return false;
+    this.context.putImageData(image, left, top);
+    this.touch();
+    return true;
+  }
+
   // The picture as it is this moment, to be put back with putBack() - what a
   // shape being drawn out is tried on, again and again. (Unlike pixels() and
   // setPixels(), which are the document's: these leave the charts alone.)

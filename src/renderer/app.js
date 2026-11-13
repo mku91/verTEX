@@ -40,6 +40,7 @@ import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 import { canvasPNG } from './png.js';
 import { offerUpdate } from './update-offer.js';
 import { Guide } from './guide.js';
+import { PhotoRipper } from './photo-ripper.js';
 
 setTheme(savedTheme()); // before the views are built, so they start in the right colours
 
@@ -85,6 +86,8 @@ const collisionMode = new CollisionMode(document.getElementById('collision-panel
 outliner.shapes = collisionMode;
 collisionMode.onRefresh = () => outliner.update();
 const simulation = new Simulation(document.getElementById('sim-controls'), viewport, editor, collisionMode);
+// The Texture Ripper's window (see photo-ripper.js): a picture off a photo onto the faces picked.
+const ripper = new PhotoRipper(editor, { say: (text) => toast(text) });
 
 
 const ACTIONS = {
@@ -92,6 +95,19 @@ const ACTIONS = {
   'make-face': () => editor.makeFace(),
   'flip-faces': () => editor.flipFaces(),
   separate: () => editor.separateSelection(),
+  'texture-ripper': () => ripper.toggle(),
+  // Unfold's popup (see UVEditor.toggleUnfold()): the UV panel opened first, the popup by its button.
+  unfold: () => {
+    if (editor.workspace === 'animation') return;
+    const go = () => {
+      if (!uvEditor.toggleUnfold()) toast(t('uv.unfold.nothing'));
+    };
+    if (uvEditor.open) go();
+    else {
+      setBottomPanel('uv');
+      requestAnimationFrame(() => requestAnimationFrame(go)); // (laid out: the popup goes by its button)
+    }
+  },
   frame: () => {
     editor.frame();
     orthoViews.frame();
@@ -151,6 +167,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => editor.setTool('move') },
     { id: 'tool.magic', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.magic'), keys: '', run: () => editor.setTool('magic') },
     { id: 'edit.separate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.separate'), keys: '', run: () => ACTIONS.separate() },
+    { id: 'paint.ripper', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.paint.ripper'), keys: '', run: () => ACTIONS['texture-ripper']() },
     { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => editor.setTool('scale') },
     { id: 'tool.pivot', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.pivot'), keys: 'KeyD', run: () => editor.setTool('pivot') },
@@ -202,6 +219,7 @@ const hotkeys = new Hotkeys(
     { id: 'view.edges', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.edges'), keys: '', run: () => ACTIONS['toggle-edges']() },
     { id: 'view.pixel-grid', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.pixel-grid'), keys: '', run: () => ACTIONS['toggle-pixel-grid']() },
     { id: 'view.uv', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.uv'), keys: 'KeyU', run: () => ACTIONS['toggle-uv']() },
+    { id: 'uv.unfold', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.uv.unfold'), keys: 'Ctrl+Shift+KeyE', run: () => ACTIONS.unfold() },
     { id: 'view.local', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.local'), keys: 'KeyL', run: () => ACTIONS['toggle-local']() },
     { id: 'view.preview', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.preview'), keys: 'KeyH', run: () => ACTIONS['toggle-preview']() },
     { id: 'view.focus', group: t('app.hotkeys.group.view'), label: t('app.hotkeys.view.focus'), keys: 'KeyT', run: () => ACTIONS['toggle-focus']() },
@@ -741,7 +759,7 @@ $('hotkeys-reset').addEventListener('click', () => {
 const HOTKEY_TITLES = {
   '[data-tool="select"]': 'tool.select', '[data-tool="move"]': 'tool.move', '[data-tool="rotate"]': 'tool.rotate',
   '[data-tool="scale"]': 'tool.scale', '[data-tool="pivot"]': 'tool.pivot', '[data-tool="paint"]': 'tool.paint',
-  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="fillObject"]': 'tool.fill-object', '[data-tool="marquee"]': 'tool.marquee',
+  '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="fillObject"]': 'tool.fill-object', '[data-tool="marquee"]': 'tool.marquee', '[data-action="texture-ripper"]': 'paint.ripper', '[data-uv="unfold"]': 'uv.unfold',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
@@ -2004,7 +2022,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode };
+window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode, ripper };
 
 // The bottom panel's height, as a share of the workspace (see setViewsSize()).
 const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';

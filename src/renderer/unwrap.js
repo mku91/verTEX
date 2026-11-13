@@ -381,6 +381,100 @@ export function unfold(mesh, faceIndices, ppu, along = 'y') {
   return pieces;
 }
 
+// The given faces laid out around a cylinder (a cylindrical projection): for
+// what is round about an axis - a vase, a body, a tower. Each object's faces
+// around its own Y axis, through the middle of them: a row of pixels is one
+// height on the axis, a column one angle round it, so the grid runs on across
+// every edge all the way round, the seam at the object's back (-Z). A column
+// is a square pixel at the faces' mean distance from the axis (their area
+// weighed), narrower nearer to it, wider further. Faces that look mostly along
+// the axis (more than CAP_LIMIT: a floor, a lid, a rim's top) cannot be seen
+// so: they are seen from above, or from below, a piece of each. A face that
+// would land on one laid already (a strap over a body, an overhang) goes to a
+// piece of its own, flat as it lies. Returns the pieces as unfold() does.
+const CAP_LIMIT = 0.75;
+export function unfoldCylinder(mesh, faceIndices, ppu) {
+  const { faces, vertices, vertexObject, objects } = mesh;
+  const turns = new Map(objects.map((object) => [object.id, quaternionOf(object.rotation)]));
+  const sound = faceIndices.filter((i) => mesh.faceNormal(i).lengthSq() > 0.5);
+  const byObject = new Map();
+  for (const i of sound) {
+    const owner = vertexObject[faces[i][0]];
+    if (!byObject.has(owner)) byObject.set(owner, []);
+    byObject.get(owner).push(i);
+  }
+  const pieces = [];
+  // Places into a piece, bigger faces first; one that lands on what is in goes to `aside`.
+  const lay = (places, aside) => {
+    const kept = new Map();
+    const boxes = [];
+    const size = (polygon) => Math.abs(polygon.reduce((sum, [x, y], k) => {
+      const [u, v] = polygon[(k + 1) % polygon.length];
+      return sum + x * v - u * y;
+    }, 0));
+    for (const [i, polygon] of [...places].sort((a, b) => size(b[1]) - size(a[1]))) {
+      const box = boxOf(polygon);
+      if (boxes.some((there) => box.x0 < there.box.x1 && there.box.x0 < box.x1 && box.y0 < there.box.y1 && there.box.y0 < box.y1 && overlapping(polygon, there.polygon))) {
+        aside.push(i);
+        continue;
+      }
+      kept.set(i, polygon);
+      boxes.push({ polygon, box });
+    }
+    if (kept.size) pieces.push(pieceFrom(kept));
+  };
+  for (const [owner, list] of byObject) {
+    const turn = turns.get(owner) ?? new THREE.Quaternion();
+    const back = turn.clone().invert();
+    const own = (vertex) => vertices[vertex].clone().applyQuaternion(back);
+    const points = [...new Set(list.flatMap((i) => faces[i]))].map(own);
+    const low = new THREE.Vector3(Infinity, Infinity, Infinity);
+    const high = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+    for (const point of points) {
+      low.min(point);
+      high.max(point);
+    }
+    const cx = (low.x + high.x) / 2;
+    const cz = (low.z + high.z) / 2;
+    const side = [];
+    const up = [];
+    const down = [];
+    for (const i of list) {
+      const normal = mesh.faceNormal(i).applyQuaternion(back);
+      (Math.abs(normal.y) > CAP_LIMIT ? (normal.y > 0 ? up : down) : side).push(i);
+    }
+    // The distance from the axis a column is square at: the side faces' mean, by their areas.
+    let weighed = 0;
+    let whole = 0;
+    for (const i of side) {
+      const corners = faces[i].map(own);
+      const middle = corners.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / corners.length);
+      const area = areaVector(mesh, i).length();
+      weighed += Math.hypot(middle.x - cx, middle.z - cz) * area;
+      whole += area;
+    }
+    const radius = whole > 0 && weighed > 0 ? weighed / whole : 1;
+    const aside = [];
+    const around = new Map();
+    for (const i of side) {
+      const corners = faces[i].map(own);
+      let angles = corners.map((point) => Math.atan2(point.x - cx, point.z - cz));
+      // (a face across the seam: on past its end, not split round)
+      if (Math.max(...angles) - Math.min(...angles) > Math.PI) angles = angles.map((angle) => (angle < 0 ? angle + 2 * Math.PI : angle));
+      around.set(i, corners.map((point, k) => [angles[k] * radius * ppu, (high.y - point.y) * ppu]));
+    }
+    lay(around, aside);
+    const seen = (chosen, mirrored) => new Map(chosen.map((i) => [i, faces[i].map(own).map((point) => [(mirrored ? cx - point.x : point.x - cx) * ppu, (point.z - cz) * ppu])]));
+    lay(seen(up, false), aside);
+    lay(seen(down, true), aside);
+    for (const i of aside) {
+      const { right, up: upward } = planeAxes(mesh.faceNormal(i), turn);
+      pieces.push(pieceFrom(new Map([[i, faces[i].map((vertex) => [vertices[vertex].dot(right) * ppu, -vertices[vertex].dot(upward) * ppu])]])));
+    }
+  }
+  return pieces;
+}
+
 // Room on the atlas: which pixels are spoken for.
 class Room {
   constructor(width, height) {

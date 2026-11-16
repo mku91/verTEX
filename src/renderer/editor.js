@@ -153,7 +153,7 @@ const KNIFE_DOT = 16; // px: the dot at the knife's start
 const CUT_MARGIN = 1e-3; // a cut off the grid (Alt held) stays this far inside the face's edges
 
 // Adds a primitive to a mesh as a new object and returns its vertices, or
-// undefined for an unknown kind. Options: cone { sides, size }, cylinder
+// undefined for an unknown kind. Options: plane { size }, cone { sides, size }, cylinder
 // { sides, size, height }, sphere { segments, size }, capsule { segments,
 // size, height }, torus { segments, sides, size, thickness }.
 // A line's pixels made pixel-perfect, as pixel art wants a line: where the
@@ -174,6 +174,7 @@ function pixelPerfect(path) {
 function buildPrimitive(mesh, kind, options) {
   switch (kind) {
     case 'cube': return mesh.addCube(options.size);
+    case 'plane': return mesh.addPlane(options.size);
     case 'cone': return mesh.addCone(options.sides, options.size);
     case 'cylinder': return mesh.addCylinder(options.sides, options.size, options.height);
     case 'sphere': return mesh.addSphere(options.segments, options.size);
@@ -6716,7 +6717,7 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
-  // Adds a new object and selects it: 'cube', 'cone' ({ sides, size }),
+  // Adds a new object and selects it: 'cube', 'plane' ({ size }), 'cone' ({ sides, size }),
   // 'cylinder' ({ sides, size, height }), 'sphere' ({ segments, size }) or
   // 'capsule' ({ segments, size, height }) or 'torus' ({ segments, sides, size, thickness }) -
   // at the origin, or with `side` up against the selection (see primitiveAnchor()).

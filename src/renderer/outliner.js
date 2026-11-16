@@ -72,6 +72,10 @@ const PRIMITIVES = {
     title: t('outliner.primitive.cube'),
     fields: [{ id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 }],
   },
+  plane: {
+    title: t('outliner.primitive.plane'),
+    fields: [{ id: 'size', label: t('outliner.field.size'), value: 1, min: 0.01, max: 100 }],
+  },
   cone: {
     title: t('outliner.primitive.cone'),
     fields: [

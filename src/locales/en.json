@@ -1181,7 +1181,7 @@
  "guide.mirror.keys0.0.text": "Opens the choice of planes",
  "guide.mirror.p1": "The global mirror's planes go through the world's origin and hold for every object; a local mirror's go through the object's own pivot point. Up to three planes at once: two halves, four quarters or eight parts.",
  "guide.objects.title": "Objects",
- "guide.objects.p0": "New objects are added with the + in the scene list: a cube, a cone, a cylinder, a sphere, a capsule, a torus, or a node that holds others.",
+ "guide.objects.p0": "New objects are added with the + in the scene list: a cube, a plane, a cone, a cylinder, a sphere, a capsule, a torus, or a node that holds others.",
  "guide.objects.p1": "A right click on an entry of the scene list gives: Center, Drop to the floor, Hide, Marker colour, Duplicate, Join, Reset the pivot, Delete.",
  "guide.objects.p2": "Join makes the picked objects one. Where they touch, corner on corner, it asks whether to weld the seams: vertices in one place become one, faces pressed together go.",
  "guide.objects.keys0.0.text": "Object mode: copy the selected objects",
@@ -1280,5 +1280,7 @@
  "app.hotkeys.uv.unfold": "Unfold",
  "uv.unfold.nothing": "Unfold: select two or more faces, or an object, on the atlas",
  "uv.unfold.cylinder": "Cylinder",
- "uv.unfold.cylinder.title": "Round the object's Y axis, as a vase or a tower: a row of pixels is one height, a column one angle round, the grid running on all the way round; the seam at the back. Columns are square at the faces' mean distance from the axis, narrower nearer to it. Floors and lids are seen from above or below; what would land on another face (a strap over a body) goes to a piece of its own"
+ "uv.unfold.cylinder.title": "Round the object's Y axis, as a vase or a tower: a row of pixels is one height, a column one angle round, the grid running on all the way round; the seam at the back. Columns are square at the faces' mean distance from the axis, narrower nearer to it. Floors and lids are seen from above or below; what would land on another face (a strap over a body) goes to a piece of its own",
+ "add-menu.plane": "Plane…",
+ "outliner.primitive.plane": "Plane"
 }

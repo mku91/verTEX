@@ -660,6 +660,17 @@ export class EditableMesh {
     return [top, ...circles.flat(), bottom];
   }
 
+  // A plane lying on the grid, as a new object: one square face `size` across,
+  // looking up (+Y). Returns the new vertices.
+  addPlane(size = 1) {
+    const object = this.addObject('Plane');
+    const h = size / 2;
+    const corners = [[-h, 0, -h], [-h, 0, h], [h, 0, h], [h, 0, -h]]; // (in this order it looks up)
+    const made = corners.map(([x, y, z]) => this.addVertex(x, y, z, object));
+    this.addFace([...made]);
+    return made;
+  }
+
   // Unit cube standing on the grid, as a new object. Returns indices of the new vertices.
   addCube(size = 1) {
     const object = this.addObject('Cube');

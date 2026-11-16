@@ -5205,9 +5205,12 @@ export class Editor extends EventTarget {
     if (near) return near.clone();
     if (!referenced?.size) return null;
     const camera = this.viewport.camera.position;
-    // Only those turned to the viewer, as they are shown (see MeshView.referenceFront()).
+    // Only those shown: turned to the viewer and, in the main view, not behind
+    // the references' own surface (see MeshView.referenceFront(), referenceSight()).
+    const main = viewer === this.mainViewer;
     const { vertices: front } = this.view.referenceFront(
-      viewer === this.mainViewer ? (point) => camera.clone().sub(point) : (point) => viewer.viewDirection(point).negate(),
+      main ? (point) => camera.clone().sub(point) : (point) => viewer.viewDirection(point).negate(),
+      main ? this.view.referenceSight(this.viewport.camera) : null,
     );
     let best = null;
     let bestDistance = Infinity;

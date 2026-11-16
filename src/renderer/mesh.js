@@ -1659,6 +1659,12 @@ const GHOST_OPACITY = 0.1; // the objects set aside while one is worked on alone
 const REFERENCE_SURFACE = 0xd8d8d8;
 const REFERENCE_SURFACE_OPACITY = 0.3;
 const REFERENCE_EDGE_OPACITY = 0.2;
+// The references' edges and vertices hidden behind their own surface (see
+// referenceSight()): a grid of the surface's depth as the camera sees it,
+// SIGHT_GRID cells a side, and how much further than the surface a point may
+// be and still be seen (a share of its distance: it lies on the surface).
+const SIGHT_GRID = 256;
+const SIGHT_SLACK = 0.015;
 const REFERENCE_POINT_SIZE = 4; // px, its vertices: small black squares
 
 // How much of the picture shows in the focus look, on a textured model (see applyLook()).
@@ -2298,19 +2304,105 @@ export class MeshView {
   // What of the references is turned to a viewer: `toViewer(point)` is the
   // way from a point to the viewer. A face is turned to it when its normal
   // points that way; an edge or a vertex is shown when a face at it is (an
-  // edge no face has, always). { edges: [[a, b]], vertices: Set }.
-  referenceFront(toViewer) {
+  // edge no face has, always). With `sight` (see referenceSight()) only what
+  // is not behind their own surface as well: a vertex seen, an edge whose
+  // middle is seen or both its ends. { edges: [[a, b]], vertices: Set }.
+  referenceFront(toViewer, sight = null) {
     const data = this.referenceData;
     if (!data) return { edges: [], vertices: new Set() };
+    const { vertices: places } = this.mesh;
     const front = data.own.map(({ normal, middle }) => normal.dot(toViewer(middle)) > 0);
-    const edges = data.edges.filter(({ faces }) => faces.length === 0 || faces.some((k) => front[k])).map(({ a, b }) => [a, b]);
+    const seen = new Map();
+    const sees = (vertex) => {
+      if (!sight) return true;
+      if (!seen.has(vertex)) seen.set(vertex, sight(places[vertex]));
+      return seen.get(vertex);
+    };
+    const middle = new THREE.Vector3();
+    const edges = data.edges
+      .filter(({ a, b, faces }) => (faces.length === 0 || faces.some((k) => front[k]))
+        && (!sight || (sees(a) && sees(b)) || sight(middle.addVectors(places[a], places[b]).multiplyScalar(0.5))))
+      .map(({ a, b }) => [a, b]);
     const vertices = new Set();
-    for (const [vertex, list] of data.vertexFaces) if (list.some((k) => front[k])) vertices.add(vertex);
+    for (const [vertex, list] of data.vertexFaces) if (list.some((k) => front[k]) && sees(vertex)) vertices.add(vertex);
     for (const [a, b] of edges) {
       if (!data.vertexFaces.has(a)) vertices.add(a);
       if (!data.vertexFaces.has(b)) vertices.add(b);
     }
     return { edges, vertices };
+  }
+
+  // Whether a point is seen by `camera` past the references' own surface: a
+  // function (point) -> bool, or null with no references. The surface's
+  // triangles are drawn, by hand, into a grid of their depth as the camera
+  // sees them (SIGHT_GRID a side, over the whole view); a point is seen when it
+  // is no further than the surface there, give or take SIGHT_SLACK - the
+  // furthest of the cells round it taken, so that what is on an outline, where
+  // the surface ends, is not lost to a coarse cell. Made once for a camera
+  // where it stands (see showReferenceFront()).
+  referenceSight(camera) {
+    const data = this.referenceData;
+    if (!data) return null;
+    const key = camera.matrixWorld.elements.join(',') + '|' + camera.projectionMatrix.elements.join(',');
+    if (data.sight?.key === key) return data.sight.test;
+    const N = SIGHT_GRID;
+    const depth = new Float32Array(N * N).fill(Infinity);
+    const toClip = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const position = this.referenceSurface.geometry.getAttribute('position');
+    // A point's place on the grid and its distance along the view (w for a
+    // perspective camera, the depth for an orthographic one).
+    const clip = new THREE.Vector4();
+    const place = (x, y, z) => {
+      clip.set(x, y, z, 1).applyMatrix4(toClip);
+      if (clip.w <= 1e-6) return null;
+      const far = camera.isOrthographicCamera ? -(new THREE.Vector3(x, y, z).applyMatrix4(camera.matrixWorldInverse).z) : clip.w;
+      return [((clip.x / clip.w + 1) / 2) * N, ((1 - clip.y / clip.w) / 2) * N, far];
+    };
+    const triangle = [];
+    for (let i = 0; i + 2 < (position?.count ?? 0); i += 3) {
+      triangle.length = 0;
+      for (let k = 0; k < 3; k++) {
+        const p = place(position.getX(i + k), position.getY(i + k), position.getZ(i + k));
+        if (!p) break;
+        triangle.push(p);
+      }
+      if (triangle.length < 3) continue; // (reaching behind the camera: not drawn)
+      const [[ax, ay, aw], [bx, by, bw], [cx, cy, cw]] = triangle;
+      const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+      if (Math.abs(area) < 1e-12) continue;
+      // Across the screen a distance goes as 1/w does (perspective): that is what is spread.
+      const ia = 1 / aw, ib = 1 / bw, ic = 1 / cw;
+      const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx))), x1 = Math.min(N - 1, Math.ceil(Math.max(ax, bx, cx)));
+      const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy))), y1 = Math.min(N - 1, Math.ceil(Math.max(ay, by, cy)));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const px = x + 0.5, py = y + 0.5;
+          const u = ((px - ax) * (cy - ay) - (cx - ax) * (py - ay)) / area;
+          const v = ((bx - ax) * (py - ay) - (px - ax) * (by - ay)) / area;
+          if (u < 0 || v < 0 || u + v > 1) continue;
+          const w = camera.isOrthographicCamera ? aw + u * (bw - aw) + v * (cw - aw) : 1 / (ia + u * (ib - ia) + v * (ic - ia));
+          if (w < depth[y * N + x]) depth[y * N + x] = w;
+        }
+      }
+    }
+    const test = (point) => {
+      const p = place(point.x, point.y, point.z);
+      if (!p) return false;
+      const [gx, gy, w] = p;
+      const cx = Math.floor(gx), cy = Math.floor(gy);
+      if (cx < -1 || cy < -1 || cx > N || cy > N) return true; // (off the view: nothing of it is in front)
+      let furthest = -Infinity;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const x = cx + dx, y = cy + dy;
+          if (x < 0 || y < 0 || x >= N || y >= N) continue;
+          furthest = Math.max(furthest, depth[y * N + x]);
+        }
+      }
+      return furthest === -Infinity || w <= furthest * (1 + SIGHT_SLACK) + 1e-4;
+    };
+    data.sight = { key, test };
+    return test;
   }
 
   // Shows of the references' edges and vertices those turned to `camera`, when it has moved.
@@ -2322,7 +2414,7 @@ export class MeshView {
     data.shownFor = key;
     const eye = camera.getWorldPosition(new THREE.Vector3());
     const along = camera.isOrthographicCamera ? camera.getWorldDirection(new THREE.Vector3()).negate() : null;
-    const { edges, vertices } = this.referenceFront((point) => along ?? eye.clone().sub(point));
+    const { edges, vertices } = this.referenceFront((point) => along ?? eye.clone().sub(point), this.referenceSight(camera));
     this.referenceEdges.geometry.setIndex(edges.flatMap(([a, b]) => [data.slot.get(a), data.slot.get(b)]));
     this.referencePoints.geometry.setIndex([...vertices].map((vertex) => data.slot.get(vertex)));
   }

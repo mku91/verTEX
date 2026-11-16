@@ -95,6 +95,7 @@ const ACTIONS = {
   'make-face': () => editor.makeFace(),
   'flip-faces': () => editor.flipFaces(),
   separate: () => editor.separateSelection(),
+  merge: () => toggleMergeMenu(),
   'texture-ripper': () => ripper.toggle(),
   // Unfold's popup (see UVEditor.toggleUnfold()): the UV panel opened first, the popup by its button.
   unfold: () => {
@@ -167,6 +168,7 @@ const hotkeys = new Hotkeys(
     { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => editor.setTool('move') },
     { id: 'tool.magic', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.magic'), keys: '', run: () => editor.setTool('magic') },
     { id: 'edit.separate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.separate'), keys: '', run: () => ACTIONS.separate() },
+    { id: 'edit.merge', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.merge'), keys: 'Shift+KeyM', run: () => ACTIONS.merge() },
     { id: 'paint.ripper', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.paint.ripper'), keys: '', run: () => ACTIONS['texture-ripper']() },
     { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => editor.setTool('rotate') },
     { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => editor.setTool('scale') },
@@ -460,17 +462,40 @@ for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', () => ACTIONS[button.dataset.action]());
 }
 // The size panel: an object's extent along the axes; a new value stretches it.
+// With its lock closed the proportions are kept: the other sides go with it
+// (see Editor.setObjectSizeLocked()). The lock is kept between launches.
+const SIZE_LOCK_KEY = 'vertex.sizeLock';
+let sizeLocked = false;
+try {
+  sizeLocked = localStorage.getItem(SIZE_LOCK_KEY) === '1';
+} catch {}
+const showSizeLock = () => {
+  const button = $('size-lock');
+  button.classList.toggle('active', sizeLocked);
+  button.firstElementChild.className = `fa-solid ${sizeLocked ? 'fa-lock' : 'fa-lock-open'}`;
+  button.title = t(sizeLocked ? 'app.size-lock.on' : 'app.size-lock.off');
+};
+$('size-lock').addEventListener('click', () => {
+  sizeLocked = !sizeLocked;
+  try {
+    localStorage.setItem(SIZE_LOCK_KEY, sizeLocked ? '1' : '0');
+  } catch {}
+  showSizeLock();
+});
+$('size-lock').addEventListener('mousedown', (event) => event.preventDefault());
+showSizeLock();
+const setSize = (axis, value, record = true) => (sizeLocked ? editor.setObjectSizeLocked(axis, value, record) : editor.setObjectSize(axis, value, record));
 for (const input of sizeInputs) {
   const axis = input.dataset.size;
   const parse = () => parseFloat(input.value.replace(',', '.'));
   input.addEventListener('change', () => {
-    editor.setObjectSize(axis, parse());
+    setSize(axis, parse());
     refresh(); // a value that was refused goes back to what the size is
   });
   let beforeScrub = null;
   scrubbable(input, {
     read: parse,
-    write: (value) => editor.setObjectSize(axis, value, false),
+    write: (value) => setSize(axis, value, false),
     begin: () => { beforeScrub = editor.snapshot(); },
     end: () => editor.commit(beforeScrub),
     min: 0,
@@ -482,7 +507,7 @@ for (const input of sizeInputs) {
     const step = editor.snapGrid.activeStep * (event.code === 'ArrowUp' ? 1 : -1);
     const value = +(parse() + step).toFixed(5);
     if (!(value >= 0)) return;
-    editor.setObjectSize(axis, value);
+    setSize(axis, value);
     input.value = value;
   });
 }
@@ -763,7 +788,7 @@ const HOTKEY_TITLES = {
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
   '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
-  '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="separate"]': 'edit.separate', '[data-tool="magic"]': 'tool.magic', '[data-action="delete"]': 'edit.delete',
+  '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="separate"]': 'edit.separate', '[data-action="merge"]': 'edit.merge', '[data-tool="magic"]': 'tool.magic', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
 };
@@ -1413,6 +1438,81 @@ const MAGIC_ANGLE_KEY = 'vertex.magicAngle';
     event.stopPropagation();
   });
 }
+// Merge (see Editor.mergeSelected()): a menu by its button - at the middle,
+// onto the vertex selected last, or by distance (the distance kept between
+// launches). A choice merges and closes it; Esc or a press elsewhere closes it.
+const MERGE_DISTANCE_KEY = 'vertex.mergeDistance';
+const mergeMenu = {
+  box: $('merge-menu'),
+  distance: (() => {
+    try {
+      const kept = Number(localStorage.getItem(MERGE_DISTANCE_KEY));
+      return kept > 0 ? kept : 0.001;
+    } catch {
+      return 0.001;
+    }
+  })(),
+};
+function toggleMergeMenu(open = mergeMenu.box.hidden) {
+  const { box } = mergeMenu;
+  if (!open) {
+    box.hidden = true;
+    return;
+  }
+  if (editor.mode === 'object' || editor.workspace !== 'model') {
+    tell(t('app.merge.vertices-only'));
+    return;
+  }
+  box.hidden = false;
+  box.querySelector('input').value = String(mergeMenu.distance);
+  const button = document.querySelector('[data-action="merge"]').getBoundingClientRect();
+  box.style.left = `${button.right + 6}px`;
+  box.style.top = `${Math.min(button.top, window.innerHeight - box.getBoundingClientRect().height - 6)}px`;
+}
+{
+  const { box } = mergeMenu;
+  const input = box.querySelector('input');
+  const setDistance = (value) => {
+    const distance = Number(String(value).replace(',', '.'));
+    if (!(distance > 0)) return;
+    mergeMenu.distance = Math.min(10, distance);
+    input.value = String(mergeMenu.distance);
+    try {
+      localStorage.setItem(MERGE_DISTANCE_KEY, String(mergeMenu.distance));
+    } catch {}
+  };
+  input.addEventListener('change', () => setDistance(input.value));
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation(); // (typed figures are not the editor's shortcuts)
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') {
+      setDistance(input.value);
+      box.querySelector('[data-merge="distance"]').click();
+    }
+    if (event.code === 'Escape') toggleMergeMenu(false);
+  });
+  box.addEventListener('click', (event) => {
+    const how = event.target.closest('[data-merge]')?.dataset.merge;
+    if (!how) return;
+    if (how === 'distance') setDistance(input.value);
+    const gone = editor.mergeSelected(how, mergeMenu.distance);
+    toggleMergeMenu(false);
+    toast(gone ? t('app.merge.done', { count: gone }) : t('app.merge.nothing'));
+  });
+  box.addEventListener('mousedown', (event) => {
+    if (event.target !== input) event.preventDefault(); // (the buttons do not take the focus)
+  });
+  window.addEventListener('pointerdown', (event) => {
+    if (!box.hidden && !box.contains(event.target) && !event.target.closest('[data-action="merge"]')) toggleMergeMenu(false);
+  }, true);
+  window.addEventListener('keydown', (event) => {
+    if (!box.hidden && event.code === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      toggleMergeMenu(false);
+    }
+  }, true);
+}
+
 function showMagicOptions() {
   const box = $('magic-options');
   const shown = editor.tool === 'magic' && editor.workspace === 'model';
@@ -2307,7 +2407,7 @@ function refresh() {
 
   $('copy-vector').disabled = $('paste-vector').disabled = !point;
   $('center-pivot').hidden = !(tool === 'pivot' && point);
-  // The size panel: one object selected, in object mode.
+  // The size panel: one object (or node: all it holds) selected, in object mode.
   const size = editor.objectSize();
   $('dimensions').hidden = !size;
   for (const input of sizeInputs) {

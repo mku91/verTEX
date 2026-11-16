@@ -606,6 +606,9 @@ export class Outliner {
         item(island.hiddenOwn ? t('outliner.show') : t('outliner.hide'), () => editor.setHidden(index, !island.hiddenOwn)),
         colorItem,
         item(t('outliner.menu.duplicate'), () => editor.duplicateObjects(whole)),
+        // (one half put in place of the other, see Editor.symmetrize())
+        item(t('outliner.menu.symmetrize-minus'), () => editor.symmetrize(index, -1), island.kind !== 'node'),
+        item(t('outliner.menu.symmetrize-plus'), () => editor.symmetrize(index, 1), island.kind !== 'node'),
         item(t('outliner.menu.join'), () => joinAsked(editor, joined), island.kind !== 'node' && joined.length > 1),
         item(t('outliner.menu.reset-pivot'), () => editor.resetPivot(index), Boolean(editor.mesh.objects[index].pivot)),
         item(t('outliner.menu.delete'), () => editor.deleteObject(index)),

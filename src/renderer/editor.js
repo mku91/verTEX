@@ -1184,6 +1184,91 @@ export class Editor extends EventTarget {
       }));
   }
 
+  // Merge (as Blender's M): the selected vertices made one, each object's
+  // apart (vertices of two objects are never one). `how`:
+  //   'center' - one vertex at the middle of them;
+  //   'last'   - all of them onto the one selected last;
+  //   'distance' - those nearer one another than `distance` (by chains of
+  //     such), each bunch one vertex where its first one is; with nothing
+  //     selected, the whole of the object being worked on (a seam closed).
+  // Faces lose the corners that come together; one left a line or a point
+  // goes, and so does a face or an edge that is there twice (see
+  // EditableMesh.mergeVertices()). One undo step. Returns how many vertices went.
+  mergeSelected(how, distance = 0.001) {
+    if (this.busy() || this.mode === 'object' || this.workspace !== 'model') return 0;
+    if (this.operation) this.setOperation(null);
+    const { vertices, vertexObject } = this.mesh;
+    const { hiddenVertices } = this.topology;
+    const chosen = [...(this.selection.size || how !== 'distance' ? this.selection : this.target)].filter((i) => !hiddenVertices.has(i));
+    const byObject = new Map();
+    for (const i of chosen) {
+      if (!byObject.has(vertexObject[i])) byObject.set(vertexObject[i], []);
+      byObject.get(vertexObject[i]).push(i);
+    }
+    const groups = [];
+    const places = new Map(); // a group's kept vertex -> where it is to be
+    for (const list of byObject.values()) {
+      if (list.length < 2) continue;
+      if (how === 'center') {
+        const middle = list.reduce((sum, i) => sum.add(vertices[i]), new THREE.Vector3()).multiplyScalar(1 / list.length);
+        groups.push(list);
+        places.set(list[0], middle);
+      } else if (how === 'last') {
+        const last = list[list.length - 1];
+        groups.push([last, ...list.slice(0, -1)]);
+      } else {
+        // Bunches: vertices joined by being nearer than `distance`, found by cells of that size.
+        const parent = new Map(list.map((i) => [i, i]));
+        const find = (i) => {
+          while (parent.get(i) !== i) {
+            parent.set(i, parent.get(parent.get(i)));
+            i = parent.get(i);
+          }
+          return i;
+        };
+        const cells = new Map();
+        const cellOf = (p) => [Math.floor(p.x / distance), Math.floor(p.y / distance), Math.floor(p.z / distance)];
+        for (const i of list) {
+          const key = cellOf(vertices[i]).join('|');
+          if (!cells.has(key)) cells.set(key, []);
+          cells.get(key).push(i);
+        }
+        for (const i of list) {
+          const [cx, cy, cz] = cellOf(vertices[i]);
+          for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+            for (const j of cells.get(`${cx + dx}|${cy + dy}|${cz + dz}`) ?? []) {
+              if (j <= i || vertices[i].distanceTo(vertices[j]) > distance) continue;
+              const a = find(i), b = find(j);
+              if (a !== b) parent.set(b, a);
+            }
+          }
+        }
+        const bunches = new Map();
+        for (const i of list) {
+          const root = find(i);
+          if (!bunches.has(root)) bunches.set(root, []);
+          bunches.get(root).push(i);
+        }
+        for (const bunch of bunches.values()) if (bunch.length > 1) groups.push(bunch);
+      }
+    }
+    if (groups.length === 0) return 0;
+    const before = this.snapshot();
+    for (const [kept, place] of places) vertices[kept].copy(place);
+    const gone = groups.reduce((sum, group) => sum + group.length - 1, 0);
+    const keptOnes = groups.map((group) => group[0]);
+    const remap = this.mesh.mergeVertices(groups);
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    // What is left selected: the merged vertices (by distance: what was selected, less what went).
+    this.selection = how === 'distance' && this.selection.size === 0 ? new Set() : kept(how === 'distance' ? this.selection : new Set(keptOnes));
+    this.target = kept(this.target);
+    this.edited(before);
+    this.rebuildView();
+    this.placeGizmo();
+    this.emitChange();
+    return gone;
+  }
+
   // Makes one vertex of each of the given groups (index lists), see
   // EditableMesh.mergeVertices(). One undo step.
   mergeOverlaps(groups) {
@@ -1216,9 +1301,10 @@ export class Editor extends EventTarget {
   // object that is the whole selection, otherwise the one object being
   // edited (the target of the three views). Null when it is not one object.
   mirrorEntry() {
-    const chosen = this.sizeEntry();
-    if (chosen !== null) return chosen;
     const { islands, islandOfVertex } = this.topology;
+    const chosen = this.sizeEntry();
+    if (chosen !== null && islands[chosen].kind !== 'node') return chosen;
+    if (chosen !== null) return null; // (a node has no mirror of its own)
     const owners = new Set([...this.target].map((vertex) => islandOfVertex[vertex]));
     if (owners.size !== 1) return null;
     const [index] = owners;
@@ -1249,17 +1335,22 @@ export class Editor extends EventTarget {
   // The object whose size is shown and set: in object mode, the one object
   // (not a node) that is the whole selection. Null otherwise.
   sizeEntry() {
-    const entry = this.pivotEntry();
-    return entry !== null && this.topology.islands[entry].kind !== 'node' ? entry : null;
+    // (a node too: its size is that of all it holds, and a new one scales all of it)
+    return this.pivotEntry();
   }
 
-  // The extent of that object along the axes, or null.
+  // The vertices an entry's size is of: an object's, or all a node holds.
+  sizeVertices(entry) {
+    return [...this.contents([entry]).vertices];
+  }
+
+  // The extent of that object (or node) along the axes, or null.
   objectSize() {
     const entry = this.sizeEntry();
     if (entry === null) return null;
-    const { vertices } = this.topology.islands[entry];
+    const vertices = this.sizeVertices(entry);
     if (vertices.length === 0) return null;
-    // Along the object's own axes: a turned object is as big as it was.
+    // Along the entry's own axes: a turned one is as big as it was.
     const back = quaternionOf(this.mesh.objects[entry].rotation).invert();
     return new THREE.Box3()
       .setFromPoints(vertices.map((i) => this.mesh.vertices[i].clone().applyQuaternion(back)))
@@ -2361,8 +2452,9 @@ export class Editor extends EventTarget {
   setObjectSize(axis, value, record = true) {
     const entry = this.sizeEntry();
     if (entry === null || !Number.isFinite(value) || value < 0 || this.busy()) return;
-    const { vertices } = this.topology.islands[entry];
-    const size = this.objectSize()[axis];
+    const vertices = this.sizeVertices(entry);
+    const size = this.objectSize()?.[axis];
+    if (size === undefined) return;
     // Along the object's own axes, about its pivot point: the vertices are
     // taken into those axes and back (for an object that is not turned they
     // are the world's, and nothing is taken anywhere).
@@ -2389,12 +2481,69 @@ export class Editor extends EventTarget {
         vertex[axis] = center + (vertex[axis] - center) * factor;
         if (turn) vertex.applyQuaternion(turn);
       }
+      this.scaleInnerPivots(entry, origin, turn, { [axis]: factor });
     }
     this.mirror.moves(moving);
     if (before) this.commit(before);
     this.view.updatePositions();
     this.placeGizmo();
     this.emitChange();
+  }
+
+  // The size along `axis` set to `value` with the proportions kept (the size
+  // panel's lock): every side the object has is scaled by as much, about its
+  // pivot point, along its own axes. A side of nought stays nought; from or to
+  // nought there is no proportion to keep, and only that side changes (see
+  // setObjectSize()). With `record` off nothing is put in the history (a drag
+  // of the field: one step at its end).
+  setObjectSizeLocked(axis, value, record = true) {
+    const entry = this.sizeEntry();
+    if (entry === null || !Number.isFinite(value) || value < 0 || this.busy()) return;
+    const size = this.objectSize();
+    if (size[axis] < 1e-9 || value < 1e-9) {
+      this.setObjectSize(axis, value, record);
+      return;
+    }
+    const factor = value / size[axis];
+    const vertices = this.sizeVertices(entry);
+    const { rotation } = this.mesh.objects[entry];
+    const turn = rotation ? quaternionOf(rotation) : null;
+    const back = turn?.clone().invert();
+    const origin = this.pivotPoint(entry);
+    if (turn) origin.applyQuaternion(back);
+    const sides = ['x', 'y', 'z'].filter((side) => size[side] >= 1e-9);
+    const before = record ? this.snapshot() : null;
+    const moving = new Map(vertices.map((i) => [i, this.mesh.vertices[i].clone()]));
+    for (const i of vertices) {
+      const vertex = this.mesh.vertices[i];
+      if (turn) vertex.applyQuaternion(back);
+      for (const side of sides) vertex[side] = origin[side] + (vertex[side] - origin[side]) * factor;
+      if (turn) vertex.applyQuaternion(turn);
+    }
+    this.scaleInnerPivots(entry, origin, turn, Object.fromEntries(sides.map((side) => [side, factor])));
+    this.mirror.moves(moving);
+    if (before) this.commit(before);
+    this.view.updatePositions();
+    this.placeGizmo();
+    this.emitChange();
+  }
+
+  // A node scaled (see setObjectSize()): the pivot points of what it holds,
+  // objects and nodes, go with their contents - scaled by `factors` ({ x, y,
+  // z }, the sides scaled) about `origin`, along the node's axes (`turn`, or
+  // none: the world's; `origin` in those axes). A pivot that follows the
+  // middle of its bounds (none set) follows by itself.
+  scaleInnerPivots(entry, origin, turn, factors) {
+    const back = turn?.clone().invert();
+    for (const index of this.entriesUnder(entry)) {
+      const object = this.mesh.objects[index];
+      if (index === entry || !object?.pivot) continue;
+      const point = new THREE.Vector3().fromArray(object.pivot);
+      if (turn) point.applyQuaternion(back);
+      for (const [side, factor] of Object.entries(factors)) point[side] = origin[side] + (point[side] - origin[side]) * factor;
+      if (turn) point.applyQuaternion(turn);
+      object.pivot = point.toArray();
+    }
   }
 
   // What the coordinate fields show and move: the pivot point with the pivot
@@ -6315,6 +6464,84 @@ export class Editor extends EventTarget {
     return { vertices, nodes };
   }
 
+  // Symmetrize (as Blender's Mesh > Symmetrize): the object's half on one side
+  // of the plane across X through its pivot point (the middle of its bounds,
+  // if it has none) is put in place of the other half, mirrored. `keep` is
+  // the side kept: 1 the +X half, -1 the -X half. A face stays if its middle
+  // is on that side; its corners that reach over the plane are put onto it, so
+  // the two halves meet there (one vertex for both); the rest of the seam is
+  // the user's to mend. The mirrored faces look out as the kept ones do, and
+  // show the same places of the atlas - the picture mirrored. A reference may
+  // be symmetrized too (from the scene list: it is not picked in the view).
+  // One undo step. Returns whether anything changed.
+  symmetrize(index, keep) {
+    const object = this.mesh.objects[index];
+    if (!object || object.kind === 'node' || this.busy() || this.operation) return false;
+    const { mesh } = this;
+    const id = object.id;
+    const own = [];
+    mesh.vertexObject.forEach((owner, i) => {
+      if (owner === id) own.push(i);
+    });
+    if (own.length === 0) return false;
+    const middle = object.pivot
+      ? object.pivot[0]
+      : (Math.min(...own.map((i) => mesh.vertices[i].x)) + Math.max(...own.map((i) => mesh.vertices[i].x))) / 2;
+    const ON = 1e-6;
+    const side = (x) => (x - middle) * keep;
+    const before = this.snapshot();
+    // Its faces on the other side go, and so do the vertices only they had.
+    const gone = new Set();
+    mesh.faces.forEach((face, i) => {
+      if (mesh.vertexObject[face[0]] !== id) return;
+      const centre = face.reduce((sum, vertex) => sum + mesh.vertices[vertex].x, 0) / face.length;
+      if (side(centre) < 0) gone.add(i);
+    });
+    mesh.removeFaces(gone);
+    const used = new Set();
+    mesh.faces.forEach((face) => {
+      if (mesh.vertexObject[face[0]] === id) for (const vertex of face) used.add(vertex);
+    });
+    const unused = new Set();
+    mesh.vertexObject.forEach((owner, i) => {
+      if (owner === id && !used.has(i) && side(mesh.vertices[i].x) < -ON) unused.add(i);
+    });
+    if (unused.size) mesh.removeVertices(unused); // (what is left over there: wires' ends)
+    // What is left: over the plane onto it; the rest gets a mirror image.
+    const twin = new Map();
+    mesh.vertexObject.forEach((owner, i) => {
+      if (owner !== id) return;
+      const vertex = mesh.vertices[i];
+      if (side(vertex.x) < ON) {
+        vertex.x = middle;
+        twin.set(i, i); // (on the plane: its own image)
+      }
+    });
+    const count = mesh.vertices.length;
+    for (let i = 0; i < count; i++) {
+      if (mesh.vertexObject[i] !== id || twin.has(i)) continue;
+      const vertex = mesh.vertices[i];
+      twin.set(i, mesh.addVertex(2 * middle - vertex.x, vertex.y, vertex.z, id));
+    }
+    const kept = mesh.faces.filter((face) => mesh.vertexObject[face[0]] === id);
+    for (const face of kept) {
+      // Turned the other way round, to look out as the original does.
+      const order = [...face.keys()].reverse();
+      const image = order.map((k) => twin.get(face[k]));
+      if (face.uv) image.uv = order.map((k) => (face.uv[k] ? [...face.uv[k]] : face.uv[k]));
+      if (face.pin) image.pin = true;
+      if (face.shaped) image.shaped = true;
+      mesh.faces.push(image);
+    }
+    this.selection = new Set();
+    this.picked = new Set();
+    this.updateTopology();
+    this.commit(before);
+    this.rebuildView();
+    this.selectionChanged();
+    return true;
+  }
+
   // --- copying and pasting objects ------------------------------------------
 
   // Object mode: remembers a copy of the selected objects and nodes, a node
@@ -6344,10 +6571,10 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the node it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, reference, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
         const top = roots.has(index);
         return {
-          id, name, kind, hidden: Boolean(hidden), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
+          id, name, kind, hidden: Boolean(hidden), reference: Boolean(reference), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
           colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null, rotationMode: rotationMode ?? null, locked: locked ?? false,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
@@ -6381,6 +6608,7 @@ export class Editor extends EventTarget {
       mesh.addObject(source.name, source.kind);
       const object = mesh.objects[mesh.objects.length - 1];
       if (source.hidden) object.hidden = true;
+      if (source.reference) object.reference = true;
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
       if (source.color) object.color = source.color;
@@ -6888,12 +7116,13 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, reference, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
       id,
       name,
       kind: kind === 'node' ? 'node' : 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
+      ...(reference ? { reference: true } : {}), // a shape to build over (see setReference())
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(typeof color === 'string' ? { color } : {}),

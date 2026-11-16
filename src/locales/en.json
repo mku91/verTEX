@@ -1282,5 +1282,22 @@
  "uv.unfold.cylinder": "Cylinder",
  "uv.unfold.cylinder.title": "Round the object's Y axis, as a vase or a tower: a row of pixels is one height, a column one angle round, the grid running on all the way round; the seam at the back. Columns are square at the faces' mean distance from the axis, narrower nearer to it. Floors and lids are seen from above or below; what would land on another face (a strap over a body) goes to a piece of its own",
  "add-menu.plane": "Plane…",
- "outliner.primitive.plane": "Plane"
+ "outliner.primitive.plane": "Plane",
+ "outliner.menu.symmetrize-minus": "Symmetrize: keep −X",
+ "outliner.menu.symmetrize-plus": "Symmetrize: keep +X",
+ "html.toolbar.action-merge.title": "Merge: the selected vertices made one - at their middle, onto the one selected last, or those nearer one another than a distance (with nothing selected, the whole object: a seam closed). Faces lose the corners that come together. One undo step",
+ "app.hotkeys.edit.merge": "Merge vertices",
+ "html.merge-menu.center": "At center",
+ "html.merge-menu.center.title": "The selected vertices become one, at their middle",
+ "html.merge-menu.last": "At last selected",
+ "html.merge-menu.last.title": "The selected vertices come onto the one selected last",
+ "html.merge-menu.distance": "By distance",
+ "html.merge-menu.distance.title": "Vertices nearer one another than the distance become one, each bunch apart; with nothing selected, all of the object (a seam after Symmetrize)",
+ "html.merge-menu.distance-value.title": "The distance, in the scene's units",
+ "app.merge.vertices-only": "Merge works on vertices: select them in the vertex, edge or face mode",
+ "app.merge.done": "Merged: {count} vertices fewer",
+ "app.merge.nothing": "Nothing to merge",
+ "html.size-lock.title": "Keep the proportions: a new size along one axis scales the others as much",
+ "app.size-lock.on": "Proportions kept: a new size along one axis scales the others as much. Click to change one axis alone",
+ "app.size-lock.off": "Each axis alone. Click to keep the proportions: a new size along one axis will scale the others as much"
 }

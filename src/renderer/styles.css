@@ -2873,6 +2873,63 @@ input.refused {
   display: none;
 }
 
+/* Merge's choices, beside its button (see toggleMergeMenu()). */
+#merge-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+#merge-menu[hidden] {
+  display: none;
+}
+
+#merge-menu button {
+  flex: 1;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#merge-menu button:hover {
+  background: var(--hover);
+}
+
+#merge-menu .merge-distance {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#merge-menu input {
+  width: 64px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+#merge-menu input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 #magic-options label {
   display: flex;
   align-items: center;
@@ -3229,6 +3286,11 @@ input.refused {
 
 .properties-header button[hidden] {
   display: none;
+}
+
+/* The size panel's lock, closed: the proportions kept (see app.js). */
+#size-lock.active {
+  color: var(--accent);
 }
 
 .properties-header button i {

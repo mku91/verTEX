@@ -240,6 +240,9 @@
       <button data-action="separate" data-i18n-title="html.toolbar.action-separate.title">
         <i class="fa-solid fa-object-ungroup"></i>
       </button>
+      <button data-action="merge" data-i18n-title="html.toolbar.action-merge.title">
+        <i class="fa-solid fa-arrows-to-dot"></i>
+      </button>
       <button data-action="delete" data-i18n-title="html.toolbar.action-delete.title">
         <i class="fa-solid fa-trash-can"></i>
       </button>
@@ -487,6 +490,9 @@
       <div id="dimensions" hidden>
         <div class="properties-header">
           <p data-i18n="html.dimensions.properties-header.p.text"></p>
+          <button id="size-lock" data-i18n-title="html.size-lock.title">
+            <i class="fa-solid fa-lock-open"></i>
+          </button>
           <button id="copy-size" data-i18n-title="html.copy-size.title">
             <i class="fa-regular fa-copy"></i>
           </button>
@@ -824,6 +830,16 @@
         <button type="submit" data-i18n="html.export-dialog.dialog.form-buttons.type-submit.text"></button>
       </div>
     </form>
+  </div>
+
+  <!-- Merge's choices, beside its button (see app.js): how the selected vertices become one. -->
+  <div id="merge-menu" hidden>
+    <button data-merge="center" data-i18n="html.merge-menu.center" data-i18n-title="html.merge-menu.center.title"></button>
+    <button data-merge="last" data-i18n="html.merge-menu.last" data-i18n-title="html.merge-menu.last.title"></button>
+    <div class="merge-distance">
+      <button data-merge="distance" data-i18n="html.merge-menu.distance" data-i18n-title="html.merge-menu.distance.title"></button>
+      <input name="distance" type="text" inputmode="decimal" spellcheck="false" data-i18n-title="html.merge-menu.distance-value.title">
+    </div>
   </div>
 
   <!-- The magic selection's angle, beside its button while it is in hand (see app.js). -->

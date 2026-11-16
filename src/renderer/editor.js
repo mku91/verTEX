@@ -4986,6 +4986,24 @@ export class Editor extends EventTarget {
       if (drag.axis) offset.projectOnVector(drag.axis);
       lead.copy(from).add(offset);
     }
+    // Vertices, an edge or a face being moved (not a whole object): the vertex
+    // taken onto a reference's vertex near where it is going on the screen -
+    // one shown, as the pencil's new vertex is (see pencilSnap()) - and all
+    // that is dragged with it. Not with Alt held; along an axis, as far as
+    // the axis takes it there.
+    let onReferenceMove = null;
+    if (!snapped && drag.parent === undefined && this.mode !== 'object' && !this.altHeld && this.topology.referenced?.size && drag.viewer.project) {
+      // Where the vertex is aimed on the screen: the pointer, less how far from
+      // the vertex it was pressed (not where the grid has put it: that may be far).
+      drag.aimFrom ??= drag.viewer.project(drag.start) ?? { x: drag.x, y: drag.y };
+      const at = { x: clientX - (drag.x - drag.aimFrom.x), y: clientY - (drag.y - drag.aimFrom.y) };
+      onReferenceMove = this.pencilSnap(at.x, at.y, drag);
+      if (onReferenceMove) {
+        offset = onReferenceMove.clone().sub(from);
+        if (drag.axis) offset.projectOnVector(drag.axis);
+        lead.copy(from).add(offset);
+      }
+    }
     // The pencil's new vertex: onto a vertex near the pointer - of its own
     // object, or of a reference (not with Alt held: then freely), whatever the grid says.
     const onReference = drag.parent !== undefined && !this.altHeld ? this.pencilSnap(clientX, clientY, drag) : null;
@@ -4998,7 +5016,7 @@ export class Editor extends EventTarget {
     // apart. (A reference's vertex by the middle is seldom right on it.)
     const onPlane = drag.parent !== undefined && !this.altHeld && this.mirrorPlaneSnap(lead, drag);
     if (onPlane) offset = lead.clone().sub(from);
-    this.showSnapMark(onReference || onPlane ? { points: [lead.clone()], lines: [] } : snapped?.mark);
+    this.showSnapMark(onReference || onPlane || onReferenceMove ? { points: [lead.clone()], lines: [] } : snapped?.mark);
     vertex.copy(drag.start).add(offset);
     for (const [i, start] of drag.others) this.mesh.vertices[i].copy(start).add(offset);
     for (const [object, start] of drag.pivots) object.pivot = start.clone().add(offset).toArray();

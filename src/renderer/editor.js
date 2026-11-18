@@ -6727,6 +6727,8 @@ export class Editor extends EventTarget {
     const made = []; // the new objects, in the scene's order
     const base = mesh.vertices.length;
     let count = 0;
+    const jointNodes = new Map(); // a skin's joint (its node in the file) -> the node made of it
+    const skinned = []; // [first vertex, weights] of each skinned mesh
     for (const entry of scene.entries) {
       mesh.addObject(latinName(entry.name).trim() || (entry.kind === 'node' ? 'Node' : 'Mesh'), entry.kind);
       const object = mesh.objects[mesh.objects.length - 1];
@@ -6738,6 +6740,8 @@ export class Editor extends EventTarget {
       object.pivot = place.toArray().map((n) => +n.toFixed(6));
       setRotation(object, rotationOf(turn));
       made.push(object);
+      if (entry.joint !== undefined) jointNodes.set(entry.joint, object.id);
+      if (entry.weights) skinned.push([mesh.vertices.length, entry.weights]);
       const image = entry.kind === 'mesh' ? pictureOf(entry) : null;
       const on = image === null ? null : atlasOf.get(image);
       if (on) object.atlas = on.atlas.id;
@@ -6759,6 +6763,13 @@ export class Editor extends EventTarget {
         }
         mesh.addFace(loop);
       }
+    }
+    // A skin's weights: to the nodes its joints became (see skin.js).
+    for (const [first, weights] of skinned) {
+      weights.forEach((weight, k) => {
+        const own = weight.filter(([joint]) => jointNodes.has(joint)).map(([joint, w]) => [jointNodes.get(joint), w]);
+        if (own.length) mesh.setWeights(first + k, own);
+      });
     }
     for (const { atlas, densities, made: own } of atlasOf.values()) {
       if (!own) continue; // (the project's one keeps its own)

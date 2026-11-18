@@ -36,8 +36,14 @@
 //     each face had (`extras.verTEXFaces`, see gltf.js), every face is as it was.
 //   - Places on a picture stay fractions of it here (from its top left, as in
 //     glTF); the editor makes pixels of them, once it knows the pictures' sizes.
-//   - Normals, vertex colours, skins and animations are left out (verTEX
-//     works out its normals itself); what was is told in `skipped`.
+//   - A skin comes as verTEX's (see skin.js): its joints - and the nodes above
+//     them - are nodes, kept though they hold no mesh (a joint at an end, too:
+//     a bone's tip), each with its place and turn; a skinned mesh's vertices
+//     are where its joints' bind matrices put them (as glTF has it: the mesh's
+//     own node does not move them), and each keeps its weights (JOINTS_0 /
+//     WEIGHTS_0, up to four) to the nodes of those joints.
+//   - Normals, vertex colours and animations are left out (verTEX works out
+//     its normals itself); what was is told in `skipped`.
 
 import * as THREE from 'three';
 
@@ -250,7 +256,10 @@ export function quadsOf(triangles, points) {
 // The scene of a .glb file's bytes:
 //   entries   [{ name, kind ('mesh' | 'node'), parent (an index among them,
 //             or null), matrix (in the world), points ([Vector3], in the
-//             world), faces ([{ loop, uv, image }]) }] - parents before children
+//             world), faces ([{ loop, uv, image }]), and for a skin: a
+//             joint's `joint` (its node's index in the file), a skinned
+//             mesh's `weights` ([[joint's node, weight]], a point each) }]
+//             - parents before children
 //   images    [{ bytes, mimeType, name }] - the pictures the faces' `image`
 //             counts in
 //   skipped   names of what was in the file and is left out
@@ -261,7 +270,6 @@ export function sceneOfGlb(bytes) {
   const nodes = gltf.nodes ?? [];
   const skipped = new Set();
   if (gltf.animations?.length) skipped.add('animations');
-  if (gltf.skins?.length) skipped.add('skins');
 
   // The roots: the scene's, or every node that is in none.
   const scene = gltf.scenes?.[gltf.scene ?? 0];
@@ -271,18 +279,57 @@ export function sceneOfGlb(bytes) {
     roots = nodes.map((_, i) => i).filter((i) => !children.has(i));
   }
 
+  // Every node's matrix in the world, and its parent (for the skins).
+  const parentOf = new Map();
+  nodes.forEach((node, i) => (node.children ?? []).forEach((child) => parentOf.set(child, i)));
+  const worlds = new Map();
+  const worldOf = (index, depth = 0) => {
+    if (worlds.has(index)) return worlds.get(index);
+    if (depth > nodes.length) throw new ImportError('broken', `node ${index}`);
+    const parent = parentOf.get(index);
+    const matrix = (parent === undefined ? new THREE.Matrix4() : worldOf(parent, depth + 1).clone()).multiply(localMatrix(nodes[index] ?? {}));
+    worlds.set(index, matrix);
+    return matrix;
+  };
+  // The skins' joints, and the nodes above them: kept as nodes, mesh or none.
+  const kept = new Set();
+  for (const skin of gltf.skins ?? []) {
+    for (let joint of skin.joints ?? []) {
+      while (joint !== undefined && !kept.has(joint)) {
+        kept.add(joint);
+        joint = parentOf.get(joint);
+      }
+    }
+  }
+  // A skin's joint matrices as they bind: each joint's world matrix times its
+  // inverse bind matrix - what takes a vertex of the mesh to where it is.
+  const bindings = (gltf.skins ?? []).map((skin) => {
+    const inverse = skin.inverseBindMatrices === undefined ? null : readAccessor(gltf, buffers, skin.inverseBindMatrices).values;
+    return (skin.joints ?? []).map((joint, k) => {
+      const bind = inverse ? new THREE.Matrix4().fromArray(Array.from(inverse.subarray(k * 16, k * 16 + 16))) : new THREE.Matrix4();
+      return { node: joint, matrix: worldOf(joint).clone().multiply(bind) };
+    });
+  });
+
   // The geometry of a mesh seen through a world matrix: the points, welded, and the faces.
-  const meshGeometry = (meshIndex, matrix) => {
+  // With `skin` (an index into gltf.skins) the points are where its joints
+  // put them, and each has its weights: [[joint's node, weight]].
+  const meshGeometry = (meshIndex, matrix, skin = null) => {
     const mesh = gltf.meshes?.[meshIndex];
     if (!mesh) throw new ImportError('broken', `mesh ${meshIndex}`);
+    const joints = skin === null ? null : bindings[skin];
+    if (skin !== null && !joints) throw new ImportError('broken', `skin ${skin}`);
+    if (joints) matrix = new THREE.Matrix4(); // (a skinned mesh: its node does not move it)
     const mirrored = matrix.determinant() < 0;
     const points = [];
+    const weights = joints ? [] : null;
     const welded = new Map();
-    const vertexAt = (point) => {
+    const vertexAt = (point, weight = null) => {
       const key = `${Math.round(point.x * WELD)},${Math.round(point.y * WELD)},${Math.round(point.z * WELD)}`;
       if (!welded.has(key)) {
         welded.set(key, points.length);
         points.push(point);
+        if (weights) weights.push(weight ?? []);
       }
       return welded.get(key);
     };
@@ -304,9 +351,30 @@ export function sceneOfGlb(bytes) {
       const set = picture && primitive.attributes[`TEXCOORD_${picture.set}`];
       const places = set === undefined || set === null ? null : readAccessor(gltf, buffers, set);
       const vertex = positions.values;
+      // A skinned mesh's joints and weights, at each corner.
+      const jointSet = joints && primitive.attributes.JOINTS_0 !== undefined ? readAccessor(gltf, buffers, primitive.attributes.JOINTS_0).values : null;
+      const weightSet = joints && primitive.attributes.WEIGHTS_0 !== undefined ? readAccessor(gltf, buffers, primitive.attributes.WEIGHTS_0).values : null;
       const ids = new Map(); // the primitive's vertex -> ours
       const ours = (i) => {
-        if (!ids.has(i)) ids.set(i, vertexAt(new THREE.Vector3(vertex[i * 3], vertex[i * 3 + 1], vertex[i * 3 + 2]).applyMatrix4(matrix)));
+        if (ids.has(i)) return ids.get(i);
+        const at = new THREE.Vector3(vertex[i * 3], vertex[i * 3 + 1], vertex[i * 3 + 2]);
+        if (!jointSet || !weightSet) {
+          ids.set(i, vertexAt(at.applyMatrix4(matrix)));
+          return ids.get(i);
+        }
+        // Where the joints put it, as they bind (blended by its weights), and its weights to them.
+        const point = new THREE.Vector3();
+        const weight = [];
+        let total = 0;
+        for (let k = 0; k < 4; k++) {
+          const w = weightSet[i * 4 + k];
+          const joint = joints[jointSet[i * 4 + k]];
+          if (!(w > 0) || !joint) continue;
+          point.addScaledVector(at.clone().applyMatrix4(joint.matrix), w);
+          weight.push([joint.node, w]);
+          total += w;
+        }
+        ids.set(i, vertexAt(total > 0 ? point.multiplyScalar(1 / total) : at, weight));
         return ids.get(i);
       };
       const placeOf = (i) => [places.values[i * 2], places.values[i * 2 + 1]];
@@ -335,7 +403,7 @@ export function sceneOfGlb(bytes) {
         triangles.push({ loop, uv: places ? corner.map(placeOf) : null, image: places ? picture.image : null });
       }
     }
-    return { points, faces: [...faces, ...quadsOf(triangles, points)] };
+    return { points, faces: [...faces, ...quadsOf(triangles, points)], ...(weights ? { weights } : {}) };
   };
 
   // The tree, walked from the roots: what is kept, parents first.
@@ -347,11 +415,13 @@ export function sceneOfGlb(bytes) {
     const matrix = parentMatrix.clone().multiply(localMatrix(node));
     const name = node.name || (node.mesh !== undefined ? gltf.meshes?.[node.mesh]?.name : '') || (node.mesh !== undefined ? 'Mesh' : 'Node');
     const children = node.children ?? [];
-    const geometry = node.mesh !== undefined ? meshGeometry(node.mesh, matrix) : null;
+    const geometry = node.mesh !== undefined ? meshGeometry(node.mesh, matrix, node.skin ?? null) : null;
     const hasMesh = geometry && geometry.faces.length > 0;
-    if (!hasMesh && children.length === 0) return false;
+    const joint = kept.has(index); // (a skin's joint, or above one: kept, holding nothing or not)
+    if (!hasMesh && children.length === 0 && !joint) return false;
     const at = entries.length;
-    entries.push({ name, kind: hasMesh && children.length === 0 ? 'mesh' : 'node', parent, matrix, points: [], faces: [] });
+    entries.push({ name, kind: hasMesh && children.length === 0 ? 'mesh' : 'node', parent, matrix, points: [], faces: [], ...(joint ? { joint: index } : {}) });
+    if (joint && !hasMesh && children.length === 0) return true;
     let holds = false;
     if (hasMesh && children.length) {
       // A mesh's node that holds more: a node, its mesh an object in it.
@@ -362,7 +432,7 @@ export function sceneOfGlb(bytes) {
       return true;
     }
     for (const child of children) if (walk(child, matrix, at, seen)) holds = true;
-    if (!holds) {
+    if (!holds && !joint) {
       // Nothing came of it: it goes, and whatever was added under it went with nothing.
       entries.length = at;
       return false;

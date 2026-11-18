@@ -4,7 +4,8 @@ import { shownSkinNodes } from './skin.js';
 // What the skin binds to a node, shown (see skin.js): with a node picked,
 // a green dot on every vertex weighted to it - brighter the more it is -
 // seen through the model, where the vertex is shown (posed, too). As
-// Blender shows a vertex node's vertices when it is picked.
+// Blender shows a vertex node's vertices when it is picked. Not in the
+// animation mode: there the model is posed, its skin not worked on.
 
 const COLOR = 0x50fa7b;
 const SIZE = 9; // px
@@ -63,7 +64,8 @@ export class SkinMarks {
   // Drawn every time the view is: the dots where the vertices are shown now.
   update() {
     const { editor } = this;
-    const nodes = editor.mesh.weights.size ? this.pickedNodes() : new Set();
+    // (none in the animation mode: there the model is posed, not its skin worked on)
+    const nodes = editor.mesh.weights.size && editor.workspace !== 'animation' ? this.pickedNodes() : new Set();
     const points = [];
     const strengths = [];
     if (nodes.size) {

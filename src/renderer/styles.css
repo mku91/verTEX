@@ -1144,10 +1144,13 @@ body {
 
 .tl-lanes-box {
   min-width: 0;
-  overflow: hidden;
+  overflow: clip; /* (not hidden: that would make it the scroller its canvas sticks in) */
 }
 
+/* As tall as what is in sight, stuck to the top as the rows scroll (see Timeline.draw()). */
 .tl-lanes {
+  position: sticky;
+  top: 0;
   display: block;
 }
 
@@ -3286,6 +3289,11 @@ input.refused {
 
 .properties-header button[hidden] {
   display: none;
+}
+
+/* A node pinned for IK (see AnimationMode.togglePin()). */
+#pose-panel .pose-pin.active {
+  color: var(--accent);
 }
 
 /* The size panel's lock, closed: the proportions kept (see app.js). */

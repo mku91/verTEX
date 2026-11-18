@@ -12,6 +12,10 @@ import { freeName } from './names.js';
 import { t } from './i18n.js';
 import { ROTATION_STEP } from './snap-grid.js';
 import { ringTurn } from './ring-turn.js';
+import { nodePlaces } from './node-marks.js';
+import { toast } from './toast.js';
+
+const NODE_PICK = 20; // px: how near a node's square a press with Alt takes it (see pickNodeAt())
 
 // The animation mode at work (see animation.js, timeline.js): the model
 // shown in the pose of the frame looked at, and posed by hand.
@@ -74,6 +78,13 @@ export class AnimationMode {
     window.addEventListener('keyup', (event) => { if (event.key === 'Shift') shift(false); });
     window.addEventListener('pointermove', (event) => shift(event.shiftKey));
     window.addEventListener('blur', () => shift(false));
+    // The wheel while moving by IK: the chain's length, not the camera's distance (see ikWheel()).
+    viewport.renderer.domElement.addEventListener('wheel', (event) => {
+      if (!this.dragging?.ik) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.ikWheel(event);
+    }, { capture: true, passive: false });
     // Alt held or let go while scaling: one side, or both (see oneSided()) -
     // as the editor has it (Editor.altHeld), once it has heard of it.
     for (const type of ['keydown', 'keyup']) {
@@ -83,7 +94,15 @@ export class AnimationMode {
     }
     this.gizmo.addEventListener('objectChange', () => this.drag());
     this.gizmo.addEventListener('mouseUp', () => this.endDrag());
-    editor.workspacePress.animation = () => (this.gizmo.object && this.gizmo.axis !== null ? 'gizmo' : false);
+    editor.workspacePress.animation = (event) => {
+      if (this.gizmo.object && this.gizmo.axis !== null) return 'gizmo';
+      // Alt held: a node - a bone - picked by its square, not the model (nothing near: nothing).
+      if (event?.altKey) {
+        this.pickNodeAt(event.clientX, event.clientY, event.shiftKey);
+        return true;
+      }
+      return false;
+    };
 
     editor.addEventListener('change', () => this.refresh());
     // Shift held or let go: a turn by steps, or freely - on the way too.
@@ -111,6 +130,33 @@ export class AnimationMode {
 
   get on() {
     return this.editor.workspace === 'animation';
+  }
+
+  // A press with Alt: the node whose square (where it is posed) is nearest the
+  // pointer, within NODE_PICK px, picked - with Shift, added to what is
+  // picked, or taken off it. Returns whether there was one.
+  pickNodeAt(x, y, add = false) {
+    const { editor } = this;
+    let best = null;
+    let nearest = NODE_PICK;
+    for (const place of nodePlaces(editor, this)) {
+      const at = editor.screenOf(place.at);
+      if (!at) continue;
+      const distance = Math.hypot(at.x - x, at.y - y);
+      if (distance <= nearest) {
+        nearest = distance;
+        best = place.index;
+      }
+    }
+    if (best === null) return false;
+    if (editor.mode !== 'object') editor.setMode('object');
+    const picked = add ? new Set(editor.picked) : new Set();
+    if (add && picked.has(best)) picked.delete(best);
+    else picked.add(best);
+    editor.picked = picked;
+    editor.syncSelection();
+    editor.emitChange();
+    return true;
   }
 
   // The entry the gizmo and the panel work on: one object or node picked whole.
@@ -368,15 +414,55 @@ export class AnimationMode {
     };
   }
 
-  // The nodes above an entry, the nearest first: the joints its IK turns.
+  // The nodes above an entry, the nearest first: the joints its IK turns -
+  // up to a node pinned for IK (`ikPin`: it does not turn, nor what is above
+  // it), and no more than the chain's length chosen by the wheel while
+  // moving (this.ikLength, kept for the next move; null: all of them). With
+  // the node above pinned there is nothing to turn: the entry stays.
   ikChain(index) {
     const { islands } = this.editor.topology;
     const { objects } = this.editor.mesh;
-    const joints = [];
+    const all = [];
     for (let at = islands[index]?.parentIndex ?? null; at !== null && at !== undefined; at = islands[at].parentIndex) {
-      joints.push({ index: at, id: objects[at].id });
+      if (objects[at].ikPin) break;
+      all.push({ index: at, id: objects[at].id });
     }
-    return joints.length ? { joints, values: structuredClone(this.values), locals: localTransforms(this.editor) } : null;
+    if (all.length === 0 && (islands[index]?.parentIndex ?? null) === null) return null; // (nothing above: an ordinary move)
+    const length = this.ikLength ? Math.min(this.ikLength, all.length) : all.length;
+    return { all, joints: all.slice(0, length), values: structuredClone(this.values), locals: localTransforms(this.editor), overrides: structuredClone(this.overrides) };
+  }
+
+  // The wheel while moving by IK: the chain a joint shorter (down) or longer
+  // (up), from 1 to as far as a pinned node lets it; told by a toast, kept
+  // for the next move, and the move done again with it.
+  ikWheel(event) {
+    const drag = this.dragging;
+    if (!drag?.ik || drag.ik.all.length === 0) return false;
+    const { ik } = drag;
+    const length = Math.max(1, Math.min(ik.all.length, ik.joints.length + (event.deltaY < 0 ? 1 : -1)));
+    if (length !== ik.joints.length) {
+      ik.joints = ik.all.slice(0, length);
+      this.ikLength = length === ik.all.length ? null : length;
+      // The joints let go of: as they were before the move.
+      for (const { id } of ik.all.slice(length)) {
+        if (ik.overrides.has(id)) this.overrides.set(id, structuredClone(ik.overrides.get(id)));
+        else this.overrides.delete(id);
+      }
+      if (drag.lastMatrix) this.poseTo(drag.lastMatrix);
+    }
+    toast(t('animate.ik.length', { count: ik.joints.length, all: ik.all.length }), { icon: 'fa-link' });
+    return true;
+  }
+
+  // The node picked pinned for IK, or let go (see ikChain()). One undo step.
+  togglePin() {
+    const entry = this.entry();
+    const object = entry && this.editor.mesh.objects[entry.index];
+    if (!object || object.kind !== 'node' || this.editor.busy()) return;
+    this.editor.history.push(this.editor.snapshot());
+    if (object.ikPin) delete object.ikPin;
+    else object.ikPin = true;
+    this.editor.emitChange();
   }
 
   // The entry put where `matrix` (in the world) says: its property (the
@@ -386,6 +472,7 @@ export class AnimationMode {
     if (!drag) return;
     if (drag.ik) {
       // Where the entry is moved to: the joints turned to bring it there.
+      drag.lastMatrix = matrix.clone(); // (for the wheel to move it again, see ikWheel())
       const target = new THREE.Vector3().setFromMatrixPosition(matrix);
       drag.target = target; // (where the sign of IK is, see ikSignAt())
       const turns = solveIK(this.editor, drag.id, drag.ik.joints, target, drag.ik.values, drag.ik.locals);
@@ -435,9 +522,16 @@ export class AnimationMode {
     if (!drag) return;
     if (drag.ik) {
       // The joints that turned: keyed, with Autokey.
-      const turned = drag.ik.joints.filter(({ id }) => JSON.stringify(this.values.get(id)?.rotation) !== JSON.stringify(drag.ik.values.get(id)?.rotation));
+      const turned = drag.ik.all.filter(({ id }) => JSON.stringify(this.values.get(id)?.rotation) !== JSON.stringify(drag.ik.values.get(id)?.rotation));
       if (this.timeline.autokey && turned.length) this.writeKeys(turned.map(({ index }) => index), ['rotation']);
-      else this.show();
+      else {
+        // Not keyed yet: the joints IK turned are kept in mind, for K to key
+        // them with what is picked (see keyPicked()) - the entry moved is not
+        // what changed, they are.
+        this.ikPosed ??= new Set();
+        for (const { index } of turned) this.ikPosed.add(index);
+        this.show();
+      }
       return;
     }
     // (what was changed: the property - and, scaled on one side, the place too)
@@ -498,10 +592,21 @@ export class AnimationMode {
     if (!this.on) return false;
     const picked = this.editor.mode === 'object' ? [...this.editor.picked] : [];
     const { mesh } = this.editor;
-    for (const index of picked) {
-      const changed = PROPERTIES.filter((property) => this.overrides.get(mesh.objects[index].id)?.[property] !== undefined);
-      if (changed.length) this.writeKeys([index], changed);
+    // ...and the joints a move by IK turned and that are not keyed (see
+    // endPose()): pulling a hand turns the elbow and the shoulder, not the hand.
+    const entries = new Set([...picked, ...(this.ikPosed ?? [])]);
+    this.ikPosed?.clear();
+    const groups = new Map(); // the properties changed -> the entries they changed on
+    for (const index of entries) {
+      const object = mesh.objects[index];
+      if (!object) continue;
+      const changed = PROPERTIES.filter((property) => this.overrides.get(object.id)?.[property] !== undefined);
+      if (changed.length === 0) continue;
+      const key = changed.join();
+      if (!groups.has(key)) groups.set(key, { indices: [], changed });
+      groups.get(key).indices.push(index);
     }
+    for (const { indices, changed } of groups.values()) this.writeKeys(indices, changed);
     return true;
   }
 
@@ -526,6 +631,7 @@ export class AnimationMode {
     for (const button of panel.querySelectorAll('button')) button.addEventListener('mousedown', (event) => event.preventDefault());
     for (const mark of this.marks) mark.addEventListener('click', () => this.toggleKey(mark.dataset.key));
     panel.querySelector('.pose-key').addEventListener('click', () => this.keyPicked());
+    panel.querySelector('.pose-pin').addEventListener('click', () => this.togglePin());
     // A number of the pose: typed, or dragged by its handle. Like the gizmo,
     // it poses for the time being, or keys with Autokey on.
     for (const input of this.inputs) {
@@ -576,6 +682,12 @@ export class AnimationMode {
       const value = values[property][+axis];
       input.value = value === undefined ? '' : +value.toFixed(4);
     }
+    // The pin for IK: a node's only.
+    const object = this.editor.mesh.objects[entry.index];
+    const pin = this.panel.querySelector('.pose-pin');
+    pin.hidden = object?.kind !== 'node';
+    pin.classList.toggle('active', Boolean(object?.ikPin));
+    pin.title = t(object?.ikPin ? 'animate.pin.on' : 'animate.pin.off');
     const clip = this.timeline.current();
     const frame = Math.round(this.timeline.frame);
     for (const mark of this.marks) {

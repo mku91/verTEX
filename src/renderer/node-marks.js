@@ -51,7 +51,7 @@ export function nodePlaces(editor, animation = null) {
     if (object.kind !== 'node' || islands[index]?.hidden) return;
     const matrix = posed?.get(object.id);
     const chosen = picked.has(index);
-    out.push({ index, at: matrix ? new THREE.Vector3().setFromMatrixPosition(matrix) : editor.pivotPoint(index), picked: chosen, size: NODE_MARK.size * sizeOf(object.id, chosen, now) });
+    out.push({ index, at: matrix ? new THREE.Vector3().setFromMatrixPosition(matrix) : editor.pivotPoint(index), picked: chosen, pinned: Boolean(object.ikPin), size: NODE_MARK.size * sizeOf(object.id, chosen, now) });
   });
   out.growing = growing;
   return out;
@@ -59,12 +59,15 @@ export function nodePlaces(editor, animation = null) {
 
 const VERTEX = /* glsl */ `
 attribute float picked;
+attribute float pinned;
 attribute float size;
 uniform float ratio;
 varying float vPicked;
+varying float vPinned;
 varying float vSize;
 void main() {
   vPicked = picked;
+  vPinned = pinned;
   vSize = size * ratio;
   gl_PointSize = vSize;
   gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
@@ -76,14 +79,20 @@ uniform vec3 color;
 uniform float line;
 uniform float faint;
 varying float vPicked;
+varying float vPinned;
 varying float vSize;
 void main() {
   // a square's outline: the pixels within so many of the point's edge
+  // (a node pinned for IK: filled, its inside fainter)
   vec2 px = gl_PointCoord * vSize;
   float width = line * ( 1.0 + vPicked );
   float edge = min( min( px.x, px.y ), min( vSize - px.x, vSize - px.y ) );
-  if ( edge > width ) discard;
-  gl_FragColor = vec4( color, vPicked > 0.5 ? 1.0 : faint );
+  float alpha = vPicked > 0.5 ? 1.0 : faint;
+  if ( edge > width ) {
+    if ( vPinned < 0.5 ) discard;
+    alpha *= 0.6;
+  }
+  gl_FragColor = vec4( color, alpha );
   #include <colorspace_fragment>
 }
 `;
@@ -121,6 +130,7 @@ export class NodeMarks {
     const geometry = this.points.geometry;
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(places.flatMap(({ at }) => at.toArray()), 3));
     geometry.setAttribute('picked', new THREE.Float32BufferAttribute(places.map(({ picked }) => (picked ? 1 : 0)), 1));
+    geometry.setAttribute('pinned', new THREE.Float32BufferAttribute(places.map(({ pinned }) => (pinned ? 1 : 0)), 1));
     geometry.setAttribute('size', new THREE.Float32BufferAttribute(places.map(({ size }) => size), 1));
     const ratio = window.devicePixelRatio || 1;
     this.material.uniforms.ratio.value = ratio;

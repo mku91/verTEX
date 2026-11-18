@@ -109,7 +109,7 @@ export function modelOf(editor) {
     shaped: mesh.faces.map((face, i) => (face.shaped ? i : -1)).filter((i) => i >= 0),
     wires: mesh.wires.map((wire) => [...wire]),
     // Every vertex belongs to an object, by id; nodes hold objects and nodes.
-    objects: mesh.objects.map(({ id, name, kind, parent, hidden, reference, pivot, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => {
+    objects: mesh.objects.map(({ id, name, kind, parent, hidden, reference, pivot, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked, ikPin }) => {
       // Inside a node that is not turned the angles are the entry's own, as they were set.
       const { position, rotation: turn } = locals.get(id);
       return {
@@ -119,6 +119,7 @@ export function modelOf(editor) {
         parent: parent ?? null,
         ...(hidden ? { hidden: true } : {}),
         ...(reference ? { reference: true } : {}), // a shape to build over, see Editor.setReference()
+        ...(ikPin ? { ikPin: true } : {}), // a node IK does not turn, nor what is above it (see animate.js)
         position: position.map(round),
         ...(turn ? { rotation: turn.map(round) } : {}),
         // No pivot point of its own: the position is the middle of its bounds, and follows them.
@@ -315,6 +316,7 @@ export function readProject(files) {
       (object.color === undefined || typeof object.color === 'string') &&
       (object.oneSided === undefined || typeof object.oneSided === 'boolean') &&
       (object.reference === undefined || typeof object.reference === 'boolean') &&
+      (object.ikPin === undefined || typeof object.ikPin === 'boolean') &&
       (object.smooth === undefined || (Number.isFinite(object.smooth) && object.smooth > 0 && object.smooth <= 180)) &&
       (object.colliders === undefined || (Array.isArray(object.colliders) && object.colliders.every(soundCollider))) &&
       (object.body === undefined || BODIES.includes(object.body)) &&

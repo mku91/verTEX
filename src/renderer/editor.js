@@ -2230,6 +2230,7 @@ export class Editor extends EventTarget {
     }
     this.cancelDrag();
     this.workspace = name;
+    this.view.setAnimating(name === 'animation');
     this.refreshHighlight();
     this.placeGizmo();
     this.emitChange();
@@ -5667,8 +5668,9 @@ export class Editor extends EventTarget {
       return face.map((vertex, k) => [vertex, face[(k + 1) % face.length]]);
     });
 
-    if (this.preview || this.painting) {
-      // Nothing on the model but its surface: looked at, or painted on.
+    if (this.preview || this.painting || this.workspace === 'animation') {
+      // Nothing on the model but its surface: looked at, painted on, or posed
+      // (in the animation mode what is picked is shown by its node's square and the gizmo).
       this.view.points.visible = false;
       this.view.setHighlight({ selectedFaces: [], hoveredFaces: [], selectedEdges: [], hoveredEdges: [] });
       this.viewport.requestRender();
@@ -6571,10 +6573,10 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the node it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, reference, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, reference, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
         const top = roots.has(index);
         return {
-          id, name, kind, hidden: Boolean(hidden), reference: Boolean(reference), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
+          id, name, kind, hidden: Boolean(hidden), reference: Boolean(reference), ikPin: Boolean(ikPin), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
           colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null, rotationMode: rotationMode ?? null, locked: locked ?? false,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
@@ -6609,6 +6611,7 @@ export class Editor extends EventTarget {
       const object = mesh.objects[mesh.objects.length - 1];
       if (source.hidden) object.hidden = true;
       if (source.reference) object.reference = true;
+      if (source.ikPin) object.ikPin = true;
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
       if (source.color) object.color = source.color;
@@ -7127,13 +7130,14 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, reference, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, reference, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
       id,
       name,
       kind: kind === 'node' ? 'node' : 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(reference ? { reference: true } : {}), // a shape to build over (see setReference())
+      ...(ikPin && kind === 'node' ? { ikPin: true } : {}), // not turned by IK (see animate.js)
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(typeof color === 'string' ? { color } : {}),

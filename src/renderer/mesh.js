@@ -2505,6 +2505,12 @@ export class MeshView {
     this.applyLook();
   }
 
+  // The animation mode on or off: the model shown without its edges (see applyLook()).
+  setAnimating(on) {
+    this.animating = on;
+    this.applyLook();
+  }
+
   setFocus(on) {
     this.focus = on;
     this.applyLook();
@@ -2558,7 +2564,8 @@ export class MeshView {
     this.plain.visible = this.plainFront.visible = !xray;
     // (View -> Edges off hides them over the surface; with no surface - the
     // wireframe look, the focus - they are all there is, and stay.)
-    this.wire.visible = !this.bare && (this.edgesShown !== false || wireframe);
+    // (in the animation mode the model is looked at in its pose: no edges over it)
+    this.wire.visible = !this.bare && !this.animating && (this.edgesShown !== false || wireframe);
     // Painted: the atlas' pixels as they are, and its see-through ones as holes.
     const painted = Boolean(this.bare || this.shading === 'textured');
     const shown = `${painted}|${this.atlases.map((atlas) => `${atlas.id}:${atlas.texture.id}`).join(',')}`;

@@ -1299,5 +1299,8 @@
  "app.merge.nothing": "Nothing to merge",
  "html.size-lock.title": "Keep the proportions: a new size along one axis scales the others as much",
  "app.size-lock.on": "Proportions kept: a new size along one axis scales the others as much. Click to change one axis alone",
- "app.size-lock.off": "Each axis alone. Click to keep the proportions: a new size along one axis will scale the others as much"
+ "app.size-lock.off": "Each axis alone. Click to keep the proportions: a new size along one axis will scale the others as much",
+ "animate.pin.off": "Pin for IK: this node will not turn when something below it is moved with Shift (IK), nor will anything above it - the chain stops here. E.g. pin the shoulders: an arm pulled turns the elbow and the shoulder joint only",
+ "animate.pin.on": "Pinned for IK: IK does not turn it, nor anything above it. Click to let go",
+ "animate.ik.length": "IK: {count} of {all} joints (the wheel: more or fewer)"
 }

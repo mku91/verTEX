@@ -707,7 +707,15 @@ export class Timeline extends EventTarget {
         this.draw();
       }, { passive: false });
     }
-    this.scroller.addEventListener('scroll', () => this.draw());
+    // A scroll up or down: the lanes drawn as scrolled (their canvas is only
+    // as tall as what is in sight, see draw()) - once a screen frame at most.
+    this.scroller.addEventListener('scroll', () => {
+      if (this.scrollDraw) return;
+      this.scrollDraw = requestAnimationFrame(() => {
+        this.scrollDraw = null;
+        this.draw();
+      });
+    });
     // (the rows taken by hand: no gliding to a picked entry meanwhile)
     const stopReveal = () => {
       cancelAnimationFrame(this.reveal?.request);
@@ -778,7 +786,7 @@ export class Timeline extends EventTarget {
   // The keys under a point of the lanes (client coordinates): their ids, or null.
   keysAt(clientX, clientY) {
     const rect = this.lanes.getBoundingClientRect();
-    const row = this.rows[Math.floor((clientY - rect.top) / ROW)];
+    const row = this.rows[Math.floor((clientY - rect.top + this.scroller.scrollTop) / ROW)];
     if (!row) return null;
     const x = clientX - rect.left;
     const reach = this.keySize() + 2;
@@ -809,12 +817,14 @@ export class Timeline extends EventTarget {
     let up;
     if (!ids) {
       // A box from here: the keys in it are picked (added to those picked).
+      // (in the rows' terms: the canvas shows them scrolled, see draw())
       const rect = lanes.getBoundingClientRect();
+      const down = () => this.scroller.scrollTop - rect.top;
       const kept = new Set(this.selected);
-      this.box = { x0: event.clientX - rect.left, y0: event.clientY - rect.top, x1: event.clientX - rect.left, y1: event.clientY - rect.top };
+      this.box = { x0: event.clientX - rect.left, y0: event.clientY + down(), x1: event.clientX - rect.left, y1: event.clientY + down() };
       move = (moved) => {
         this.box.x1 = moved.clientX - rect.left;
-        this.box.y1 = moved.clientY - rect.top;
+        this.box.y1 = moved.clientY + down();
         const [left, right] = [Math.min(this.box.x0, this.box.x1), Math.max(this.box.x0, this.box.x1)];
         const [top, bottom] = [Math.min(this.box.y0, this.box.y1), Math.max(this.box.y0, this.box.y1)];
         this.selected = new Set(kept);
@@ -920,7 +930,7 @@ export class Timeline extends EventTarget {
   // The key under a point of a track's row: { object, property, frame }, or null.
   keyAt(clientX, clientY) {
     const rect = this.lanes.getBoundingClientRect();
-    const row = this.rows[Math.floor((clientY - rect.top) / ROW)];
+    const row = this.rows[Math.floor((clientY - rect.top + this.scroller.scrollTop) / ROW)];
     if (!row?.property) return null;
     const ids = this.keysAt(clientX, clientY);
     if (!ids) return null;
@@ -1478,12 +1488,22 @@ export class Timeline extends EventTarget {
     };
     const ratio = window.devicePixelRatio || 1;
     const width = this.lanes.parentElement.clientWidth;
+    // A canvas as large as it is to be: made anew only when that changes
+    // (each time a tall one costs - the lanes of a skeleton are many rows), else cleared.
     const prepare = (canvas, height) => {
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      canvas.width = Math.max(1, Math.round(width * ratio));
-      canvas.height = Math.max(1, Math.round(height * ratio));
+      const across = Math.max(1, Math.round(width * ratio));
+      const down = Math.max(1, Math.round(height * ratio));
       const context = canvas.getContext('2d');
+      if (canvas.width !== across || canvas.height !== down) {
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        canvas.width = across;
+        canvas.height = down;
+      } else {
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.globalAlpha = 1;
+        context.clearRect(0, 0, across, down);
+      }
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       return context;
     };
@@ -1541,8 +1561,14 @@ export class Timeline extends EventTarget {
     }
 
     // The lanes: a row for each name, the clip's frames lit, a line every frame (when there is room).
+    // Only the part in sight: the canvas is as tall as the scroller's view,
+    // stuck to its top (the box under it as tall as the rows, for the scroll),
+    // and drawn as scrolled - a canvas many rows tall, drawn anew on every
+    // frame played, was a weight on every frame.
     const height = Math.max(this.rows.length * ROW, this.scroller.clientHeight);
-    const lanes = prepare(this.lanes, height);
+    this.lanes.parentElement.style.height = `${height}px`;
+    const lanes = prepare(this.lanes, Math.max(1, this.scroller.clientHeight));
+    lanes.translate(0, -this.scroller.scrollTop);
     lanes.fillStyle = colors.bg;
     lanes.fillRect(0, 0, width, height);
     lanes.fillStyle = colors.raised;

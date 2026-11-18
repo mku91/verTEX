@@ -12,7 +12,9 @@ import { unwrap } from './animation.js';
 // to the outermost, each in turn is turned the least that points the entry
 // at the target as seen from the joint; round again, until the entry is
 // there or the rounds are used up. Every joint may turn any way (no limits);
-// the chain is every node above the entry.
+// the chain is the nodes above the entry up to one pinned (`ikPin`, which
+// does not turn, nor anything above it) - or as many as the wheel left it
+// while moving (see AnimationMode.ikChain()).
 
 const ROUNDS = 16;
 const NEAR_ENOUGH = 1e-4;

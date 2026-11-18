@@ -6,8 +6,8 @@ import * as THREE from 'three';
 // a faint surface with its edges over it.
 
 const COLOR = 0xbd93f9; // Dracula's purple
-const SURFACE_OPACITY = 0.12;
-const EDGE_OPACITY = 0.4;
+const SURFACE_OPACITY = 0.05;
+const EDGE_OPACITY = 0.15;
 const SAME = 1e-6; // matrices this near are the same place
 
 const differ = (a, b) => a.elements.some((value, i) => Math.abs(value - b.elements[i]) > SAME);
@@ -39,6 +39,14 @@ export class PoseGhost {
       }
     }
     const { mesh, view, viewport } = this.editor;
+    // Nothing apart from its keys (the most of the time - as a clip plays): nothing to draw.
+    if (moved.size === 0) {
+      if (this.surface.visible || this.edges.visible) {
+        this.surface.visible = this.edges.visible = false;
+        viewport.requestRender();
+      }
+      return;
+    }
     const at = new Map(); // vertex -> where the keys have it
     const placed = moved.size ? pose.placed(keyed) : null;
     for (const id of moved) {
@@ -58,7 +66,7 @@ export class PoseGhost {
       }
     }
     const lines = [];
-    for (const [a, b] of mesh.edges()) if (drawn.has(a) && drawn.has(b)) lines.push(...at.get(a).toArray(), ...at.get(b).toArray());
+    for (const [a, b] of this.editor.topology.edges ?? mesh.edges()) if (drawn.has(a) && drawn.has(b)) lines.push(...at.get(a).toArray(), ...at.get(b).toArray());
     this.surface.geometry.setAttribute('position', new THREE.Float32BufferAttribute(triangles, 3));
     this.edges.geometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
     const wasShown = this.surface.visible;

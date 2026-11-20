@@ -164,22 +164,22 @@ const hotkeys = new Hotkeys(
     { id: 'file.save-as', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.save-as'), keys: 'Ctrl+Shift+KeyS', run: () => ACTIONS['project-save-as']() },
     { id: 'file.close', group: t('app.hotkeys.group.file'), label: t('app.hotkeys.file.close'), keys: 'Ctrl+Shift+KeyQ', run: () => ACTIONS['project-close-file']() },
 
-    { id: 'tool.select', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.select'), keys: 'KeyQ', run: () => editor.setTool('select') },
-    { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => editor.setTool('move') },
-    { id: 'tool.magic', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.magic'), keys: '', run: () => editor.setTool('magic') },
+    { id: 'tool.select', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.select'), keys: 'KeyQ', run: () => pickTool('select') },
+    { id: 'tool.move', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.move'), keys: 'KeyW', run: () => pickTool('move') },
+    { id: 'tool.magic', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.magic'), keys: '', run: () => pickTool('magic') },
     { id: 'edit.separate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.separate'), keys: '', run: () => ACTIONS.separate() },
     { id: 'edit.merge', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.edit.merge'), keys: 'Shift+KeyM', run: () => ACTIONS.merge() },
     { id: 'paint.ripper', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.paint.ripper'), keys: '', run: () => ACTIONS['texture-ripper']() },
-    { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => editor.setTool('rotate') },
-    { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => editor.setTool('scale') },
-    { id: 'tool.pivot', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.pivot'), keys: 'KeyD', run: () => editor.setTool('pivot') },
-    { id: 'tool.paint', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.paint'), keys: 'KeyV', run: () => editor.setTool('paint') },
-    { id: 'tool.pipette', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.pipette'), keys: 'KeyI', run: () => editor.setTool('pipette') },
-    { id: 'tool.fill', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill'), keys: 'KeyE', run: () => editor.setTool('fill') },
-    { id: 'tool.fill-object', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill-object'), keys: 'Shift+KeyE', run: () => editor.setTool('fillObject') },
-    { id: 'tool.rect', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.rect'), keys: 'KeyM', run: () => editor.setTool('rect') },
-    { id: 'tool.ellipse', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.ellipse'), keys: 'KeyO', run: () => editor.setTool('ellipse') },
-    { id: 'tool.marquee', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.marquee'), keys: '', run: () => editor.setTool('marquee') },
+    { id: 'tool.rotate', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.rotate'), keys: 'KeyR', run: () => pickTool('rotate') },
+    { id: 'tool.scale', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.scale'), keys: 'KeyS', run: () => pickTool('scale') },
+    { id: 'tool.pivot', group: t('app.hotkeys.group.tools'), label: t('app.hotkeys.tool.pivot'), keys: 'KeyD', run: () => pickTool('pivot') },
+    { id: 'tool.paint', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.paint'), keys: 'KeyV', run: () => pickTool('paint') },
+    { id: 'tool.pipette', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.pipette'), keys: 'KeyI', run: () => pickTool('pipette') },
+    { id: 'tool.fill', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill'), keys: 'KeyE', run: () => pickTool('fill') },
+    { id: 'tool.fill-object', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.fill-object'), keys: 'Shift+KeyE', run: () => pickTool('fillObject') },
+    { id: 'tool.rect', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.rect'), keys: 'KeyM', run: () => pickTool('rect') },
+    { id: 'tool.ellipse', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.ellipse'), keys: 'KeyO', run: () => pickTool('ellipse') },
+    { id: 'tool.marquee', group: t('app.hotkeys.group.painting'), label: t('app.hotkeys.tool.marquee'), keys: '', run: () => pickTool('marquee') },
 
     { id: 'op.place', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.place'), keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.cut'), keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
@@ -307,7 +307,7 @@ const rotationInputs = [...document.querySelectorAll('[data-rotation]')];
 const $ = (id) => document.getElementById(id);
 
 for (const button of toolButtons) {
-  button.addEventListener('click', () => editor.setTool(button.dataset.tool));
+  button.addEventListener('click', () => pickTool(button.dataset.tool));
 }
 
 // The skin (see skin.js): the vertices selected bound to a node, smoothed, let go.
@@ -427,14 +427,14 @@ const openShapes = (open) => {
 };
 $('shape-tool').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 $('shape-tool').addEventListener('click', () => {
-  editor.setTool(shape);
+  pickTool(shape);
   openShapes(shapeFlyout.hidden);
 });
 for (const button of shapeFlyout.querySelectorAll('button')) {
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', () => {
     editor.setShapeFilled(button.dataset.filled === '1');
-    editor.setTool(button.dataset.shape);
+    pickTool(button.dataset.shape);
     openShapes(false);
   });
 }
@@ -973,13 +973,21 @@ function setLocalAxes(on) {
 editor.setLocalAxes(localStorage.getItem(LOCAL_AXES_KEY) === '1');
 $('local-toggle').addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 
-// The focus look: a switch of its own, remembered between runs.
-const FOCUS_KEY = 'vertex.focus';
+// The focus look: a switch of its own, for the time being - off at every
+// start, and as a tool is chosen (see pickTool()).
 function setFocus(on) {
   editor.setFocus(on);
-  localStorage.setItem(FOCUS_KEY, on ? '1' : '0');
 }
-editor.setFocus(localStorage.getItem(FOCUS_KEY) === '1');
+try {
+  localStorage.removeItem('vertex.focus'); // (it was remembered between runs once)
+} catch {}
+
+// A tool chosen by the user - its button, its key, a shape of the row: the
+// focus look ends with it. (The editor's own change of tool leaves it be.)
+function pickTool(tool) {
+  if (editor.focus) setFocus(false);
+  editor.setTool(tool);
+}
 
 // The light preview (see Viewport.setLit()); kept between runs.
 const LIGHT_KEY = 'vertex.light';

@@ -120,7 +120,7 @@
  "html.axis-gizmo.title": "Vertex move lock: Shift+1 — free, Shift+2 — X, Shift+3 — Y, Shift+4 — Z",
  "html.light-button.title": "Light: the model lit as in a game — a sun with shadows on the model and the floor, and the sky's ambient light. Turning the camera shows the lit and the shaded sides",
  "html.preview-button.title": "Preview: only the textured model on a black background, without the grid, edges, vertices or selection — as it will look after export",
- "html.focus-button.title": "Focus: dark background, the object a white wireframe with vertex dots, picking through the object (T)",
+ "html.focus-button.title": "Focus: dark background, the object a white wireframe with vertex dots, picking through the object (T). Off again as a tool is chosen, and at every start",
  "html.shading-button.title": "Object shading",
  "html.shading-menu.shading-solid.text": "Solid",
  "html.shading-menu.shading-wireframe.text": "Wireframe",

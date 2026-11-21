@@ -407,11 +407,33 @@ body {
 
 .color-palette-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: var(--text-dim);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* (a choice of the built-in palettes: as plain as the name it was) */
+select.color-palette-name {
+  height: 24px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+select.color-palette-name:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+select.color-palette-name option {
+  background: var(--bg-raised);
+  color: var(--text);
 }
 
 .color-palette-bar button {

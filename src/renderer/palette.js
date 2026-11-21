@@ -30,6 +30,37 @@ export const DEFAULT_PALETTE = {
   ].map((hex) => [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16))),
 };
 
+// A palette in the manner of Moebius (Jean Giraud): twice Famicube's, 128 -
+// sixteen ramps of eight tones, dark to light, the shadows leaning to blue
+// and violet, the lights to warm yellow, in even steps of lightness (built in
+// OKLCH); the dusty pastels of a desert and its skies, a few bright notes
+// (coral, magenta, turquoise, lemon), blue-black ink and a warm paper. A row
+// a ramp: ink / paper, warm stone, sand, ochre, terracotta, coral, peach / skin, dusty rose, magenta, lilac, indigo, sky, turquoise, lemon, jade, olive / moss.
+export const MOEBIUS_PALETTE = {
+  name: 'Moebius 128',
+  colors: [
+    '060912', '1f2330', '3b4150', '5b6173', '7d8396', 'a6a5b9', 'd0c9da', 'fbeffc',
+    '211416', '3c2b2b', '584441', '755f59', '907d71', 'ad9b8f', 'cbbbb0', 'e9dbd1',
+    '391e1a', '55352a', '724e3b', '8d6a4e', 'a18b63', 'bda882', 'd9c7a5', 'f7e6c8',
+    '410300', '5d2004', '7b3a02', '97570d', 'a57c08', 'c2993c', 'dcb86b', 'f6d794',
+    '37001c', '57122b', '792739', '9b3f48', 'ba5d49', 'd47c65', 'eb9e84', 'ffc1a9',
+    '420126', '650633', '89133d', 'a92b47', 'c8483c', 'de6855', 'f18a70', 'ffad92',
+    '2d050f', '4e1e20', '723831', '955645', 'b37a52', 'd29c76', 'f0c09e', 'feeadc',
+    '300f23', '4f2439', '6f3b50', '905468', 'b27079', 'd08f93', 'ebb1af', 'ffd7d0',
+    '2f0028', '530143', '78095d', '9a2675', 'bf4082', 'dd6290', 'f8869d', 'feb4b5',
+    '2b163c', '452c5a', '624479', '7f5d99', '9f78b5', 'c394c9', 'e7b2da', 'fed9e8',
+    '0f073c', '231f5d', '393780', '5151a2', '6f6cc2', '9b85d6', 'c89fe3', 'f4bced',
+    '01213a', '013b61', '105786', '2b75a8', '3f95c6', '5cb8dc', '82daec', 'adfcfb',
+    '001e2a', '043947', '035667', '107486', '0596a0', '3cb7b6', '78d5c7', 'abf3d9',
+    '434302', '5c5a07', '767209', '928b17', 'b3a319', 'cdbe47', 'e6d978', 'fff5aa',
+    '022729', '05423f', '0c5e54', '0e7d67', '4a9a68', '72b582', '9bd09f', 'c2ecbc',
+    '001610', '02321f', '134f26', '3e6b33', '798136', '979f5b', 'b7be82', 'd7dda8',
+  ].map((hex) => [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16))),
+};
+
+// The palettes there are to choose from without a file (see ColorPopup).
+export const BUILT_IN_PALETTES = [DEFAULT_PALETTE, MOEBIUS_PALETTE];
+
 const fail = (what) => {
   throw new Error(what);
 };

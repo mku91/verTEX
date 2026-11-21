@@ -1,4 +1,4 @@
-import { DEFAULT_PALETTE, PALETTE_FILES, readPalette } from './palette.js';
+import { DEFAULT_PALETTE, BUILT_IN_PALETTES, PALETTE_FILES, readPalette } from './palette.js';
 import { t } from './i18n.js';
 
 // The brush's colour: a button that shows it, and a popup that opens beside
@@ -86,10 +86,15 @@ export class ColorPopup {
     popup.querySelector('[data-palette="add"]').addEventListener('click', () => this.addColor());
     popup.querySelector('[data-palette="import"]').addEventListener('click', () => this.file.click());
     popup.querySelector('[data-palette="reset"]').addEventListener('click', () => this.setPalette(DEFAULT_PALETTE));
+    // The palette's name: a choice of the built-in ones (the one in use first, if it is the user's own).
+    popup.querySelector('.color-palette-name').addEventListener('change', (event) => {
+      const chosen = BUILT_IN_PALETTES[Number(event.target.value)];
+      if (chosen) this.setPalette(chosen);
+    });
     this.file.addEventListener('change', () => this.importFile());
     // Its buttons must not take the keyboard focus; its number fields may.
     popup.addEventListener('mousedown', (event) => {
-      if (!(event.target instanceof HTMLInputElement)) event.preventDefault();
+      if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement)) event.preventDefault();
     });
     // A press anywhere else closes it, and so does Esc.
     window.addEventListener('pointerdown', (event) => {
@@ -241,6 +246,14 @@ export class ColorPopup {
       return button;
     });
     this.swatches.replaceChildren(swatch(null, t('color-popup.no-color')), ...colors);
-    this.popup.querySelector('.color-palette-name').textContent = `${this.palette.name} · ${this.palette.colors.length}`;
+    // The choice of palettes: the built-in ones; the one in use picked - or,
+    // if it is none of them (one read from a file, or changed), it first.
+    const choice = this.popup.querySelector('.color-palette-name');
+    const same = (palette) => palette.name === this.palette.name && JSON.stringify(palette.colors) === JSON.stringify(this.palette.colors);
+    const at = BUILT_IN_PALETTES.findIndex(same);
+    const options = BUILT_IN_PALETTES.map((palette, k) => new Option(`${palette.name} · ${palette.colors.length}`, String(k)));
+    if (at < 0) options.unshift(new Option(`${this.palette.name} · ${this.palette.colors.length}`, 'own'));
+    choice.replaceChildren(...options);
+    choice.value = at < 0 ? 'own' : String(at);
   }
 }

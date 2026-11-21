@@ -26,6 +26,7 @@
 // the surface draws them: alpha under a half) are left as they are.
 
 import { t } from './i18n.js';
+import { MOEBIUS_PALETTE } from './palette.js';
 
 // The settings as they are at first, and what each may be.
 export const RETRO_DEFAULTS = {
@@ -64,6 +65,7 @@ export const PALETTES = {
   'ZX Spectrum': ['#000000', '#0000d7', '#d70000', '#d700d7', '#00d700', '#00d7d7', '#d7d700', '#d7d7d7', '#0000ff', '#ff0000', '#ff00ff', '#00ff00', '#00ffff', '#ffff00', '#ffffff'],
   CGA: ['#000000', '#55ffff', '#ff55ff', '#ffffff'],
   [t('retro.palette.1bit')]: ['#000000', '#ffffff'],
+  [MOEBIUS_PALETTE.name]: MOEBIUS_PALETTE.colors.map((rgb) => `#${rgb.map((value) => value.toString(16).padStart(2, '0')).join('')}`),
 };
 
 // --- colours ---------------------------------------------------------------------

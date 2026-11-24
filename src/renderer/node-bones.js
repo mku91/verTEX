@@ -21,6 +21,7 @@ export function bones(editor, places) {
   const byIndex = new Map(places.map((place) => [place.index, place]));
   const out = [];
   for (const place of places) {
+    if (!place.node) continue; // (a pinned object's square)
     const parent = islands[place.index]?.parentIndex;
     const head = byIndex.get(parent);
     if (!head || head.at.distanceToSquared(place.at) < 1e-10) continue;

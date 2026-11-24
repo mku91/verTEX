@@ -140,7 +140,7 @@ export class AnimationMode {
     let best = null;
     let nearest = NODE_PICK;
     for (const place of nodePlaces(editor, this)) {
-      const at = editor.screenOf(place.at);
+      const at = place.node ? editor.screenOf(place.at) : null;
       if (!at) continue;
       const distance = Math.hypot(at.x - x, at.y - y);
       if (distance <= nearest) {
@@ -415,19 +415,29 @@ export class AnimationMode {
   }
 
   // The nodes above an entry, the nearest first: the joints its IK turns -
-  // up to a node pinned for IK (`ikPin`: it does not turn, nor what is above
-  // it), and no more than the chain's length chosen by the wheel while
+  // up to one that would turn something pinned for IK (`ikPin`: a pinned node
+  // does not turn, a pinned object is not turned - so nor is anything above
+  // it, whichever limb it is in), and no more than the chain's length chosen by the wheel while
   // moving (this.ikLength, kept for the next move; null: all of them). With
-  // the node above pinned there is nothing to turn: the entry stays.
+  // the node above pinned there is nothing to turn: the entry stays. The pins
+  // of what is moved, and of what it holds, are not asked: they go with it.
   ikChain(index) {
     const { islands } = this.editor.topology;
     const { objects } = this.editor.mesh;
     const all = [];
+    const held = new Set(); // the pinned, and all that is above them
+    objects.forEach((object, i) => {
+      if (!object.ikPin) return;
+      const up = [];
+      for (let at = i; at !== null && at !== undefined; at = islands[at].parentIndex) up.push(at);
+      if (!up.includes(index)) for (const at of up) held.add(at);
+    });
     for (let at = islands[index]?.parentIndex ?? null; at !== null && at !== undefined; at = islands[at].parentIndex) {
-      if (objects[at].ikPin) break;
+      if (held.has(at)) break;
       all.push({ index: at, id: objects[at].id });
     }
     if (all.length === 0 && (islands[index]?.parentIndex ?? null) === null) return null; // (nothing above: an ordinary move)
+    if (all.length === 0) toast(t('animate.ik.pinned'), { icon: 'fa-thumbtack' });
     const length = this.ikLength ? Math.min(this.ikLength, all.length) : all.length;
     return { all, joints: all.slice(0, length), values: structuredClone(this.values), locals: localTransforms(this.editor), overrides: structuredClone(this.overrides) };
   }
@@ -454,11 +464,11 @@ export class AnimationMode {
     return true;
   }
 
-  // The node picked pinned for IK, or let go (see ikChain()). One undo step.
+  // The entry picked pinned for IK, or let go (see ikChain()). One undo step.
   togglePin() {
     const entry = this.entry();
     const object = entry && this.editor.mesh.objects[entry.index];
-    if (!object || object.kind !== 'node' || this.editor.busy()) return;
+    if (!object || this.editor.busy()) return;
     this.editor.history.push(this.editor.snapshot());
     if (object.ikPin) delete object.ikPin;
     else object.ikPin = true;
@@ -682,12 +692,12 @@ export class AnimationMode {
       const value = values[property][+axis];
       input.value = value === undefined ? '' : +value.toFixed(4);
     }
-    // The pin for IK: a node's only.
     const object = this.editor.mesh.objects[entry.index];
     const pin = this.panel.querySelector('.pose-pin');
-    pin.hidden = object?.kind !== 'node';
+    const node = object?.kind === 'node';
+    pin.hidden = !object;
     pin.classList.toggle('active', Boolean(object?.ikPin));
-    pin.title = t(object?.ikPin ? 'animate.pin.on' : 'animate.pin.off');
+    pin.title = t(object?.ikPin ? (node ? 'animate.pin.on' : 'animate.pin.object.on') : node ? 'animate.pin.off' : 'animate.pin.object.off');
     const clip = this.timeline.current();
     const frame = Math.round(this.timeline.frame);
     for (const mark of this.marks) {

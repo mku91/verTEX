@@ -119,7 +119,7 @@ export function modelOf(editor) {
         parent: parent ?? null,
         ...(hidden ? { hidden: true } : {}),
         ...(reference ? { reference: true } : {}), // a shape to build over, see Editor.setReference()
-        ...(ikPin ? { ikPin: true } : {}), // a node IK does not turn, nor what is above it (see animate.js)
+        ...(ikPin ? { ikPin: true } : {}), // an entry IK does not turn, nor what is above it (see animate.js)
         position: position.map(round),
         ...(turn ? { rotation: turn.map(round) } : {}),
         // No pivot point of its own: the position is the middle of its bounds, and follows them.

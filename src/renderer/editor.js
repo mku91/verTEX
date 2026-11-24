@@ -7239,7 +7239,7 @@ export class Editor extends EventTarget {
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(reference ? { reference: true } : {}), // a shape to build over (see setReference())
-      ...(ikPin && kind === 'node' ? { ikPin: true } : {}), // not turned by IK (see animate.js)
+      ...(ikPin ? { ikPin: true } : {}), // not turned by IK (see animate.js)
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),
       ...(typeof color === 'string' ? { color } : {}),

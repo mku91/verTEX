@@ -48,10 +48,11 @@ export function nodePlaces(editor, animation = null) {
   const picked = editor.mode === 'object' ? editor.picked : new Set();
   const out = [];
   editor.mesh.objects.forEach((object, index) => {
-    if (object.kind !== 'node' || islands[index]?.hidden) return;
+    if (islands[index]?.hidden) return;
+    if (object.kind !== 'node' && !(animation?.on && object.ikPin)) return; // (an object pinned for IK has one while animating)
     const matrix = posed?.get(object.id);
     const chosen = picked.has(index);
-    out.push({ index, at: matrix ? new THREE.Vector3().setFromMatrixPosition(matrix) : editor.pivotPoint(index), picked: chosen, pinned: Boolean(object.ikPin), size: NODE_MARK.size * sizeOf(object.id, chosen, now) });
+    out.push({ index, node: object.kind === 'node', at: matrix ? new THREE.Vector3().setFromMatrixPosition(matrix) : editor.pivotPoint(index), picked: chosen, pinned: Boolean(object.ikPin), size: NODE_MARK.size * sizeOf(object.id, chosen, now) });
   });
   out.growing = growing;
   return out;

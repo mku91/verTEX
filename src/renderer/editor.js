@@ -533,6 +533,7 @@ export class Editor extends EventTarget {
     });
     this.gizmo.addEventListener('mouseUp', () => {
       this.snapGrid.end();
+      this.showSnapMark(null);
       this.commit(this.gizmoBefore);
       this.placeGizmo();
     });
@@ -573,10 +574,12 @@ export class Editor extends EventTarget {
   // if its handle `axis` had been taken, for the code that hears of the real
   // one. Follow with the gizmo's place, turn or pull set and applyGizmo(), then
   // endDrivenGizmo(). `outward`: which way pulling the scale's middle handle
-  // makes it bigger. False if it can't be taken now.
-  beginDrivenGizmo(axis, outward) {
+  // makes it bigger; `viewer`: how the view is seen (as a drag's, see
+  // mainViewer). False if it can't be taken now.
+  beginDrivenGizmo(axis, outward, viewer = null) {
     if (!this.gizmo.object || this.busy()) return false;
     this.gizmoOutward = outward;
+    this.gizmoViewer = viewer;
     this.gizmo.axis = axis;
     this.gizmo.dragging = true;
     this.gizmo.dispatchEvent({ type: 'mouseDown', mode: this.gizmo.mode });
@@ -588,6 +591,7 @@ export class Editor extends EventTarget {
     this.gizmo.dragging = false;
     this.gizmo.axis = null;
     this.gizmo.dispatchEvent({ type: 'mouseUp', mode: this.gizmo.mode });
+    this.gizmoViewer = null;
   }
 
   // Applies the gizmo's drag, as it stands, to what is being dragged.
@@ -782,15 +786,83 @@ export class Editor extends EventTarget {
       const travel = this.pivot.position.clone().sub(this.pivotStart).applyQuaternion(this.moveTurn.clone().invert());
       for (const axis of ['x', 'y', 'z']) if (!handle.includes(axis)) travel[axis] = 0;
       this.pivot.position.copy(this.pivotStart).add(travel.applyQuaternion(this.moveTurn));
-      if (!this.altHeld) this.snapGrid.snap(this.pivot.position); // with Alt held, freely
-      this.snapGrid.focus(this.pivot.position);
-      return;
+    } else {
+      for (const axis of ['x', 'y', 'z']) {
+        if (!handle.includes(axis)) this.pivot.position[axis] = this.pivotStart[axis];
+      }
     }
-    for (const axis of ['x', 'y', 'z']) {
-      if (!handle.includes(axis)) this.pivot.position[axis] = this.pivotStart[axis];
-    }
-    if (!this.altHeld) this.snapGrid.snap(this.pivot.position); // with Alt held, freely
+    // Onto a reference's vertex near (whatever the grid says), or else the grid; with Alt held, freely.
+    const landed = this.altHeld ? null : this.gizmoReferenceSnap();
+    if (landed) {
+      const way = landed.offset;
+      if (this.moveTurn) way.applyQuaternion(this.moveTurn.clone().invert());
+      for (const axis of ['x', 'y', 'z']) if (!handle.includes(axis)) way[axis] = 0; // (as far as the handle goes)
+      if (this.moveTurn) way.applyQuaternion(this.moveTurn);
+      this.pivot.position.add(way);
+    } else if (!this.altHeld) this.snapGrid.snap(this.pivot.position);
+    this.showSnapMark(landed ? { points: [landed.target], lines: [] } : null);
     this.snapGrid.focus(this.pivot.position);
+  }
+
+  // Where the move gizmo's drag would have to go on to, as it stands, for a
+  // vertex of what is moved to land on a reference's vertex: of the moved
+  // ones, the one that has come nearest to one on the screen (within
+  // REFERENCE_SNAP px - Blender's "Closest"), see pencilSnap(). Vertices,
+  // edges and faces only, not whole objects. { offset, target }, or null.
+  gizmoReferenceSnap() {
+    if (this.mode === 'object' || this.pivotEdited !== null || !this.topology.referenced?.size) return null;
+    const viewer = this.gizmoViewer ?? this.mainViewer;
+    const travel = this.pivot.position.clone().sub(this.pivotStart);
+    const targets = this.referenceTargets(viewer);
+    let best = null;
+    for (const start of this.dragStartPositions.values()) {
+      const point = start.clone().add(travel);
+      const at = viewer.project(point);
+      const found = at && this.nearestTarget(at.x, at.y, targets);
+      if (found && (!best || found.distance < best.distance)) best = { ...found, from: point };
+    }
+    return best && { offset: best.point.clone().sub(best.from), target: best.point.clone() };
+  }
+
+  // The references' vertices a viewer is shown, with where each is on the
+  // screen and how far from the viewer: [{ point, x, y, depth }].
+  referenceTargets(viewer) {
+    const main = viewer === this.mainViewer;
+    const camera = this.viewport.camera.position;
+    // Only those shown: turned to the viewer and, in the main view, not behind
+    // the references' own surface (see MeshView.referenceFront(), referenceSight()).
+    const { vertices: front } = this.view.referenceFront(
+      main ? (point) => camera.clone().sub(point) : (point) => viewer.viewDirection(point).negate(),
+      main ? this.view.referenceSight(this.viewport.camera) : null,
+    );
+    const targets = [];
+    for (const index of front) {
+      const point = this.mesh.vertices[index];
+      const at = viewer.project(point);
+      if (at) targets.push({ point, x: at.x, y: at.y, depth: main ? point.distanceTo(camera) : point.dot(viewer.viewDirection(point)) });
+    }
+    return targets;
+  }
+
+  // Of those, the one nearest a place on the screen, within REFERENCE_SNAP px;
+  // of ones as near as that on the screen, the nearest to the viewer, not one
+  // behind it. { point, distance }, or null.
+  nearestTarget(x, y, targets) {
+    let best = null;
+    let bestDistance = Infinity;
+    let bestDepth = Infinity;
+    for (const target of targets) {
+      const distance = Math.hypot(target.x - x, target.y - y);
+      if (distance > REFERENCE_SNAP) continue;
+      const nearer = distance < bestDistance - SAME_SPOT;
+      const asNear = Math.abs(distance - bestDistance) <= SAME_SPOT;
+      if (nearer || (asNear && target.depth < bestDepth)) {
+        best = target.point;
+        bestDistance = Math.min(distance, bestDistance);
+        bestDepth = target.depth;
+      }
+    }
+    return best && { point: best, distance: bestDistance };
   }
 
   // Snaps the scale gizmo so that the selection's size, not the factor, moves
@@ -1184,8 +1256,9 @@ export class Editor extends EventTarget {
       }));
   }
 
-  // Merge (as Blender's M): the selected vertices made one, each object's
-  // apart (vertices of two objects are never one). `how`:
+  // Merge (as Blender's M): the selected vertices made one. Those of several
+  // objects make the objects one, as a face made through them does (see
+  // EditableMesh.fill()): the one of the vertex that stays. `how`:
   //   'center' - one vertex at the middle of them;
   //   'last'   - all of them onto the one selected last;
   //   'distance' - those nearer one another than `distance` (by chains of
@@ -1193,21 +1266,91 @@ export class Editor extends EventTarget {
   //     selected, the whole of the object being worked on (a seam closed).
   // Faces lose the corners that come together; one left a line or a point
   // goes, and so does a face or an edge that is there twice (see
-  // EditableMesh.mergeVertices()). One undo step. Returns how many vertices went.
+  // EditableMesh.mergeVertices()). One undo step. Returns { gone: how many
+  // vertices went, joined: the names of the objects that became a part of
+  // another }.
   mergeSelected(how, distance = 0.001) {
-    if (this.busy() || this.mode === 'object' || this.workspace !== 'model') return 0;
+    const none = { gone: 0, joined: [] };
+    if (this.busy() || this.mode === 'object' || this.workspace !== 'model') return none;
     if (this.operation) this.setOperation(null);
+    const { vertices, vertexObject, objects } = this.mesh;
+    const { groups, places } = this.mergeGroups(how, distance);
+    if (groups.length === 0) return none;
+    const before = this.snapshot();
+    const joined = [];
+    for (const [first, ...others] of groups) {
+      for (const i of others) {
+        // (looked up anew: an object may have become another's on the way)
+        const keptId = this.mesh.vertexObject[first];
+        const goneId = this.mesh.vertexObject[i];
+        if (keptId === goneId) continue;
+        const into = objects.find((object) => object.id === keptId);
+        const from = objects.find((object) => object.id === goneId);
+        // Its faces on the atlas stay there; those on another are laid out anew (as joinObjects() does).
+        if (from.atlas && !into.atlas) into.atlas = from.atlas;
+        if (from.atlas && from.atlas !== into.atlas) this.forgetPlaces(from.id);
+        joined.push(from.name);
+        this.mesh.mergeObjects(keptId, goneId);
+      }
+    }
+    for (const [kept, place] of places) vertices[kept].copy(place);
+    const gone = groups.reduce((sum, group) => sum + group.length - 1, 0);
+    const keptOnes = groups.map((group) => group[0]);
+    const remap = this.mesh.mergeVertices(groups);
+    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    // What is left selected: the merged vertices (by distance: what was selected, less what went).
+    this.selection = how === 'distance' && this.selection.size === 0 ? new Set() : kept(how === 'distance' ? this.selection : new Set(keptOnes));
+    this.target = kept(this.target);
+    this.edited(before);
+    this.rebuildView();
+    this.selectionChanged();
+    return { gone, joined };
+  }
+
+  // The atlases of the objects a merge would make one (see mergeSelected()):
+  // the ids, the one that stays first. More than one: places on the others go.
+  mergeAtlases(how, distance) {
+    const { vertexObject, objects } = this.mesh;
+    const { groups } = this.mergeGroups(how, distance);
+    const found = new Set();
+    for (const group of groups) {
+      const ids = new Set(group.map((i) => vertexObject[i]));
+      if (ids.size < 2) continue;
+      for (const id of ids) {
+        const atlas = objects.find((object) => object.id === id)?.atlas;
+        if (atlas) found.add(atlas);
+      }
+    }
+    return [...found];
+  }
+
+  // How near the two nearest of the selected vertices are, or null (for what
+  // to say when none is near enough to merge).
+  nearestSelected() {
+    const list = [...this.selection].slice(0, 500); // (a hint: not worked out for thousands)
+    let nearest = Infinity;
+    for (let a = 0; a < list.length; a++) {
+      for (let b = a + 1; b < list.length; b++) nearest = Math.min(nearest, this.mesh.vertices[list[a]].distanceTo(this.mesh.vertices[list[b]]));
+    }
+    return Number.isFinite(nearest) ? nearest : null;
+  }
+
+  // What a merge would make one (see mergeSelected()): groups of vertices,
+  // the one that stays first, and `places`: where it is to be, if elsewhere.
+  mergeGroups(how, distance) {
     const { vertices, vertexObject } = this.mesh;
     const { hiddenVertices } = this.topology;
     const chosen = [...(this.selection.size || how !== 'distance' ? this.selection : this.target)].filter((i) => !hiddenVertices.has(i));
-    const byObject = new Map();
+    // (nothing selected: each object by itself - none is joined to another unasked)
+    const pools = new Map();
     for (const i of chosen) {
-      if (!byObject.has(vertexObject[i])) byObject.set(vertexObject[i], []);
-      byObject.get(vertexObject[i]).push(i);
+      const pool = this.selection.size ? 0 : vertexObject[i];
+      if (!pools.has(pool)) pools.set(pool, []);
+      pools.get(pool).push(i);
     }
     const groups = [];
     const places = new Map(); // a group's kept vertex -> where it is to be
-    for (const list of byObject.values()) {
+    for (const list of pools.values()) {
       if (list.length < 2) continue;
       if (how === 'center') {
         const middle = list.reduce((sum, i) => sum.add(vertices[i]), new THREE.Vector3()).multiplyScalar(1 / list.length);
@@ -1252,21 +1395,7 @@ export class Editor extends EventTarget {
         for (const bunch of bunches.values()) if (bunch.length > 1) groups.push(bunch);
       }
     }
-    if (groups.length === 0) return 0;
-    const before = this.snapshot();
-    for (const [kept, place] of places) vertices[kept].copy(place);
-    const gone = groups.reduce((sum, group) => sum + group.length - 1, 0);
-    const keptOnes = groups.map((group) => group[0]);
-    const remap = this.mesh.mergeVertices(groups);
-    const kept = (set) => new Set([...set].filter((i) => remap.has(i)).map((i) => remap.get(i)));
-    // What is left selected: the merged vertices (by distance: what was selected, less what went).
-    this.selection = how === 'distance' && this.selection.size === 0 ? new Set() : kept(how === 'distance' ? this.selection : new Set(keptOnes));
-    this.target = kept(this.target);
-    this.edited(before);
-    this.rebuildView();
-    this.placeGizmo();
-    this.emitChange();
-    return gone;
+    return { groups, places };
   }
 
   // Makes one vertex of each of the given groups (index lists), see
@@ -5372,34 +5501,7 @@ export class Editor extends EventTarget {
     });
     if (near) return near.clone();
     if (!referenced?.size) return null;
-    const camera = this.viewport.camera.position;
-    // Only those shown: turned to the viewer and, in the main view, not behind
-    // the references' own surface (see MeshView.referenceFront(), referenceSight()).
-    const main = viewer === this.mainViewer;
-    const { vertices: front } = this.view.referenceFront(
-      main ? (point) => camera.clone().sub(point) : (point) => viewer.viewDirection(point).negate(),
-      main ? this.view.referenceSight(this.viewport.camera) : null,
-    );
-    let best = null;
-    let bestDistance = Infinity;
-    let bestDepth = Infinity;
-    for (const index of front) {
-      const point = this.mesh.vertices[index];
-      const at = viewer.project(point);
-      const distance = at ? Math.hypot(at.x - clientX, at.y - clientY) : Infinity;
-      if (distance > REFERENCE_SNAP) continue;
-      const depth = viewer === this.mainViewer ? point.distanceTo(camera) : point.dot(viewer.viewDirection(point));
-      // The square aimed at: the nearest to the pointer; of ones as near as
-      // that on the screen, the nearest to the viewer, not one behind it.
-      const nearer = distance < bestDistance - SAME_SPOT;
-      const asNear = Math.abs(distance - bestDistance) <= SAME_SPOT;
-      if (nearer || (asNear && depth < bestDepth)) {
-        best = point;
-        bestDistance = Math.min(distance, bestDistance);
-        bestDepth = depth;
-      }
-    }
-    return best ? best.clone() : null;
+    return this.nearestTarget(clientX, clientY, this.referenceTargets(viewer))?.point.clone() ?? null;
   }
 
   // Pencil: a drag that starts on a vertex does not move it but pulls a new

@@ -1498,13 +1498,24 @@ function toggleMergeMenu(open = mergeMenu.box.hidden) {
     }
     if (event.code === 'Escape') toggleMergeMenu(false);
   });
-  box.addEventListener('click', (event) => {
+  box.addEventListener('click', async (event) => {
     const how = event.target.closest('[data-merge]')?.dataset.merge;
     if (!how) return;
     if (how === 'distance') setDistance(input.value);
-    const gone = editor.mergeSelected(how, mergeMenu.distance);
     toggleMergeMenu(false);
-    toast(gone ? t('app.merge.done', { count: gone }) : t('app.merge.nothing'));
+    // Objects on different atlases made one: asked first, as joining them is.
+    const atlases = editor.mergeAtlases(how, mergeMenu.distance);
+    if (atlases.length > 1) {
+      const sure = await confirmIt(t('outliner.join.title'), t('outliner.join.text', { atlas: editor.atlasById(atlases[0])?.name }), t('outliner.join.ok'));
+      if (!sure) return;
+    }
+    const { gone, joined } = editor.mergeSelected(how, mergeMenu.distance);
+    if (joined.length) toast(t('app.merge.joined', { count: gone, names: joined.join(', ') }));
+    else if (gone) toast(t('app.merge.done', { count: gone }));
+    else {
+      const nearest = how === 'distance' ? editor.nearestSelected() : null;
+      toast(nearest === null ? t('app.merge.nothing') : t('app.merge.too-far', { nearest: +nearest.toFixed(5), distance: mergeMenu.distance }));
+    }
   });
   box.addEventListener('mousedown', (event) => {
     if (event.target !== input) event.preventDefault(); // (the buttons do not take the focus)

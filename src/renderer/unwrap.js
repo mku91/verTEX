@@ -376,9 +376,26 @@ export function unfold(mesh, faceIndices, ppu, along = 'y') {
       boxes.push({ polygon, box });
       left.delete(i);
     }
-    pieces.push(pieceFrom(places));
+    pieces.push(pieceFrom(centred(places)));
   }
   return pieces;
+}
+
+// The same places, shifted so that a symmetric piece (a face, a chest) has its
+// middle on the grid, between two pixels: each pixel of one half has its like in the other.
+const SYMMETRIC = 0.1; // px a corner may be off its mirrored place
+function centred(places) {
+  const corners = [...places.values()].flat();
+  const shift = [0, 1].map((axis) => {
+    const values = corners.map((corner) => corner[axis]);
+    const middle = (Math.min(...values) + Math.max(...values)) / 2;
+    const symmetric = corners.every((corner) => corners.some((other) => Math.abs(other[1 - axis] - corner[1 - axis]) < SYMMETRIC && Math.abs(other[axis] + corner[axis] - 2 * middle) < SYMMETRIC));
+    if (!symmetric) return 0;
+    // (With no edge down the middle, the middle of a pixel does as well: an odd width keeps its ends on pixels.)
+    const steps = values.some((value) => Math.abs(value - middle) < SYMMETRIC) ? 1 : 2;
+    return Math.round(middle * steps) / steps - middle;
+  });
+  return new Map([...places].map(([i, polygon]) => [i, polygon.map(([x, y]) => [x + shift[0], y + shift[1]])]));
 }
 
 // The given faces laid out around a cylinder (a cylindrical projection): for

@@ -1303,5 +1303,7 @@
  "animate.pin.off": "Pin for IK: this node will not turn when something below it is moved with Shift (IK), nor will anything above it - the chain stops here. E.g. pin the shoulders: an arm pulled turns the elbow and the shoulder joint only",
  "animate.pin.on": "Pinned for IK: IK does not turn it, nor anything above it. Click to let go",
  "animate.ik.length": "IK: {count} of {all} joints (the wheel: more or fewer)",
- "color-popup.palette-choice.title": "The palette: choose a built-in one - Famicube (64) or Moebius 128, in the manner of Moebius: desert pastels, skies, ink and paper. One of your own (imported or changed) is shown first"
+ "color-popup.palette-choice.title": "The palette: choose a built-in one - Famicube (64) or Moebius 128, in the manner of Moebius: desert pastels, skies, ink and paper. One of your own (imported or changed) is shown first",
+ "app.merge.joined": "Merged: {count} vertices fewer. Joined into one object: {names}",
+ "app.merge.too-far": "Nothing to merge: the nearest selected vertices are {nearest} apart, the distance is {distance}"
 }

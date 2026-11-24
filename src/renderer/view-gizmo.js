@@ -112,7 +112,7 @@ export class ViewGizmo {
     const outward = new THREE.Vector3();
     outward[view.right] = view.rightSign;
     outward[view.up] = view.upSign;
-    if (!editor.beginDrivenGizmo(handle.name, outward.normalize())) return false;
+    if (!editor.beginDrivenGizmo(handle.name, outward.normalize(), view.viewer)) return false;
     const center = this.views.project(view, editor.pivot.position);
     this.drag = {
       view,

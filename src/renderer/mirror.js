@@ -214,7 +214,6 @@ export class Mirror {
     before.vertices.forEach((p, i) => {
       if (!outside.has(before.vertexObject[i])) beforeIndex.set(keyOf(p), i);
     });
-    const afterKeys = new Set(mesh.vertices.filter((_, i) => !outside.has(mesh.vertexObject[i])).map(keyOf));
 
     // What the edit touched, by object: the positions of vertices that are
     // new or moved (after), removed (before), and of the corners of faces and
@@ -225,14 +224,29 @@ export class Mirror {
       if (!touched.has(objectId)) touched.set(objectId, []);
       touched.get(objectId).push(p);
     };
-    mesh.vertices.forEach((p, i) => {
-      if (!beforeIndex.has(keyOf(p))) touch(mesh.vertexObject[i], p);
-    });
-    before.vertices.forEach((p, i) => {
-      if (!afterKeys.has(keyOf(p))) touch(before.vertexObject[i], p);
+    // What was there already, or is there still, is looked for in the same
+    // object: another's may stand in the same place - a piece cut off it, a
+    // shape it was traced from. (Or, where an object has become a part of
+    // another, in the one that is gone; or been parted, in the new one.)
+    const known = new Set(before.objects.map((object) => object.id));
+    const here = new Set(mesh.objects.map((object) => object.id));
+    const changes = (was, is, change) => { // was, is: [[object's id, key, thing]]
+      const wasOwn = new Set(was.map(([id, key]) => `${id}@${key}`));
+      const wasGone = new Set(was.filter(([id]) => !here.has(id)).map(([, key]) => key));
+      const isOwn = new Set(is.map(([id, key]) => `${id}@${key}`));
+      const isNew = new Set(is.filter(([id]) => !known.has(id)).map(([, key]) => key));
+      const isAny = new Set(is.map(([, key]) => key));
+      for (const [id, key, thing] of is) if (!wasOwn.has(`${id}@${key}`) && !wasGone.has(key)) change(thing, true);
+      for (const [id, key, thing] of was) {
+        if (!isOwn.has(`${id}@${key}`) && !isNew.has(key) && (here.has(id) || !isAny.has(key))) change(thing, false);
+      }
+    };
+    const places = (list, owners) => list.map((p, i) => [owners[i], keyOf(p), i]);
+    changes(places(before.vertices, before.vertexObject), places(mesh.vertices, mesh.vertexObject), (i, now) => {
+      if (now) touch(mesh.vertexObject[i], mesh.vertices[i]);
+      else touch(before.vertexObject[i], before.vertices[i]);
     });
     // A new object is all new, also one made in the place of another (a copy).
-    const known = new Set(before.objects.map((object) => object.id));
     mesh.vertices.forEach((p, i) => {
       if (!known.has(mesh.vertexObject[i])) touch(mesh.vertexObject[i], p);
     });
@@ -248,14 +262,11 @@ export class Mirror {
     };
     const wireKey = (vertices, wire) => wire.map((i) => keyOf(vertices[i])).sort().join(';');
     for (const [list, key] of [['faces', cycleKey], ['wires', wireKey]]) {
-      const was = new Set(before[list].map((loop) => key(before.vertices, loop)));
-      const is = new Set(mesh[list].map((loop) => key(mesh.vertices, loop)));
-      for (const loop of mesh[list]) {
-        if (!was.has(key(mesh.vertices, loop))) for (const i of loop) touch(mesh.vertexObject[i], mesh.vertices[i]);
-      }
-      for (const loop of before[list]) {
-        if (!is.has(key(before.vertices, loop))) for (const i of loop) touch(before.vertexObject[i], before.vertices[i]);
-      }
+      const loops = (from) => from[list].map((loop) => [from.vertexObject[loop[0]], key(from.vertices, loop), loop]);
+      changes(loops(before), loops(mesh), (loop, now) => {
+        const from = now ? mesh : before;
+        for (const i of loop) touch(from.vertexObject[i], from.vertices[i]);
+      });
     }
     if (touched.size === 0) return null;
     const held = this.holders(before.vertices, before.vertexObject, before.objects); // whose image was whose
@@ -414,6 +425,7 @@ export class Mirror {
     const images = subsets(planes);
     const apart = new Map();
     const taken = new Set();
+    let kin = new Set();
     if (!local) {
       const alive = new Set(mesh.objects.map((candidate) => candidate.id));
       for (const [n, holder] of held.get(id) ?? []) {
@@ -424,12 +436,15 @@ export class Mirror {
       for (const [other, theirs] of held) {
         if (other !== id) for (const holder of theirs.values()) taken.add(holder);
       }
+      // ...and only in one that may be an image of this: one that merely
+      // meets it - a head on a neck, cut apart - shares an edge with it.
+      kin = this.kin(id, images, before);
       for (let i = 0; i < before.vertices.length; i++) {
         if (before.vertexObject[i] !== id) continue;
         images.forEach((some, n) => {
           if (apart.has(n)) return;
           const owner = before.vertexObject[beforeIndex.get(keyOf(mirrorPoint(before.vertices[i], some)))];
-          if (owner !== undefined && alive.has(owner) && !taken.has(owner)) involved.add(owner);
+          if (owner !== undefined && alive.has(owner) && !taken.has(owner) && kin.has(owner)) involved.add(owner);
         });
       }
     }
@@ -446,7 +461,7 @@ export class Mirror {
       const there = positions.get(keyOf(p));
       if (!there) return undefined;
       if (owner !== undefined) return there.find((i) => mesh.vertexObject[i] === owner);
-      return there.find((i) => mesh.vertexObject[i] === id) ?? (local ? undefined : there.find((i) => !taken.has(mesh.vertexObject[i])));
+      return there.find((i) => mesh.vertexObject[i] === id) ?? (local ? undefined : there.find((i) => !taken.has(mesh.vertexObject[i]) && kin.has(mesh.vertexObject[i])));
     };
     const faceByKey = new Map(mesh.faces.map((f, k) => [sortedKey(f), k]));
     const wireByKey = new Map(mesh.wires.map((w, k) => [sortedKey(w), k]));
@@ -567,6 +582,33 @@ export class Mirror {
       changed = true;
     }
     return { changed, remap };
+  }
+
+  // The objects that may hold images of the object `id` though none is exactly
+  // one (see holders()): as the scene was before the edit, or as it is, most
+  // of their vertices stand where its own are mirrored to (`images`: the
+  // lists of planes). Not a hidden one, nor one that is its own image.
+  kin(id, images, before) {
+    const { mesh } = this.editor;
+    const outside = this.outside();
+    const hidden = new Set((this.editor.topology?.islands ?? []).filter((island) => island.hidden).map((island) => island.id));
+    const found = new Set();
+    for (const { vertices, vertexObject } of [before, mesh]) {
+      const points = new Map(); // object's id -> its vertices' places
+      vertices.forEach((p, i) => {
+        if (!points.has(vertexObject[i])) points.set(vertexObject[i], []);
+        points.get(vertexObject[i]).push(p);
+      });
+      const mirrored = images.map((some) => new Set((points.get(id) ?? []).map((p) => keyOf(mirrorPoint(p, some)))));
+      for (const [other, own] of points) {
+        if (other === id || found.has(other) || outside.has(other) || hidden.has(other)) continue;
+        if (!mirrored.some((keys) => own.filter((p) => keys.has(keyOf(p))).length * 2 > own.length)) continue;
+        const keys = new Set(own.map(keyOf));
+        if (images.some((some) => own.every((p) => keys.has(keyOf(mirrorPoint(p, some)))))) continue;
+        found.add(other);
+      }
+    }
+    return found;
   }
 
   // See reconcileObject(): the image vertices (kept, not source) in connected

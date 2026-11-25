@@ -90,14 +90,17 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         .on_document_title_changed(|window, title| {
             let _ = window.set_title(&title);
         })
-        // The page opens one window of its own: its views (see views-window.js),
-        // which it draws into itself - so the window is the page's child, with
-        // the page as its opener. Nothing else.
+        // The page opens windows of its own: its views (see views-window.js) and
+        // the preview (see preview-window.js), which it draws into itself - so
+        // such a window is the page's child, with the page as its opener. Nothing else.
         .on_new_window(move |url, features| {
-            if !url.path().ends_with("/views.html") {
-                return NewWindowResponse::Deny;
-            }
-            match open_views(&opener, features, views_dir.clone()) {
+            let page = url.path().rsplit('/').next().unwrap_or("");
+            let opened = match page {
+                "views.html" => open_child(&opener, "window.views.title", (1280.0, 860.0), features, views_dir.clone()),
+                "preview.html" => open_child(&opener, "preview.title", (480.0, 520.0), features, views_dir.clone()),
+                _ => return NewWindowResponse::Deny,
+            };
+            match opened {
                 Ok(window) => NewWindowResponse::Create { window },
                 Err(_) => NewWindowResponse::Deny,
             }
@@ -111,14 +114,15 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
     Ok(window)
 }
 
-static VIEWS: AtomicUsize = AtomicUsize::new(0);
+static CHILDREN: AtomicUsize = AtomicUsize::new(0);
 
-fn open_views(app: &tauri::AppHandle, features: tauri::webview::NewWindowFeatures, webview_dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
+// (`size`: where the page has not said another.)
+fn open_child(app: &tauri::AppHandle, title: &str, size: (f64, f64), features: tauri::webview::NewWindowFeatures, webview_dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
     let language = app.state::<locale::Language>();
-    let mut builder = WebviewWindowBuilder::new(app, format!("views-{}", VIEWS.fetch_add(1, Ordering::SeqCst)), WebviewUrl::External("about:blank".parse().unwrap()))
+    let mut builder = WebviewWindowBuilder::new(app, format!("views-{}", CHILDREN.fetch_add(1, Ordering::SeqCst)), WebviewUrl::External("about:blank".parse().unwrap()))
+        .inner_size(size.0, size.1)
         .window_features(features)
-        .title(language.t("window.views.title"))
-        .inner_size(1280.0, 860.0)
+        .title(language.t(title))
         .background_color(BACKGROUND)
         .additional_browser_args(&browser_args())
         .general_autofill_enabled(false);

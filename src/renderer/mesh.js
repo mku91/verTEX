@@ -1673,7 +1673,7 @@ const XRAY_OPACITY = 0.65;
 // A face's picture, as a function: a point on the face (Vector3) to its
 // place on the atlas, [x, y] - the one flat mapping that puts the face's
 // corners on their places (`uv`), from the three of them that span the most.
-function atlasMap(mesh, loop, uv, normal) {
+export function atlasMap(mesh, loop, uv, normal) {
   const u = new THREE.Vector3(1, 0, 0);
   if (Math.abs(normal.x) > 0.9) u.set(0, 1, 0);
   u.cross(normal).normalize();

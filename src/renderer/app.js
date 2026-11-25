@@ -39,6 +39,7 @@ import { latinOnly, freeName } from './names.js';
 import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 import { canvasPNG } from './png.js';
 import { offerUpdate } from './update-offer.js';
+import { PreviewWindow } from './preview-window.js';
 import { Recovery } from './recovery.js';
 import { Guide } from './guide.js';
 import { PhotoRipper } from './photo-ripper.js';
@@ -58,6 +59,9 @@ orthoViews.animation = animationMode;
 new NodeMarks(editor, animationMode); // (every node, a hollow square on its pivot point)
 new NodeBones(editor, animationMode); // (and a bone from it to each node inside it)
 // The views in a window of their own (see views-window.js).
+// The model as it will look, in a window of its own (the eye): never open at a start.
+const previewWindow = new PreviewWindow(editor, viewport);
+previewWindow.addEventListener('change', () => document.getElementById('preview-button').classList.toggle('active', previewWindow.open));
 const viewsWindow = new ViewsWindow(editor, viewport);
 viewsWindow.animation = animationMode;
 viewsWindow.addEventListener('change', () => {
@@ -97,6 +101,7 @@ const ACTIONS = {
   'flip-faces': () => editor.flipFaces(),
   separate: () => editor.separateSelection(),
   merge: () => toggleMergeMenu(),
+  bevel: () => openBevel(),
   'texture-ripper': () => ripper.toggle(),
   // Unfold's popup (see UVEditor.toggleUnfold()): the UV panel opened first, the popup by its button.
   unfold: () => {
@@ -129,7 +134,7 @@ const ACTIONS = {
   'toggle-snapping': () => setSnapping(!editor.snapGrid.enabled),
   'toggle-local': () => setLocalAxes(!editor.localAxes),
   'toggle-focus': () => setFocus(!editor.focus),
-  'toggle-preview': () => editor.setPreview(!editor.preview),
+  'toggle-preview': () => previewWindow.toggle(),
   'toggle-light': () => setLit(!editor.viewport.lit),
   'toggle-cut': () => editor.setOperation(editor.operation === 'cut' ? null : 'cut'),
   'toggle-place': () => editor.setOperation(editor.operation === 'place' ? null : 'place'),
@@ -185,6 +190,7 @@ const hotkeys = new Hotkeys(
     { id: 'op.place', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.place'), keys: 'KeyJ', run: () => ACTIONS['toggle-place']() },
     { id: 'op.cut', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.cut'), keys: 'Ctrl+KeyQ', run: () => ACTIONS['toggle-cut']() },
     { id: 'op.extrude', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.extrude'), keys: 'Ctrl+KeyE', run: () => ACTIONS['toggle-extrude']() },
+    { id: 'op.bevel', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.bevel'), keys: 'Ctrl+KeyB', run: () => ACTIONS.bevel() },
     { id: 'op.inset', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.inset'), keys: '', run: () => ACTIONS['toggle-inset']() },
     { id: 'op.knife', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.knife'), keys: '', run: () => ACTIONS['toggle-knife']() },
     { id: 'op.polygon', group: t('app.hotkeys.group.modes'), label: t('app.hotkeys.op.polygon'), keys: 'KeyG', run: () => ACTIONS['toggle-polygon']() },
@@ -788,7 +794,7 @@ const HOTKEY_TITLES = {
   '[data-tool="pipette"]': 'tool.pipette', '[data-tool="fill"]': 'tool.fill', '[data-tool="fillObject"]': 'tool.fill-object', '[data-tool="marquee"]': 'tool.marquee', '[data-action="texture-ripper"]': 'paint.ripper', '[data-uv="unfold"]': 'uv.unfold',
   '[data-shape="rect"][data-filled="0"]': 'tool.rect', '[data-shape="ellipse"][data-filled="0"]': 'tool.ellipse',
   '#undo-button': 'edit.undo', '#redo-button': 'edit.redo',
-  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
+  '#place-toggle': 'op.place', '#cut-toggle': 'op.cut', '#extrude-toggle': 'op.extrude', '#inset-toggle': 'op.inset', '#bevel-button': 'op.bevel', '#knife-toggle': 'op.knife', '#polygon-toggle': 'op.polygon', '#pencil-toggle': 'op.pencil', '#collision-button': 'op.collisions', '#animation-button': 'op.animation',
   '[data-action="make-face"]': 'edit.make-face', '[data-action="flip-faces"]': 'edit.flip-faces', '[data-action="separate"]': 'edit.separate', '[data-action="merge"]': 'edit.merge', '[data-tool="magic"]': 'tool.magic', '[data-action="delete"]': 'edit.delete',
   '[data-action="frame"]': 'view.frame', '[data-action="toggle-views"]': 'view.views', '[data-action="toggle-uv"]': 'view.uv', '#preview-button': 'view.preview', '#focus-button': 'view.focus', '#light-button': 'view.light',
   '[data-shading="orientation"]': 'view.orientation',
@@ -1047,79 +1053,6 @@ function pickMode(mode) {
   return true;
 }
 
-// A new project is asked about first: how it is textured. Resolves to the
-// options for Editor.newProject(), or to null if the user thinks better of it.
-const NEW_PPU_KEY = 'vertex.newProjectPPU';
-// The pixels per unit are the one atlas': with several, each is given its
-// own when it is made (see openAtlasPopup()) - the field is off then.
-function showNewProjectPPU() {
-  const multi = $('new-project-dialog').querySelector('[name="atlases"]:checked').value === 'multi';
-  const field = $('new-project-dialog').querySelector('.ppu-label').closest('.field');
-  field.classList.toggle('off', multi);
-  const input = field.querySelector('input');
-  input.disabled = multi;
-  if (multi) input.setSelectionRange(0, 0); // (not shown picked while off)
-}
-for (const radio of $('new-project-dialog').querySelectorAll('[name="atlases"]')) radio.addEventListener('change', showNewProjectPPU);
-// A card is chosen by a press anywhere on it - its field too, when that is off.
-for (const card of $('new-project-dialog').querySelectorAll('.choice-card')) {
-  card.addEventListener('click', (event) => {
-    const radio = card.querySelector('[type="radio"]');
-    if (radio.checked) return;
-    radio.checked = true;
-    radio.dispatchEvent(new Event('change'));
-  });
-}
-{
-  const field = $('new-project-dialog').querySelector('form').elements.ppu;
-  scrubbable(field, { read: () => parseInt(field.value, 10), write: (value) => { field.value = value; }, whole: true, min: 1, max: 128 });
-}
-function askNewProject() {
-  const dialog = $('new-project-dialog');
-  const form = dialog.querySelector('form');
-  form.elements.ppu.value = parseInt(localStorage.getItem(NEW_PPU_KEY), 10) || 16;
-  showNewProjectPPU();
-  dialog.hidden = false;
-  form.elements.ppu.focus();
-  form.elements.ppu.select();
-  return new Promise((resolve) => {
-    const done = (options) => {
-      dialog.hidden = true;
-      form.removeEventListener('submit', submit);
-      form.querySelector('[data-cancel]').removeEventListener('click', cancel);
-      window.removeEventListener('keydown', escape, true);
-      resolve(options);
-    };
-    const submit = (event) => {
-      event.preventDefault();
-      const ppu = parseInt(form.elements.ppu.value, 10);
-      if (form.elements.atlases.value === 'multi') {
-        done({ multiAtlas: true });
-        return;
-      }
-      if (!(ppu >= 1 && ppu <= 128)) {
-        form.elements.ppu.focus();
-        form.elements.ppu.select();
-        return;
-      }
-      localStorage.setItem(NEW_PPU_KEY, ppu);
-      done({ ppu, multiAtlas: form.elements.atlases.value === 'multi' });
-    };
-    const cancel = () => done(null);
-    const escape = (event) => {
-      // The dialog owns the keyboard while it is open: the editor's shortcuts
-      // do not hear it, the form itself does (typing, Tab, Enter).
-      event.stopImmediatePropagation();
-      if (event.code !== 'Escape') return;
-      event.preventDefault();
-      cancel();
-    };
-    form.addEventListener('submit', submit);
-    form.querySelector('[data-cancel]').addEventListener('click', cancel);
-    window.addEventListener('keydown', escape, true);
-  });
-}
-
 window.addEventListener('keydown', (event) => {
   // The settings dialog owns the keyboard while it is open.
   if (!$('settings-dialog').hidden) {
@@ -1252,7 +1185,6 @@ project.addEventListener('saved', () => toast(t('app.project.saved', { name: pro
 new MutationObserver(showProject).observe($('welcome'), { attributes: true, attributeFilter: ['hidden'] });
 showProject();
 
-project.ask = askNewProject;
 // The picture of the model kept in the project's file, for the welcome screen.
 project.picture = () => {
   const planes = mirrorDisplay.group.visible; // the mirror's planes are the editor's, not the model's
@@ -1302,7 +1234,7 @@ function askExport(title) {
     };
     const cancel = () => done(null);
     const escape = (event) => {
-      // As in askNewProject(): the dialog owns the keyboard while it is open.
+      // The dialog owns the keyboard while it is open.
       event.stopImmediatePropagation();
       if (event.code !== 'Escape') return;
       event.preventDefault();
@@ -1452,6 +1384,120 @@ const MAGIC_ANGLE_KEY = 'vertex.magicAngle';
 // Merge (see Editor.mergeSelected()): a menu by its button - at the middle,
 // onto the vertex selected last, or by distance (the distance kept between
 // launches). A choice merges and closes it; Esc or a press elsewhere closes it.
+// The bevel: tried on what is picked while its popup is open, beside its
+// button - the width, how bent the edges have to be, and, for faces, whether
+// only those round them. The editor does nothing else meanwhile, but the
+// camera may be turned.
+const BEVEL_KEY = 'vertex.bevel';
+const bevelMenu = { box: $('bevel-menu'), options: { width: 0.05, angle: 10, outline: false } };
+try {
+  const kept = JSON.parse(localStorage.getItem(BEVEL_KEY) ?? '{}');
+  if (kept.width > 0) bevelMenu.options.width = kept.width;
+  if (kept.angle >= 0 && kept.angle < 180) bevelMenu.options.angle = kept.angle;
+  bevelMenu.options.outline = Boolean(kept.outline);
+} catch { /* as it is at first */ }
+function showBevel(shown) {
+  const { box } = bevelMenu;
+  box.querySelector('small').textContent = shown.count
+    ? t('app.bevel.shown', { count: shown.count, limit: Number.isFinite(shown.limit) ? +shown.limit.toFixed(4) : '∞' })
+    : t('app.bevel.no-edges');
+  box.querySelector('[data-bevel-do="apply"]').disabled = !shown.count;
+  const { width, angle, outline } = bevelMenu.options;
+  for (const [name, value] of [['width', +width.toFixed(4)], ['angle', angle]]) {
+    const input = box.querySelector(`[name="${name}"]`);
+    if (document.activeElement !== input) input.value = String(value);
+  }
+  box.querySelector('[name="outline"]').checked = outline;
+}
+function openBevel() {
+  if (editor.bevel) return;
+  const { box, options } = bevelMenu;
+  if (!editor.canBevel()) {
+    toast(t('app.bevel.nothing'));
+    return;
+  }
+  if (!editor.beginBevel(options)) return;
+  box.hidden = false;
+  box.querySelector('[data-bevel="angle"]').hidden = editor.mode === 'edge';
+  box.querySelector('[data-bevel="outline"]').hidden = editor.mode !== 'face';
+  showBevel(editor.setBevel(options));
+  const button = $('bevel-button').getBoundingClientRect();
+  box.style.left = `${Math.max(6, Math.min(button.left, window.innerWidth - box.offsetWidth - 6))}px`;
+  box.style.top = `${button.bottom + 6}px`;
+}
+function closeBevel(apply) {
+  const { box, options } = bevelMenu;
+  if (box.hidden) return;
+  box.hidden = true;
+  if (box.contains(document.activeElement)) document.activeElement.blur();
+  if (!apply) {
+    editor.cancelBevel();
+    return;
+  }
+  editor.applyBevel();
+  try {
+    localStorage.setItem(BEVEL_KEY, JSON.stringify(options));
+  } catch { /* not kept: fine */ }
+}
+{
+  const { box, options } = bevelMenu;
+  const limits = { width: [0.0001, 1000], angle: [0, 179] };
+  const set = (name, value) => {
+    if (!Number.isFinite(value)) return;
+    options[name] = Math.min(limits[name][1], Math.max(limits[name][0], value));
+    if (name === 'width') {
+      // (not past where it can be: pulled back, it goes at once)
+      const shown = editor.setBevel(options);
+      if (shown?.count && options.width > shown.limit) options.width = shown.limit;
+      if (shown) showBevel(shown);
+    } else if (editor.bevel) showBevel(editor.setBevel(options));
+  };
+  for (const name of ['width', 'angle']) {
+    const input = box.querySelector(`[name="${name}"]`);
+    const read = () => parseFloat(input.value.replace(',', '.'));
+    input.addEventListener('input', () => {
+      if (read() > 0 || name === 'angle') set(name, read());
+    });
+    scrubbable(input, {
+      read: () => options[name],
+      write: (value) => {
+        set(name, value);
+        input.value = String(+options[name].toFixed(4));
+      },
+      min: limits[name][0],
+      max: limits[name][1],
+      step: name === 'width' ? 0.01 : 1,
+    });
+  }
+  box.querySelector('[name="outline"]').addEventListener('change', (event) => {
+    options.outline = event.target.checked;
+    showBevel(editor.setBevel(options));
+  });
+  box.addEventListener('click', (event) => {
+    const what = event.target.closest('[data-bevel-do]')?.dataset.bevelDo;
+    if (what) closeBevel(what === 'apply');
+  });
+  // Presses elsewhere are not heard, but the camera's.
+  for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick']) {
+    window.addEventListener(type, (event) => {
+      if (box.hidden || box.contains(event.target) || event.target === viewport.renderer.domElement || event.target.closest?.('.ask-dialog')) return;
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }, true);
+  }
+  // The keys are the popup's: Enter applies, Esc goes back.
+  window.addEventListener('keydown', (event) => {
+    if (box.hidden || document.querySelector('.ask-dialog:not([hidden])')) return;
+    event.stopImmediatePropagation();
+    if (event.code === 'Escape') closeBevel(false);
+    else if ((event.code === 'Enter' || event.code === 'NumpadEnter') && !event.target.closest?.('button')) {
+      if (!box.querySelector('[data-bevel-do="apply"]').disabled) closeBevel(true);
+      event.preventDefault();
+    } else if (!box.contains(event.target)) event.preventDefault();
+  }, true);
+  window.vertex?.onMenu(() => closeBevel(false)); // (the menu's are for what is there without it)
+}
+
 const MERGE_DISTANCE_KEY = 'vertex.mergeDistance';
 const mergeMenu = {
   box: $('merge-menu'),
@@ -1713,7 +1759,13 @@ const WELCOME_ACTIONS = ['project-new', 'project-open', 'project-close', 'new', 
 const WELCOME_HOTKEYS = ['file.new', 'file.open', 'view.settings'];
 const welcome = new Welcome($('welcome'), project, window.vertex?.recent);
 project.addEventListener('closed', () => {
+  previewWindow.close();
   if (renderMode.open) renderMode.close();
+});
+
+// Another project: all of it in the preview.
+project.addEventListener('open', () => {
+  if (previewWindow.open) previewWindow.frame();
 });
 
 // The sprite render: the model into a PNG sprite sheet (see render-mode.js),
@@ -2144,7 +2196,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { recovery, uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode, ripper };
+window.vertexDebug = { previewWindow, recovery, uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode, ripper };
 
 // The bottom panel's height, as a share of the workspace (see setViewsSize()).
 const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';
@@ -2487,7 +2539,6 @@ function refresh() {
   $('stat-faces').textContent = scope.reduce((sum, island) => sum + island.faces.length, 0);
   $('stat-size').textContent = formatBytes(mesh.byteSize(objects.length ? objects : null));
   $('focus-button').classList.toggle('active', editor.focus);
-  $('preview-button').classList.toggle('active', editor.preview);
   $('light-button').classList.toggle('active', editor.viewport.lit);
   mirrorDisplay.group.visible = !editor.preview; // the mirror's planes are the editor's too
   showMirror();

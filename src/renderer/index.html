@@ -101,6 +101,9 @@
         <button id="inset-toggle" data-action="toggle-inset" data-i18n-title="html.inset-toggle.title" data-i18n-aria-label="html.inset-toggle.aria-label">
           <i class="fa-solid fa-compress"></i>
         </button>
+        <button id="bevel-button" data-action="bevel" data-i18n-title="html.bevel-button.title" data-i18n-aria-label="html.bevel-button.title">
+          <i class="fa-regular fa-gem"></i>
+        </button>
         <button id="polygon-toggle" data-action="toggle-polygon" data-i18n-title="html.polygon-toggle.title" data-i18n-aria-label="html.polygon-toggle.aria-label">
           <i class="fa-solid fa-draw-polygon"></i>
         </button>
@@ -702,33 +705,6 @@
     </div>
   </div>
 
-  <div id="new-project-dialog" class="modal" hidden>
-    <form class="dialog">
-      <h2 data-i18n="html.new-project-dialog.dialog.h2.text"></h2>
-      <h3 data-i18n="html.new-project-dialog.dialog.h3.text"></h3>
-      <div class="choice-card">
-        <label class="choice">
-          <input type="radio" name="atlases" value="single" checked>
-          <span><i18n-text data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.text"></i18n-text><small data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.small.text"></small></span>
-        </label>
-        <label class="field" data-i18n-title="html.new-project-dialog.dialog.choice-card.field.title">
-          <span class="ppu-label" data-i18n="html.new-project-dialog.dialog.choice-card.field.ppu-label.text"></span>
-          <input name="ppu" type="text" inputmode="numeric" spellcheck="false" value="16">
-        </label>
-      </div>
-      <div class="choice-card">
-        <label class="choice">
-          <input type="radio" name="atlases" value="multi">
-          <span><i18n-text data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.text2"></i18n-text><small data-i18n="html.new-project-dialog.dialog.choice-card.choice.span.small.text2"></small></span>
-        </label>
-      </div>
-      <div class="form-buttons">
-        <button type="button" data-cancel data-i18n="html.new-project-dialog.dialog.form-buttons.type-button.text"></button>
-        <button type="submit" data-i18n="html.new-project-dialog.dialog.form-buttons.type-submit.text"></button>
-      </div>
-    </form>
-  </div>
-
   <!-- A clip's name and length: asked for a new one, changed for the one worked on (see timeline.js). -->
   <form id="clip-popup" class="grid-popup" hidden>
     <div class="grid-popup-title"></div>
@@ -840,6 +816,19 @@
     <div class="merge-distance">
       <button data-merge="distance" data-i18n="html.merge-menu.distance" data-i18n-title="html.merge-menu.distance.title"></button>
       <input name="distance" type="text" inputmode="decimal" spellcheck="false" data-i18n-title="html.merge-menu.distance-value.title">
+    </div>
+  </div>
+
+  <!-- The bevel being tried, beside its button (see app.js). -->
+  <div id="bevel-menu" hidden>
+    <b data-i18n="html.bevel-menu.title"></b>
+    <label data-i18n-title="html.bevel-menu.width.title"><span data-i18n="html.bevel-menu.width"></span><input name="width" type="text" inputmode="decimal" spellcheck="false"></label>
+    <label data-bevel="angle" data-i18n-title="html.bevel-menu.angle.title"><span data-i18n="html.bevel-menu.angle"></span><input name="angle" type="text" inputmode="decimal" spellcheck="false"></label>
+    <label data-bevel="outline" data-i18n-title="html.bevel-menu.outline.title"><input name="outline" type="checkbox"><span data-i18n="html.bevel-menu.outline"></span></label>
+    <small></small>
+    <div class="bevel-foot">
+      <button data-bevel-do="cancel" data-i18n="ask.cancel"></button>
+      <button data-bevel-do="apply" data-i18n="html.bevel-menu.apply"></button>
     </div>
   </div>
 

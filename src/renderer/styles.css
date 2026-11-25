@@ -2898,6 +2898,72 @@ input.refused {
   display: none;
 }
 
+/* The bevel being tried, beside its button (see openBevel()). */
+#bevel-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+#bevel-menu[hidden],
+#bevel-menu label[hidden] {
+  display: none;
+}
+
+#bevel-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+#bevel-menu label:not([data-bevel='outline']) span {
+  flex: 1;
+}
+
+#bevel-menu .scrub-field {
+  flex: none;
+  width: 92px;
+}
+
+#bevel-menu small {
+  color: var(--text-dim);
+}
+
+#bevel-menu .bevel-foot {
+  display: flex;
+  gap: 6px;
+}
+
+#bevel-menu button {
+  flex: 1;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+#bevel-menu button[data-bevel-do='apply'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+#bevel-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Merge's choices, beside its button (see toggleMergeMenu()). */
 #merge-menu {
   position: fixed;
@@ -2967,7 +3033,7 @@ input.refused {
   width: 80px;
 }
 
-#magic-options input {
+:is(#magic-options, #bevel-menu) input:not([type='checkbox']) {
   width: 100%;
   height: 22px;
   padding: 0 38px 0 6px; /* (room for the handle, see scrubbable()) */
@@ -2978,7 +3044,7 @@ input.refused {
   font: inherit;
 }
 
-#magic-options input:focus {
+:is(#magic-options, #bevel-menu) input:focus {
   border-color: var(--accent);
   outline: none;
 }
@@ -5961,21 +6027,7 @@ option::checkmark {
   background: color-mix(in srgb, var(--accent) 28%, var(--bg));
 }
 
-/* Whose the new project's pixels per unit are, on one line. */
-#new-project-dialog .ppu-label {
-  white-space: nowrap;
-}
-
-#new-project-dialog .field .scrub-field {
-  flex: none;
-  width: 130px;
-}
-
-#new-project-dialog .field .scrub-field input {
-  width: 100%;
-}
-
-/* (shown or not by the attribute, whatever their display: see showAtlases(), showNewProjectPPU()) */
+/* (shown or not by the attribute, whatever their display: see showAtlases()) */
 #atlas-list[hidden],
 #uv-atlas[hidden],
 #uv-atlas-new[hidden],
@@ -5984,41 +6036,6 @@ option::checkmark {
 .modal .field[hidden],
 .scrub-field[hidden] {
   display: none;
-}
-
-/* The new project's ways of texturing, each a card: the one chosen lit. */
-.modal .choice-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: -4px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.12s, background-color 0.12s;
-}
-
-.modal .choice-card:hover {
-  background: color-mix(in srgb, var(--hover) 50%, transparent);
-}
-
-.modal .choice-card:has(input[type="radio"]:checked) {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.modal .choice-card .field {
-  margin: 0 0 0 21px;
-}
-
-/* The one atlas' pixels per unit, while several are chosen: there, but off. */
-.modal .field.off {
-  opacity: 0.45;
-}
-
-.modal .field.off input {
-  pointer-events: none;
 }
 
 /* (levels do nothing while a palette is on) */

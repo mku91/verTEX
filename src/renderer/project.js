@@ -23,7 +23,7 @@
 //
 // Since version 3 the model is textured: `uvs` is where each face's corners
 // are on its object's atlas, in pixels (see unwrap.js). Since version 5 a
-// project may have several atlases (`multiAtlas`, chosen when it is made):
+// project may have several atlases (`multiAtlas`; since 1.26 every new one is so):
 // `atlases` is [{ id, name, ppu, width, height }] - each one's pixels per
 // unit of length and size - and an object's `atlas` the id of the one it is
 // on. (Up to version 4 there was one: `ppu` and `atlas` { width, height }
@@ -402,7 +402,6 @@ export class Project extends EventTarget {
     this.path = null;
     this.savedState = editor.history.id; // the history state that is on disk (or was the start)
     this.working = false; // a command is waiting for a dialog
-    this.ask = null; // asks what kind of project a new one is to be, see newProject()
     this.picture = null; // gives the picture of the model that goes into the file (PNG bytes), see write()
     this.shown = '';
     editor.addEventListener('change', () => this.report());
@@ -491,11 +490,8 @@ export class Project extends EventTarget {
   newProject() {
     return this.run(async () => {
       if (!(await this.mayDiscard())) return;
-      // What kind of project: asked by the window (see app.js), if it has a way to ask.
-      const options = this.ask ? await this.ask() : {};
-      if (!options) return;
       this.leave();
-      if (!this.editor.newProject(options)) return;
+      if (!this.editor.newProject()) return;
       this.path = null;
       this.savedState = this.editor.history.id;
       this.report();

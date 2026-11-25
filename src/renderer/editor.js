@@ -3,6 +3,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { bevelEdges, bevelTo, planBevel } from './bevel.js';
 import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid, ROTATION_STEP } from './snap-grid.js';
 import { History } from './history.js';
@@ -262,6 +263,7 @@ export class Editor extends EventTarget {
     // The extrusion being pulled out: its new vertices and how far they went.
     this.extrude = null;
     this.inset = null; // an inset in progress, see beginInset()
+    this.bevel = null; // a bevel being tried, see beginBevel()
     this.isolation = null; // one object worked on alone: { id, others }, see setIsolated()
     this.knife = null; // the knife's cut being drawn, see pressKnife()
     // The polygon tool's state: its work plane and the outline drawn so far.
@@ -271,7 +273,7 @@ export class Editor extends EventTarget {
     // (see setLocalAxes()) rather than the world's.
     this.localAxes = false;
     this.uvLook = false; // the UV editor is open, see setUVLook()
-    this.preview = false; // the model alone is shown, see setPreview()
+    this.preview = false; // the model alone is drawn, see picture()
     // What the editor works on (see setWorkspace()): the model itself, or
     // something over it - its collision shapes ('collisions', collisions.js),
     // its animations ('animation') - with the model not to be edited.
@@ -285,8 +287,8 @@ export class Editor extends EventTarget {
     this.modeDragging = false; // such a mode's gizmo is being dragged
     this.simulating = false; // the simulation runs (see simulation.js): the model is its, not to be edited
     // Texturing (see unwrap.js): the atlases the objects are painted with -
-    // one, or several in a project made so (`multiAtlas`, chosen when it is
-    // made) - each its own picture, at its own pixels per unit of length. The
+    // as many as wanted (`multiAtlas`), or one, in a project from before
+    // every new one was so - each its own picture, at its own pixels per unit of length. The
     // UV editor and the brush work on one of them at a time (`atlasId`,
     // see the `atlas` getter); `ppu` is that one's.
     // A project with several begins with none: each is made, its pixels per
@@ -2741,7 +2743,7 @@ export class Editor extends EventTarget {
           return;
         }
         if (event.button !== 0) return;
-        if (this.preview || this.simulating) return; // only looked at: the press is the camera's (or the simulation's)
+        if (this.preview || this.simulating || this.bevel) return; // only looked at: the press is the camera's (or the simulation's)
         // A mode over the model: its gizmo, or what it has under the pointer
         // (a collision shape), takes the press; else objects are picked as
         // usual (and nothing is moved, see dragTo()).
@@ -4743,6 +4745,103 @@ export class Editor extends EventTarget {
     return true;
   }
 
+  // --- bevel ---------------------------------------------------------------
+
+  // The faces a bevel would be of: those picked, or all of the objects picked.
+  bevelFaces() {
+    if (this.mode === 'face') return [...this.picked];
+    if (this.mode !== 'object') return [];
+    const { islands } = this.topology;
+    return [...new Set([...this.picked].flatMap((index) => islands[index]?.nodeFaces ?? []))];
+  }
+
+  canBevel() {
+    if (this.workspace !== 'model' || this.painting || this.preview) return false;
+    return this.mode === 'edge' ? this.picked.size > 0 : this.bevelFaces().length > 0;
+  }
+
+  // Tries a bevel on the edges picked, or those of the faces or the objects
+  // picked: the model is shown bevelled (see setBevel()) until it is applied
+  // or cancelled. Returns false if there is nothing to bevel.
+  beginBevel(options) {
+    if (!this.canBevel() || this.busy()) return false;
+    if (this.operation) this.setOperation(null);
+    const { mesh } = this;
+    const before = this.snapshot();
+    const base = Object.assign(Object.create(Object.getPrototypeOf(mesh)), {
+      vertices: mesh.vertices, faces: mesh.faces, wires: mesh.wires, vertexObject: mesh.vertexObject, folds: mesh.folds, weights: mesh.weights,
+    });
+    this.bevel = {
+      before, base, mode: this.mode, faces: this.bevelFaces(), edges: this.mode === 'edge' ? new Set(this.picked) : null,
+      own: new Set(this.selection), nodes: new Set(this.pickedNodes ?? []), plan: null, planned: null, width: 0,
+    };
+    this.gizmo.detach();
+    this.setBevel(options);
+    return true;
+  }
+
+  // `width`; `angle`: edges less bent (degrees) are left; `outline`: of picked
+  // faces, the edges round them only. Returns { width, count }: how wide it
+  // is, as wide as it can be at most, and how many edges it is of.
+  setBevel({ width, angle, outline }) {
+    const { bevel, mesh } = this;
+    if (!bevel) return null;
+    const key = `${angle}|${outline}`;
+    if (bevel.planned !== key) {
+      bevel.planned = key;
+      const edges = bevel.edges ?? bevelEdges(bevel.base, bevel.faces, { angle, outline: outline && bevel.mode === 'face' });
+      bevel.count = edges.size;
+      bevel.plan = planBevel(bevel.base, edges);
+    }
+    if (bevel.plan) bevelTo(mesh, bevel.base, bevel.plan, width, { preview: true });
+    else Object.assign(mesh, { vertices: bevel.base.vertices.map((vertex) => vertex.clone()), vertexObject: [...bevel.base.vertexObject], faces: bevel.base.faces.map(cloneFace) });
+    bevel.width = bevel.plan ? Math.min(width, bevel.plan.limit) : 0;
+    // (nothing is laid out yet: not rebuildView())
+    this.selection = new Set();
+    this.hovered = null;
+    this.updateTopology();
+    this.view.rebuild();
+    this.picked = new Set();
+    this.refreshHighlight();
+    this.viewport.requestRender();
+    return { width: bevel.width, count: bevel.plan ? bevel.count : 0, limit: bevel.plan?.limit ?? 0 };
+  }
+
+  // Back to the model as it was. Returns false if no bevel was being tried.
+  cancelBevel() {
+    if (!this.bevel) return false;
+    const { before, nodes } = this.bevel;
+    this.bevel = null;
+    this.pickedNodes = nodes;
+    this.restore(before);
+    return true;
+  }
+
+  // One undo step. Returns whether there was anything to bevel.
+  applyBevel() {
+    const { bevel, mesh } = this;
+    if (!bevel) return false;
+    if (!bevel.plan || bevel.width < 1e-9) {
+      this.cancelBevel();
+      return false;
+    }
+    const { first, remap } = bevelTo(mesh, bevel.base, bevel.plan, bevel.width);
+    this.bevel = null;
+    const owners = new Set([...bevel.own].map((i) => bevel.base.vertexObject[i]));
+    // What was picked, with what has been made of it.
+    const kept = new Set(bevel.mode === 'edge' ? [] : bevel.own);
+    for (let i = first; i < first + bevel.plan.points.length; i++) kept.add(i);
+    this.selection = bevel.mode === 'object'
+      ? new Set([...mesh.vertexObject.keys()].filter((i) => owners.has(mesh.vertexObject[i])))
+      : new Set([...kept].filter((i) => remap.has(i)).map((i) => remap.get(i)));
+    this.target = new Set([...mesh.vertexObject.keys()].filter((i) => owners.has(mesh.vertexObject[i])));
+    this.pickedNodes = bevel.nodes;
+    this.edited(bevel.before);
+    this.rebuildView();
+    this.selectionChanged();
+    return true;
+  }
+
   // --- knife -------------------------------------------------------------
 
   // LMB with the knife: the first press puts the cut's start on the border of
@@ -5803,25 +5902,7 @@ export class Editor extends EventTarget {
     this.viewport.requestRender();
   }
 
-  // The preview: the main view shows the model as it will be seen outside the
-  // editor - painted, on black, with no floor, no edges or vertices, no
-  // selection, no gizmo. It is a look, and a look only: nothing is edited
-  // through the main view while it is on (the camera still turns).
-  setPreview(on) {
-    // (The simulation is only looked at too: the preview is let in while it runs.)
-    if (on === this.preview || (this.busy() && !this.simulating)) return;
-    if (on) this.setOperation(null);
-    this.preview = on;
-    this.hovered = null;
-    this.viewport.renderer.domElement.style.cursor = '';
-    this.applyBare();
-    this.viewport.setPreview(on);
-    this.refreshHighlight();
-    this.placeGizmo();
-    this.emitChange();
-  }
-
-  // The surface alone, painted, with nothing drawn on it: in the preview, and
+  // The surface alone, painted, with nothing drawn on it: for picture(), and
   // under the brush - which also has the atlas' pixels marked out on it, and
   // the objects set aside still in sight, to paint with them in mind.
   applyBare() {
@@ -5830,7 +5911,7 @@ export class Editor extends EventTarget {
     if (!this.painting || this.preview) this.setPaintHover(null);
   }
 
-  // A picture of the model as the preview shows it - alone, painted, on black -
+  // A picture of the model as it is outside the editor - alone, painted, on black -
   // seen from the side the camera is on and filling the picture, on a canvas
   // of the given size. What the editor is in the middle of is left as it is.
   picture(width, height) {
@@ -7319,7 +7400,7 @@ export class Editor extends EventTarget {
 
   // A fresh project: the starting cube and an empty history.
   // `ppu` is the new project's pixels per unit of length.
-  newProject({ ppu = 16, multiAtlas = false } = {}) {
+  newProject() {
     const draft = new EditableMesh();
     draft.autoAtlas = this.mesh.autoAtlas;
     draft.addCube();
@@ -7331,8 +7412,8 @@ export class Editor extends EventTarget {
         objects: draft.objects,
         vertexObject: draft.vertexObject,
         nextObjectId: draft.nextObjectId,
-        atlases: multiAtlas ? [] : [{ id: ATLAS, name: ATLAS, ppu }], // (several: each made when wanted)
-        multiAtlas,
+        atlases: [], // (each made when wanted)
+        multiAtlas: true,
       },
       view: { camera: { position: [3.5, 3, 4.5], target: [0, 0.5, 0] } },
     });
@@ -7425,6 +7506,7 @@ export class Editor extends EventTarget {
       this.simulating ||
       this.extrude !== null ||
       this.inset !== null ||
+      this.bevel !== null ||
       Boolean(this.polygon?.points.length)
     );
   }

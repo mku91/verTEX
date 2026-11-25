@@ -808,9 +808,10 @@ export class Editor extends EventTarget {
   // vertex of what is moved to land on a reference's vertex: of the moved
   // ones, the one that has come nearest to one on the screen (within
   // REFERENCE_SNAP px - Blender's "Closest"), see pencilSnap(). Vertices,
-  // edges and faces only, not whole objects. { offset, target }, or null.
+  // edges and faces only, not whole objects - picked as such or by all their
+  // vertices. { offset, target }, or null.
   gizmoReferenceSnap() {
-    if (this.mode === 'object' || this.pivotEdited !== null || !this.topology.referenced?.size) return null;
+    if (this.mode === 'object' || this.pivotEdited !== null || !this.topology.snapped?.size || this.wholeObjects(this.dragStartPositions)) return null;
     const viewer = this.gizmoViewer ?? this.mainViewer;
     const travel = this.pivot.position.clone().sub(this.pivotStart);
     const targets = this.referenceTargets(viewer);
@@ -824,7 +825,14 @@ export class Editor extends EventTarget {
     return best && { offset: best.point.clone().sub(best.from), target: best.point.clone() };
   }
 
-  // The references' vertices a viewer is shown, with where each is on the
+  // Whether vertices (a Map or a Set of them) are whole objects, nothing of them left out.
+  wholeObjects(vertices) {
+    const { vertexObject } = this.mesh;
+    const owners = new Set([...vertices.keys()].map((i) => vertexObject[i]));
+    return vertexObject.every((owner, i) => !owners.has(owner) || vertices.has(i));
+  }
+
+  // The references' vertices snapped to (see setReferenceSnap()) that a viewer is shown, with where each is on the
   // screen and how far from the viewer: [{ point, x, y, depth }].
   referenceTargets(viewer) {
     const main = viewer === this.mainViewer;
@@ -837,6 +845,7 @@ export class Editor extends EventTarget {
     );
     const targets = [];
     for (const index of front) {
+      if (!this.topology.snapped.has(index)) continue;
       const point = this.mesh.vertices[index];
       const at = viewer.project(point);
       if (at) targets.push({ point, x: at.x, y: at.y, depth: main ? point.distanceTo(camera) : point.dot(viewer.viewDirection(point)) });
@@ -5271,7 +5280,7 @@ export class Editor extends EventTarget {
     // that is dragged with it. Not with Alt held; along an axis, as far as
     // the axis takes it there.
     let onReferenceMove = null;
-    if (!snapped && drag.parent === undefined && this.mode !== 'object' && !this.altHeld && this.topology.referenced?.size && drag.viewer.project) {
+    if (!snapped && drag.parent === undefined && this.mode !== 'object' && !this.altHeld && this.topology.snapped?.size && drag.viewer.project && !this.wholeObjects(drag.moving)) {
       // Where the vertex is aimed on the screen: the pointer, less how far from
       // the vertex it was pressed (not where the grid has put it: that may be far).
       drag.aimFrom ??= drag.viewer.project(drag.start) ?? { x: drag.x, y: drag.y };
@@ -5486,7 +5495,7 @@ export class Editor extends EventTarget {
     const { viewer } = drag;
     if (!viewer.project) return null;
     const { vertices, vertexObject } = this.mesh;
-    const { hiddenVertices, referenced } = this.topology;
+    const { hiddenVertices, snapped } = this.topology;
     const own = vertexObject[drag.parent];
     let near = null;
     let nearest = REFERENCE_SNAP;
@@ -5500,7 +5509,7 @@ export class Editor extends EventTarget {
       }
     });
     if (near) return near.clone();
-    if (!referenced?.size) return null;
+    if (!snapped?.size) return null;
     return this.nearestTarget(clientX, clientY, this.referenceTargets(viewer))?.point.clone() ?? null;
   }
 
@@ -5662,20 +5671,24 @@ export class Editor extends EventTarget {
     // References (see setReference()), an entry's own switch or a node's above
     // it: as hidden to picking and to what a node holds, but drawn - see-through.
     const referenced = new Set();
-    const refer = (index, under) => {
+    const snapped = new Set(); // those of them that are snapped to, see setReferenceSnap()
+    const refer = (index, under, free) => {
       const island = islands[index];
       island.referenceOwn = Boolean(this.mesh.objects[index]?.reference);
       island.referenced = under || island.referenceOwn;
+      island.snapOff = Boolean(this.mesh.objects[index]?.snapOff);
+      const off = free || (island.referenceOwn && island.snapOff);
       if (island.referenced && !island.hidden) {
         for (const vertex of island.vertices) {
           referenced.add(vertex);
+          if (!off) snapped.add(vertex);
           hiddenVertices.add(vertex);
         }
       }
-      for (const child of island.children) refer(child, island.referenced);
+      for (const child of island.children) refer(child, island.referenced, off);
     };
     islands.forEach((island, index) => {
-      if (island.parentIndex === null) refer(index, false);
+      if (island.parentIndex === null) refer(index, false, false);
     });
     const collect = (island) => {
       if (island.node) return;
@@ -5690,7 +5703,7 @@ export class Editor extends EventTarget {
     };
     islands.forEach(collect);
     const edges = this.mesh.edges().filter(([a]) => !hiddenVertices.has(a));
-    this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices, referenced };
+    this.topology = { edges, islands, islandOfFace, islandOfVertex, hiddenVertices, referenced, snapped };
     this.view.hidden = hiddenVertices; // takes effect at the view's next rebuild
     this.view.referenced = referenced; // likewise
     this.view.ghosted = ghosted; // likewise
@@ -6458,6 +6471,19 @@ export class Editor extends EventTarget {
     this.selectionChanged();
   }
 
+  // Whether vertices - the pencil's new one, those moved - snap to the
+  // vertices of a reference (index in the objects list) and of all it holds,
+  // or not: kept as `snapOff`. One undo step.
+  setReferenceSnap(index, on) {
+    const object = this.mesh.objects[index];
+    if (!object?.reference || !object.snapOff === on || this.busy()) return;
+    this.history.push(this.snapshot());
+    if (on) delete object.snapOff;
+    else object.snapOff = true;
+    this.updateTopology();
+    this.emitChange();
+  }
+
   // Works on one entry of the objects list alone (Blender's Local View,
   // Maya's Isolate Select), or - on the one that is, or with null - goes back:
   // the others are set aside, a faint wireframe that nothing can pick. A way
@@ -6675,10 +6701,10 @@ export class Editor extends EventTarget {
     this.clipboard = {
       // `parent` is an id among the copied ones; a root has `outer`, the node it was taken from.
       objects: order.map((index) => {
-        const { id, name, kind, parent, hidden, reference, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
+        const { id, name, kind, parent, hidden, reference, snapOff, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked } = mesh.objects[index];
         const top = roots.has(index);
         return {
-          id, name, kind, hidden: Boolean(hidden), reference: Boolean(reference), ikPin: Boolean(ikPin), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
+          id, name, kind, hidden: Boolean(hidden), reference: Boolean(reference), snapOff: Boolean(snapOff), ikPin: Boolean(ikPin), pivot: pivot ? [...pivot] : null, mirror: mirror ? [...mirror] : null,
           rotation: rotation ? [...rotation] : null, color: color ?? null, atlas: atlas ?? null, oneSided: Boolean(oneSided), smooth: smooth ?? null,
           colliders: colliders?.length ? colliders.map(cloneCollider) : null, body: body ?? null, rotationMode: rotationMode ?? null, locked: locked ?? false,
           parent: top ? null : parent, outer: top ? parent ?? null : null,
@@ -6713,6 +6739,7 @@ export class Editor extends EventTarget {
       const object = mesh.objects[mesh.objects.length - 1];
       if (source.hidden) object.hidden = true;
       if (source.reference) object.reference = true;
+      if (source.snapOff) object.snapOff = true;
       if (source.ikPin) object.ikPin = true;
       if (source.pivot) object.pivot = [...source.pivot];
       if (source.rotation) object.rotation = [...source.rotation];
@@ -7232,13 +7259,14 @@ export class Editor extends EventTarget {
     const placedObjects = model.objects.some((object) => object.atlas !== undefined)
       ? null
       : new Set((model.uvs ?? []).flatMap((uv, i) => (uv ? [model.vertexObject[model.faces[i][0]]] : [])));
-    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, reference, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
+    mesh.objects = model.objects.map(({ id, name, kind, parent, hidden, reference, snapOff, ikPin, pivot, rotation, mirror, color, atlas, oneSided, smooth, colliders, body, rotationMode, locked }) => ({
       id,
       name,
       kind: kind === 'node' ? 'node' : 'mesh',
       parent: parent ?? null,
       ...(hidden ? { hidden: true } : {}),
       ...(reference ? { reference: true } : {}), // a shape to build over (see setReference())
+      ...(snapOff ? { snapOff: true } : {}), // not snapped to as a reference (see setReferenceSnap())
       ...(ikPin ? { ikPin: true } : {}), // not turned by IK (see animate.js)
       ...(pivot ? { pivot: [...pivot] } : {}),
       ...(rotation?.some(Boolean) ? { rotation: [...rotation] } : {}),

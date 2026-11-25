@@ -2993,6 +2993,7 @@ input.refused {
 
 /* The reference switch (see Editor.setReference()): on the row under the
    pointer, or always while it is on; the switches after it beside it. */
+.outliner-snap + .outliner-reference,
 .outliner-reference + .outliner-isolate,
 .outliner-reference + .outliner-eye {
   margin-left: 2px;
@@ -3006,12 +3007,15 @@ input.refused {
   visibility: visible;
 }
 
+.outliner-snap.active,
+.outliner-snap.active:hover,
 .outliner-reference.active,
 .outliner-reference.active:hover {
   background: var(--accent);
   opacity: 1;
 }
 
+.outliner-snap.active i,
 .outliner-reference.active i {
   color: #fff;
 }

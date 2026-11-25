@@ -1237,6 +1237,8 @@
  "outliner.isolate.on": "Only this object: the others become a faint wireframe that cannot be picked",
  "outliner.isolate.off": "Back to all the objects",
  "outliner.reference.on": "Reference: see-through with black edges, not picked or exported; the pencil's new vertices snap to its vertices",
+ "outliner.reference.snap.on": "Vertices do not snap to this reference's vertices. Click to make them",
+ "outliner.reference.snap.off": "Vertices drawn and moved snap to this reference's vertices (whole objects do not). Click to stop",
  "outliner.reference.off": "Back from a reference to an object to edit",
  "html.uv-editor.uv-bar.uv-unfold.title": "Unfold: choose how the pixel grid lies, see it on the model, and lay the picked faces out on it - or, with an object selected, all of its faces. The grid meets across every edge; pixels stretch on sloping faces. Faces tilted over 60° go to a piece of their own. They get new places, filled with the template; what was painted for them stays at the old place until «Clean» is pressed",
  "uv.chart-menu.stack": "Stack",

@@ -46,6 +46,7 @@ const NODE_ICON = '<i class="fa-solid fa-circle-nodes"></i>'; // a node (the kin
 const EYE_ICON = '<i class="fa-solid fa-eye"></i>';
 const EYE_OFF_ICON = '<i class="fa-solid fa-eye-slash"></i>';
 const ISOLATE_ICON = '<i class="fa-solid fa-crosshairs"></i>';
+const SNAP_ICON = '<i class="fa-solid fa-magnet"></i>';
 const REFERENCE_ICON = '<i class="fa-solid fa-ghost"></i>';
 const INDENT = 14; // px per nesting level
 const DRAG_THRESHOLD = 5; // px of pointer travel before a press on a row becomes a drag
@@ -165,7 +166,7 @@ export class Outliner {
     const bound = boundByNode(this.editor.mesh);
     const focus = this.editor.mode === 'vertex' ? this.editor.skinFocus ?? null : null;
     const signature = JSON.stringify([
-      islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden, island.referenceOwn, island.referenced]),
+      islands.map((island) => [island.name, island.kind, island.parentIndex, island.hiddenOwn, island.hidden, island.referenceOwn, island.referenced, island.snapOff]),
       [...bound].map(([node, objects]) => [node, objects.map(({ object, vertices }) => [object, vertices.length])]), focus,
       [...selected],
       whole,
@@ -251,6 +252,15 @@ export class Outliner {
       // A reference (see Editor.setReference()), by its own switch or a node's
       // above it: the switch shows on the row under the pointer, or when it is on.
       row.classList.toggle('reference', island.referenced);
+      // Whether vertices snap to it (see Editor.setReferenceSnap()).
+      if (island.referenceOwn) {
+        const snap = document.createElement('span');
+        snap.className = `outliner-eye outliner-snap${island.snapOff ? '' : ' active'}`;
+        snap.dataset.snap = '';
+        snap.title = island.snapOff ? t('outliner.reference.snap.on') : t('outliner.reference.snap.off');
+        snap.innerHTML = SNAP_ICON;
+        row.append(snap);
+      }
       const reference = document.createElement('span');
       reference.className = `outliner-eye outliner-reference${island.referenceOwn ? ' active' : ''}`;
       reference.dataset.reference = '';
@@ -356,6 +366,12 @@ export class Outliner {
         this.openAddMenu(Number(plus.dataset.addInto), plus);
         return;
       }
+      const snap = event.target.closest('[data-snap]');
+      if (snap) {
+        const index = Number(rowAt(snap).dataset.object);
+        editor.setReferenceSnap(index, editor.topology.islands[index].snapOff);
+        return;
+      }
       const reference = event.target.closest('[data-reference]');
       if (reference) {
         const index = Number(rowAt(reference).dataset.object);
@@ -403,7 +419,7 @@ export class Outliner {
     });
     list.addEventListener('dblclick', (event) => {
       const row = rowAt(event.target);
-      if (row && !event.target.closest('[data-fold], [data-eye], [data-reference], [data-add-into], [data-lock]')) this.rename(row);
+      if (row && !event.target.closest('[data-fold], [data-eye], [data-reference], [data-snap], [data-add-into], [data-lock]')) this.rename(row);
       const shape = event.target.closest('[data-shape]');
       if (shape) this.rename(shape);
     });
@@ -417,7 +433,7 @@ export class Outliner {
     list.addEventListener('pointerdown', (event) => {
       this.suppressClick = false; // the last drag's click never came
       const row = rowAt(event.target);
-      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye], [data-reference], [data-add-into], [data-lock]')) return;
+      if (!row || event.button !== 0 || this.renaming || event.target.closest('[data-fold], [data-eye], [data-reference], [data-snap], [data-add-into], [data-lock]')) return;
       this.press = { index: Number(row.dataset.object), x: event.clientX, y: event.clientY, dragging: false };
     });
     window.addEventListener('pointermove', (event) => {

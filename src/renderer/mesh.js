@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toLocal, toWorld } from './frames.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -1026,6 +1027,24 @@ export class EditableMesh {
 
   // --- cutting with an axis-aligned plane (axis = value) -------------------
 
+  // Does `work` with the faces' vertices taken into a frame { origin,
+  // quaternion } (see frames.js), where a plane across one of the frame's axes
+  // is axis-aligned, and back out of it - with any vertex added meanwhile.
+  // With no frame: as they are.
+  inFrame(faceIndices, frame, work) {
+    if (!frame) return work();
+    const count = this.vertices.length;
+    const own = new Set(faceIndices.flatMap((face) => [...this.faces[face]]));
+    const places = new Map([...own].map((i) => [i, this.vertices[i]]));
+    for (const [i, place] of places) this.vertices[i] = toLocal(place, frame);
+    try {
+      return work();
+    } finally {
+      for (const [i, place] of places) this.vertices[i] = place; // (exactly where they were)
+      for (let i = count; i < this.vertices.length; i++) this.vertices[i].copy(toWorld(this.vertices[i], frame));
+    }
+  }
+
   // -1 / 0 / +1: which side of the plane a vertex is on; 0 means on it.
   planeSide(vertex, axis, value) {
     const distance = this.vertices[vertex][axis] - value;
@@ -1055,7 +1074,12 @@ export class EditableMesh {
   }
 
   // Where the plane crosses the given faces, as [Vector3, Vector3] segments.
-  planeSegments(faceIndices, axis, value) {
+  // (`frame`: the axis is that frame's, see inFrame().)
+  planeSegments(faceIndices, axis, value, frame = null) {
+    if (frame) {
+      return this.inFrame(faceIndices, frame, () => this.planeSegments(faceIndices, axis, value))
+        .map((segment) => segment.map((point) => toWorld(point, frame)));
+    }
     const segments = [];
     for (const faceIndex of faceIndices) {
       // Points stand in for vertices here: nothing is added to the mesh.
@@ -1076,7 +1100,9 @@ export class EditableMesh {
   // split along each stretch of the plane's line that runs inside it - a
   // concave face may be cut into more than two pieces.
   // Returns { changed, vertices }: the vertices that lie on the cut.
-  planeCut(faceIndices, axis, value) {
+  // (`frame`: the axis is that frame's, see inFrame().)
+  planeCut(faceIndices, axis, value, frame = null) {
+    if (frame) return this.inFrame(faceIndices, frame, () => this.planeCut(faceIndices, axis, value));
     const cutVertices = new Map(); // edge key -> index of the vertex cut into it
     const onPlane = new Set();
     let changed = false;

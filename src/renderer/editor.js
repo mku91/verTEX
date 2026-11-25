@@ -8,7 +8,7 @@ import { EditableMesh, MeshView, edgeKey, cloneFace, ATLAS } from './mesh.js';
 import { SnapGrid, ROTATION_STEP } from './snap-grid.js';
 import { History } from './history.js';
 import { Mirror, mirrorPoint } from './mirror.js';
-import { quaternionOf, rotationOf, setRotation, toLocal } from './frames.js';
+import { quaternionOf, rotationOf, setRotation, toLocal, turnOfShape } from './frames.js';
 import { Atlas, facePixels, shapePixels, linePixels, turnedImage } from './atlas.js';
 import { surfacePath, barycentric } from './surface-path.js';
 import { unwrap, unfold, unfoldCylinder, START_SIZE, PADDING, packRects } from './unwrap.js';
@@ -1018,7 +1018,20 @@ export class Editor extends EventTarget {
   // the picked entries and what they hold - with the turn each has now.
   rotationsInMotion() {
     const moving = new Map();
-    if (this.mode !== 'object') return moving;
+    if (this.mode !== 'object') {
+      // (An object all of whose vertices are picked - one just added while in
+      // another mode - is turned as a whole too.)
+      const { objects, vertexObject } = this.mesh;
+      const missed = new Set(); // objects something of which is not picked
+      vertexObject.forEach((owner, i) => {
+        if (!this.selection.has(i)) missed.add(owner);
+      });
+      const owners = new Set([...this.selection].map((i) => vertexObject[i]));
+      for (const object of objects) {
+        if (owners.has(object.id) && !missed.has(object.id)) moving.set(object, quaternionOf(object.rotation));
+      }
+      return moving;
+    }
     for (const picked of this.picked) {
       for (const index of this.entriesUnder(picked)) {
         const object = this.mesh.objects[index];
@@ -5079,14 +5092,20 @@ export class Editor extends EventTarget {
     this.moveCut(clientX, clientY);
   }
 
-  // Starts cutting the object the face belongs to, with the line at the face's middle.
+  // Starts cutting the object the face belongs to, with the line at the face's
+  // middle. An object that has been turned is cut across its own axes, by a
+  // grid that goes through its pivot point (`frame`); one that has not, across
+  // the world's.
   beginCut(face) {
     const island = this.topology.islands[this.topology.islandOfFace[face]];
     // `value` is where the cut will be made; `shown` is where its line is drawn
     // right now, on its way there. `segments` is that line, `time` runs its dashes.
     // `right` is the screen's right in the view the pointer is in, see cutAxis().
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.viewport.camera.quaternion);
-    this.cut = { face, faces: island.faces, axis: null, value: null, shown: null, segments: [], time: 0, right };
+    const index = this.topology.islandOfFace[face];
+    const turn = this.ownTurn(index);
+    const frame = turn ? { origin: this.pivotPoint(index), quaternion: turn } : null;
+    this.cut = { face, faces: island.faces, frame, axis: null, value: null, shown: null, segments: [], time: 0, right };
     const center = new THREE.Vector3();
     for (const i of this.mesh.faces[face]) center.add(this.mesh.vertices[i]);
     this.placeCut(center.divideScalar(this.mesh.faces[face].length));
@@ -5132,8 +5151,8 @@ export class Editor extends EventTarget {
     this.emitChange();
   }
 
-  // The axis the cutting plane is perpendicular to, for a face with the given
-  // corners. Of the two axes the face lies along: on a wall the horizontal cut
+  // The axis the cutting plane is perpendicular to - the world's, or the turned
+  // object's own - for a face with the given corners. Of the two axes the face lies along: on a wall the horizontal cut
   // is the one at a height (across Y) and the vertical one is the other; on a
   // floor, where nothing is vertical, the vertical cut is the one whose line
   // looks vertical in the view the pointer is in.
@@ -5145,15 +5164,20 @@ export class Editor extends EventTarget {
       normal.y += (a.z - b.z) * (a.x + b.x);
       normal.z += (a.x - b.x) * (a.y + b.y);
     });
-    const [first, second] = ['x', 'y', 'z'].sort((a, b) => Math.abs(normal[a]) - Math.abs(normal[b]));
+    const ways = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+    if (this.cut.frame) for (const way of Object.values(ways)) way.applyQuaternion(this.cut.frame.quaternion);
+    const along = (axis) => Math.abs(normal.dot(ways[axis]));
+    const [first, second] = ['x', 'y', 'z'].sort((a, b) => along(a) - along(b));
     let vertical;
     let horizontal;
-    if (first === 'y' || second === 'y') {
-      horizontal = 'y';
-      vertical = first === 'y' ? second : first;
+    const [rise, other] = [first, second].map((axis) => Math.abs(ways[axis].y));
+    if (Math.abs(rise - other) > 0.1) {
+      // (a height: the one that rises more)
+      horizontal = rise > other ? first : second;
+      vertical = rise > other ? second : first;
     } else {
       const right = this.cut.right;
-      vertical = Math.abs(right[first]) >= Math.abs(right[second]) ? first : second;
+      vertical = Math.abs(right.dot(ways[first])) >= Math.abs(right.dot(ways[second])) ? first : second;
       horizontal = vertical === first ? second : first;
     }
     return this.cutDirection === 'vertical' ? vertical : horizontal;
@@ -5166,10 +5190,12 @@ export class Editor extends EventTarget {
     cut.point = point.clone(); // to re-place the line when the direction or the step changes
     const points = this.mesh.faces[cut.face].map((i) => this.mesh.vertices[i]);
     const axis = this.cutAxis(points);
+    const place = (p) => (cut.frame ? toLocal(p, cut.frame)[axis] : p[axis]);
+    const at = place(point);
 
     // Grid positions strictly inside the face's extent along the axis.
     const step = this.snapGrid.activeStep;
-    const coordinates = points.map((p) => p[axis]);
+    const coordinates = points.map(place);
     const first = Math.ceil((Math.min(...coordinates) + 1e-6) / step);
     const last = Math.floor((Math.max(...coordinates) - 1e-6) / step);
     const axisChanged = axis !== cut.axis;
@@ -5178,10 +5204,10 @@ export class Editor extends EventTarget {
       // With Alt held, freely: where the pointer is, short of the face's edges.
       const low = Math.min(...coordinates) + CUT_MARGIN;
       const high = Math.max(...coordinates) - CUT_MARGIN;
-      cut.value = low > high ? null : THREE.MathUtils.clamp(point[axis], low, high);
+      cut.value = low > high ? null : THREE.MathUtils.clamp(at, low, high);
     } else {
       // No grid line crosses the face along this axis: there is nothing to cut.
-      cut.value = first > last ? null : THREE.MathUtils.clamp(Math.round(point[axis] / step), first, last) * step;
+      cut.value = first > last ? null : THREE.MathUtils.clamp(Math.round(at / step), first, last) * step;
     }
     // The drawn line glides to a new position along the same axis, and jumps otherwise.
     if (axisChanged || cut.shown === null || cut.value === null) cut.shown = cut.value;
@@ -5209,7 +5235,7 @@ export class Editor extends EventTarget {
         cut.shown = THREE.MathUtils.lerp(cut.shown, cut.value, 1 - Math.exp(-CUT_GLIDE * dt));
         if (Math.abs(cut.shown - cut.value) < 1e-4) cut.shown = cut.value;
       }
-      cut.segments = cut.value === null ? [] : this.mesh.planeSegments(cut.faces, cut.axis, cut.shown);
+      cut.segments = cut.value === null ? [] : this.mesh.planeSegments(cut.faces, cut.axis, cut.shown, cut.frame);
 
       const pixel = this.viewport.worldPerPixel(); // the dashes keep their size on screen
       this.view.setCutPreview(cut.segments, {
@@ -5225,10 +5251,10 @@ export class Editor extends EventTarget {
   }
 
   applyCut() {
-    const { faces, axis, value } = this.cut;
+    const { faces, axis, value, frame } = this.cut;
     if (value === null) return;
     const before = this.snapshot();
-    const result = this.mesh.planeCut(faces, axis, value);
+    const result = this.mesh.planeCut(faces, axis, value, frame);
     if (!result.changed) return;
     this.selection = new Set(result.vertices);
     this.edited(before);
@@ -7665,14 +7691,37 @@ export class Editor extends EventTarget {
   scaleFrame() {
     const { objects, vertexObject } = this.mesh;
     const entry = this.pivotEntry();
-    let rotation = null;
-    if (entry !== null) {
-      rotation = objects[entry].rotation;
-    } else {
-      const owners = new Set([...this.selection].map((i) => vertexObject[i]));
-      if (owners.size === 1) rotation = objects.find((object) => object.id === [...owners][0])?.rotation;
+    if (entry !== null) return this.ownTurn(entry);
+    const owners = new Set([...this.selection].map((i) => vertexObject[i]));
+    if (owners.size !== 1) return null;
+    return this.ownTurn(objects.findIndex((object) => object.id === [...owners][0]));
+  }
+
+  // How an object or a node (index in the objects list) stands: the turn it
+  // has been given as a whole - or, that of a box whose vertices say otherwise,
+  // theirs (see turnOfShape()). A quaternion, or null for none.
+  ownTurn(index) {
+    const object = this.mesh.objects[index];
+    if (!object) return null;
+    const known = quaternionOf(object.rotation);
+    const plain = object.rotation ? known : null;
+    const island = this.topology.islands[index];
+    if (object.kind === 'node' || !island?.faces.length || island.faces.length > 2000) return plain;
+    const { vertices, faces } = this.mesh;
+    const edges = new Map();
+    for (const face of island.faces) {
+      const loop = faces[face];
+      const normal = this.mesh.faceNormal(face);
+      loop.forEach((a, k) => {
+        const b = loop[(k + 1) % loop.length];
+        const key = edgeKey(a, b);
+        if (edges.has(key)) return;
+        const way = vertices[b].clone().sub(vertices[a]);
+        const length = way.length();
+        if (length > 1e-9) edges.set(key, { length, way: way.divideScalar(length), normal });
+      });
     }
-    return rotation ? quaternionOf(rotation) : null;
+    return turnOfShape([...edges.values()], known) ?? plain;
   }
 
   // A vertex remembers the sides it was folded from along its object's own

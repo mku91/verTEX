@@ -7,6 +7,7 @@
 mod files;
 mod locale;
 mod menu;
+mod recovery;
 mod system;
 mod update;
 
@@ -182,13 +183,16 @@ fn window_close(window: WebviewWindow, windows: tauri::State<Windows>) -> Result
 
 fn main() {
     let (data, webview_dir) = profile();
+    let folder = files::Folder(data.clone());
+    let recovery = recovery::Recovery::new(&folder);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::Updates::default())
         .manage(Windows::default())
         .manage(locale::Language::load(data.clone()))
-        .manage(files::Folder(data))
+        .manage(folder)
+        .manage(recovery)
         .manage(system::Watching::default())
         .invoke_handler(tauri::generate_handler![
             window_ready,
@@ -211,6 +215,11 @@ fn main() {
             files::path_remove,
             files::path_trash,
             files::temp_folder,
+            recovery::recovery_begin,
+            recovery::recovery_list,
+            recovery::recovery_read,
+            recovery::recovery_write,
+            recovery::recovery_remove,
             system::folder_watch,
             system::open_path,
             system::open_with,
@@ -242,7 +251,12 @@ fn main() {
                 let _ = window.emit_to(MAIN, "menu", "project-close");
             }
             // With the editor's window go the others (its views).
-            WindowEvent::Destroyed if window.label() == MAIN => window.app_handle().exit(0),
+            WindowEvent::Destroyed if window.label() == MAIN => {
+                let windows = window.state::<Windows>();
+                let asked = windows.closing.lock().unwrap().contains(MAIN) || !windows.dirty.lock().unwrap().contains(MAIN);
+                window.state::<recovery::Recovery>().end(!asked);
+                window.app_handle().exit(0);
+            }
             _ => {}
         })
         .run(tauri::generate_context!())

@@ -39,6 +39,7 @@ import { latinOnly, freeName } from './names.js';
 import { RETRO_DEFAULTS, DITHERS, PALETTES } from './retro.js';
 import { canvasPNG } from './png.js';
 import { offerUpdate } from './update-offer.js';
+import { Recovery } from './recovery.js';
 import { Guide } from './guide.js';
 import { PhotoRipper } from './photo-ripper.js';
 
@@ -1240,6 +1241,8 @@ const warnings = new Warnings(editor, {
 // The project: its file and its unsaved changes, named in the window's title.
 // (Its questions and messages in the program's own dialogs, see ask-dialog.js.)
 const project = new Project(editor, window.vertex?.project && { ...window.vertex.project, confirm: askSave, alert: tell });
+// Its unsaved work, kept for when the program ends without being closed.
+const recovery = new Recovery(editor, project, window.vertex?.recovery);
 // On the welcome screen no project is open yet: the program's name alone.
 const showProject = () => {
   document.title = $('welcome').hidden ? `${project.dirty ? '● ' : ''}${project.name} — verTEX` : 'verTEX';
@@ -2141,7 +2144,7 @@ for (const id of ['atlas-open', 'atlas-reveal', 'atlas-repack']) {
   $(id).addEventListener('mousedown', (event) => event.preventDefault()); // keep the keyboard focus
 }
 
-window.vertexDebug = { uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode, ripper };
+window.vertexDebug = { recovery, uv: uvEditor, atlasLink, warnings, text: () => editor.toText(), views: orthoViews, project, files: () => projectFiles(editor), editor, timeline, animationMode, renderMode, ripper };
 
 // The bottom panel's height, as a share of the workspace (see setViewsSize()).
 const VIEWS_SIZE_KEY = 'vertex.orthoViewsSize';
@@ -2537,6 +2540,12 @@ window.addEventListener('contextmenu', (event) => {
   if (!event.target.closest?.('input, textarea')) event.preventDefault();
 }, true);
 
+// Nor have its keys for loading the page anew: what is not saved would go.
+// (A hotkey of the user's on them works all the same.)
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'F5' || (event.code === 'KeyR' && (event.ctrlKey || event.metaKey))) event.preventDefault();
+}, true);
+
 // Loaded: a newer version offered, if there is one (see update-offer.js),
 // and the splash goes (see index.html).
 {
@@ -2545,5 +2554,6 @@ window.addEventListener('contextmenu', (event) => {
   offerUpdate(splash).then(() => {
     splash.addEventListener('transitionend', () => splash.remove(), { once: true });
     requestAnimationFrame(() => splash.classList.add('gone'));
+    recovery.offer(); // what a run that did not end well has left
   });
 }

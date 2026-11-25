@@ -180,6 +180,15 @@ if (tauri) {
       setState: ({ dirty }) => invoke('project_state', { dirty }),
       close: () => invoke('window_close'),
     },
+    // Copies of unsaved work, in the program's own folder (see recovery.js).
+    recovery: {
+      begin: () => invoke('recovery_begin'),
+      list: () => invoke('recovery_list'),
+      read: async (name) => unpack(new Uint8Array(await invoke('recovery_read', { name }))),
+      write: (name, files) => invoke('recovery_write', pack(files, 1), { headers: { name } }),
+      remove: (name) => invoke('recovery_remove', { name }),
+      modified: (path) => invoke('file_modified', { path }),
+    },
     export: { pick: pickExport, write: writeExport },
     import: { pick: pickImport },
     // A switch of the window's menu ticked or not (see src-tauri/src/menu.rs).

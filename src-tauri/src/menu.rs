@@ -38,14 +38,19 @@ pub fn build(app: &AppHandle, language: &Language) -> tauri::Result<Menu<Wry>> {
         .item(&item("undo", "menu.edit.undo", Some("Ctrl+Z"))?)
         .item(&item("redo", "menu.edit.redo", Some("Ctrl+Y"))?)
         .build()?;
-    let view = SubmenuBuilder::new(app, language.t("menu.view"))
+    let mut view = SubmenuBuilder::new(app, language.t("menu.view"))
         .item(&item("toggle-views", "menu.view.views", Some("B"))?)
         .item(&item("frame", "menu.view.frame", Some("F"))?)
         // A switch: ticked here when chosen, and set from the page (see menu_check()), which keeps it.
         .item(&CheckMenuItemBuilder::with_id("toggle-pixel-grid", language.t("menu.view.pixel-grid")).checked(true).build(app)?)
         .item(&CheckMenuItemBuilder::with_id("toggle-edges", language.t("menu.view.edges")).checked(true).build(app)?)
-        .separator()
-        .item(&item("reload", "menu.view.reload", Some("Ctrl+R"))?)
+        .separator();
+    // For work on the program itself only, and by no key: what is not saved is
+    // gone from a page loaded anew (but for its copy, see recovery.rs).
+    if cfg!(debug_assertions) {
+        view = view.item(&item("reload", "menu.view.reload", None)?);
+    }
+    let view = view
         .item(&item("devtools", "menu.view.devtools", Some("Ctrl+Shift+I"))?)
         .item(&item("fullscreen", "menu.view.fullscreen", Some("F11"))?)
         .build()?;

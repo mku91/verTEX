@@ -527,6 +527,30 @@ export class Project extends EventTarget {
     });
   }
 
+  // Opens a copy of unsaved work (see recovery.js) as the project it is of,
+  // with changes that are not saved. Returns whether it was opened.
+  async recover(files, path) {
+    let opened = false;
+    await this.run(async () => {
+      let project;
+      try {
+        project = readProject(files);
+      } catch (error) {
+        await this.api.alert(t('project.error.open'), error.message);
+        return;
+      }
+      this.leave();
+      if (!this.editor.loadProject(project)) return;
+      for (const [id, bytes] of project.pictures) await this.editor.atlasById(id)?.load(bytes);
+      this.path = path;
+      this.savedState = null; // (no state of it is in the file)
+      this.report();
+      this.dispatchEvent(new Event('open'));
+      opened = true;
+    });
+    return opened;
+  }
+
   save() {
     return this.run(() => this.write(false));
   }

@@ -10,16 +10,20 @@ use tauri::ipc::{InvokeBody, Request, Response};
 use tauri_plugin_dialog::DialogExt;
 
 // An error the page can tell apart: a file that is not there is "missing".
-fn failure(error: std::io::Error) -> String {
+pub fn failure(error: std::io::Error) -> String {
     match error.kind() {
         std::io::ErrorKind::NotFound => "missing".into(),
         _ => error.to_string(),
     }
 }
 
+pub fn header(request: &Request, name: &str) -> Result<String, String> {
+    let raw = request.headers().get(name).and_then(|value| value.to_str().ok()).ok_or(format!("no {name}"))?;
+    percent_decode(raw)
+}
+
 fn header_path(request: &Request) -> Result<PathBuf, String> {
-    let raw = request.headers().get("path").and_then(|value| value.to_str().ok()).ok_or("no path")?;
-    Ok(PathBuf::from(percent_decode(raw)?))
+    header(request, "path").map(PathBuf::from)
 }
 
 fn percent_decode(text: &str) -> Result<String, String> {

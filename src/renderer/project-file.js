@@ -16,13 +16,13 @@ const PREVIEW = 'preview.png';
 const isText = (name) => name.endsWith('.json');
 
 // { name: string | Uint8Array } -> the archive's bytes. A name ending in '/'
-// is a folder and is kept even when empty.
-export function pack(files) {
+// is a folder and is kept even when empty. `level`: 1, packed quickly, to 9, tightly.
+export function pack(files, level = 6) {
   const entries = {};
   for (const [name, content] of Object.entries(files)) {
     entries[name] = typeof content === 'string' ? strToU8(content) : new Uint8Array(content ?? 0);
   }
-  return zipSync(entries, { level: 6 });
+  return zipSync(entries, { level });
 }
 
 // The archive's bytes -> { name: string | Uint8Array }: JSON entries as text,

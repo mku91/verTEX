@@ -25,7 +25,14 @@ import { mirroredWeights } from './skin.js';
 //                  along it first.
 
 const EPS = 1e-4;
-const keyOf = (p) => `${Math.round(p.x / EPS)}|${Math.round(p.y / EPS)}|${Math.round(p.z / EPS)}`;
+// (Rounded alike on both sides of nought, or a point and its image would have
+// different places - and not at a half of EPS, where many a size's half is
+// and the last digit would decide.)
+const cellOf = (c) => {
+  const cell = Math.round(Math.abs(c) / EPS + 1e-3);
+  return c < 0 ? -cell : cell;
+};
+const keyOf = (p) => `${cellOf(p.x)}|${cellOf(p.y)}|${cellOf(p.z)}`;
 const pointOf = (key) => new THREE.Vector3().fromArray(key.split('|').map((n) => Number(n) * EPS));
 
 // The point mirrored across every plane of the list.

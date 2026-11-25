@@ -6305,12 +6305,27 @@ export class Editor extends EventTarget {
     for (const i of vertices) mesh.vertices[i].y -= lowest;
   }
 
+  // A primitive just built of an odd number of sides is the same on both sides
+  // of Z, not of X: the mirror of X would cut it in two. It is turned a quarter
+  // round - the other way about then. (Of both at once it cannot be the same.)
+  turnForMirror(mesh, vertices) {
+    const { globalAxes } = this.mirror;
+    if (!globalAxes.has('x') || globalAxes.has('z')) return;
+    const same = vertices.every((i) => {
+      const { x, y, z } = mesh.vertices[i];
+      return vertices.some((j) => Math.abs(mesh.vertices[j].x + x) < 1e-6 && Math.abs(mesh.vertices[j].y - y) < 1e-6 && Math.abs(mesh.vertices[j].z - z) < 1e-6);
+    });
+    if (same) return;
+    for (const i of vertices) mesh.vertices[i].set(mesh.vertices[i].z, mesh.vertices[i].y, -mesh.vertices[i].x);
+  }
+
   // Shows, as a wireframe in the scene, the object addPrimitive() would make
   // with these arguments; a null kind takes the preview away. Nothing is added
   // to the model.
   previewPrimitive(kind, options = {}, side = null, into = null, floor = true) {
     const draft = new EditableMesh();
     const made = kind && buildPrimitive(draft, kind, options);
+    if (made) this.turnForMirror(draft, made);
     if (made) this.placePrimitive(draft, made, { anchor: this.primitiveAnchor(side), node: this.nodeIndex(into), floor });
     this.view.setPreview(made ? draft.edges().map(([a, b]) => [draft.vertices[a], draft.vertices[b]]) : []);
     this.viewport.requestRender();
@@ -7205,6 +7220,7 @@ export class Editor extends EventTarget {
     const node = this.nodeIndex(into);
     const vertices = buildPrimitive(this.mesh, kind, options);
     if (!vertices) return;
+    this.turnForMirror(this.mesh, vertices);
     const object = this.mesh.objects[this.mesh.objects.length - 1];
     this.placePrimitive(this.mesh, vertices, { anchor, node, floor, object });
     if (node !== null) object.parent = into;

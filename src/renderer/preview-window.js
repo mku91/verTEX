@@ -17,6 +17,7 @@ import { localize, t } from './i18n.js';
 // the main window; whether it was open is not kept.
 
 const FOV = 45;
+let count = 0; // windows opened: each is called differently, not to be taken for one on its way out
 const SIZE = { width: 480, height: 520 };
 
 export class PreviewWindow extends EventTarget {
@@ -57,7 +58,7 @@ export class PreviewWindow extends EventTarget {
     const frame = this.offset ?? { x: 0, y: 0 };
     const asked = { x: at.x - frame.x, y: at.y - frame.y };
     const features = `left=${asked.x},top=${asked.y},width=${at.width},height=${at.height}`;
-    const opened = window.open('preview.html', 'vertex-preview', features);
+    const opened = window.open('preview.html', `vertex-preview-${count += 1}`, features);
     if (!opened) return;
     this.window = opened;
     const ready = () => {
@@ -79,7 +80,8 @@ export class PreviewWindow extends EventTarget {
   close() {
     if (this.open) {
       this.remember(this.window);
-      this.window.close();
+      if (window.vertex?.closeChild) window.vertex.closeChild('preview');
+      else this.window.close();
     }
     this.tearDown();
   }

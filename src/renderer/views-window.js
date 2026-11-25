@@ -16,6 +16,8 @@ import { theme, onThemeChange } from './theme.js';
 // The keys pressed in it are the main window's (the tools, undo). It is
 // closed with the main one.
 
+let count = 0; // windows opened: each is called differently, not to be taken for one on its way out
+
 export class ViewsWindow extends EventTarget {
   constructor(editor, viewport) {
     super();
@@ -43,10 +45,11 @@ export class ViewsWindow extends EventTarget {
       this.window.focus();
       return;
     }
-    const opened = window.open('views.html', 'vertex-views', 'width=1280,height=860');
+    const opened = window.open('views.html', `vertex-views-${count += 1}`, 'width=1280,height=860');
     if (!opened) return;
     this.window = opened;
     const ready = () => {
+      if (this.window !== opened || this.ortho) return; // (closed meanwhile)
       opened.addEventListener('contextmenu', (event) => event.preventDefault(), true); // (as the main window, see app.js)
       this.build();
     };
@@ -55,12 +58,15 @@ export class ViewsWindow extends EventTarget {
     const watch = setInterval(() => {
       if (!opened.closed) return;
       clearInterval(watch);
-      this.tearDown();
+      if (this.window === opened) this.tearDown();
     }, 500);
   }
 
   close() {
-    if (this.open) this.window.close();
+    if (this.open) {
+      if (window.vertex?.closeChild) window.vertex.closeChild('views');
+      else this.window.close();
+    }
     this.tearDown();
   }
 
@@ -106,6 +112,7 @@ export class ViewsWindow extends EventTarget {
   }
 
   tearDown() {
+    this.window = null;
     if (!this.ortho) return;
     this.ortho.dispose();
     this.ortho = null;
@@ -114,7 +121,6 @@ export class ViewsWindow extends EventTarget {
     for (const material of this.materials?.all ?? []) material.dispose();
     this.renderer = null;
     this.materials = null;
-    this.window = null;
     this.dispatchEvent(new Event('change'));
   }
 

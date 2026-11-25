@@ -172,6 +172,8 @@ if (tauri) {
     },
     // The window as the editor wants it (maximized, with its menu bar), or as
     // the welcome screen does (no menu bar).
+    // Closes the page's windows of a kind: 'views', 'preview' (see src-tauri/src/main.rs).
+    closeChild: (kind) => invoke('child_close', { kind }).catch(() => {}),
     editing: (on) => invoke('window_editing', { on }),
     // (Asking and telling are the page's own dialogs, see app.js.)
     project: {

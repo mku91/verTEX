@@ -82,8 +82,16 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         // editor): allowed without asking, as the browser would ask a site.
         // Only that - what else a page may ask for is asked about as before.
         .enable_clipboard_access()
-        .on_page_load(|_, payload| match payload.event() {
-            PageLoadEvent::Started => stage("page"),
+        .on_page_load(|window, payload| match payload.event() {
+            PageLoadEvent::Started => {
+                stage("page");
+                // (a page loaded anew has no windows yet: those of the one before go)
+                for (label, child) in window.app_handle().webview_windows() {
+                    if label != MAIN {
+                        let _ = child.destroy();
+                    }
+                }
+            }
             PageLoadEvent::Finished => stage("page-done"),
         })
         // The window is called as its page is: the project's name.
@@ -96,8 +104,8 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
         .on_new_window(move |url, features| {
             let page = url.path().rsplit('/').next().unwrap_or("");
             let opened = match page {
-                "views.html" => open_child(&opener, "window.views.title", (1280.0, 860.0), features, views_dir.clone()),
-                "preview.html" => open_child(&opener, "preview.title", (480.0, 520.0), features, views_dir.clone()),
+                "views.html" => open_child(&opener, "views", "window.views.title", (1280.0, 860.0), features, views_dir.clone()),
+                "preview.html" => open_child(&opener, "preview", "preview.title", (480.0, 520.0), features, views_dir.clone()),
                 _ => return NewWindowResponse::Deny,
             };
             match opened {
@@ -117,9 +125,9 @@ fn open_main(app: &tauri::AppHandle, webview_dir: Option<PathBuf>) -> tauri::Res
 static CHILDREN: AtomicUsize = AtomicUsize::new(0);
 
 // (`size`: where the page has not said another.)
-fn open_child(app: &tauri::AppHandle, title: &str, size: (f64, f64), features: tauri::webview::NewWindowFeatures, webview_dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
+fn open_child(app: &tauri::AppHandle, kind: &str, title: &str, size: (f64, f64), features: tauri::webview::NewWindowFeatures, webview_dir: Option<PathBuf>) -> tauri::Result<WebviewWindow> {
     let language = app.state::<locale::Language>();
-    let mut builder = WebviewWindowBuilder::new(app, format!("views-{}", CHILDREN.fetch_add(1, Ordering::SeqCst)), WebviewUrl::External("about:blank".parse().unwrap()))
+    let mut builder = WebviewWindowBuilder::new(app, format!("{kind}-{}", CHILDREN.fetch_add(1, Ordering::SeqCst)), WebviewUrl::External("about:blank".parse().unwrap()))
         .inner_size(size.0, size.1)
         .window_features(features)
         .title(language.t(title))
@@ -130,6 +138,17 @@ fn open_child(app: &tauri::AppHandle, title: &str, size: (f64, f64), features: t
         builder = builder.data_directory(dir);
     }
     builder.build()
+}
+
+// Closes the page's windows of a kind ("views", "preview"). A window's own
+// close() ends the page in it and leaves the window there, empty.
+#[tauri::command]
+fn child_close(window: WebviewWindow, kind: String) {
+    for (label, child) in window.app_handle().webview_windows() {
+        if label != MAIN && label.split('-').next() == Some(kind.as_str()) {
+            let _ = child.destroy();
+        }
+    }
 }
 
 // How far the start has got, for npm start to show (scripts/start.mjs): a
@@ -204,6 +223,7 @@ fn main() {
             window_editing,
             project_state,
             window_close,
+            child_close,
             locale::locale_set,
             menu::menu_check,
             files::file_read,

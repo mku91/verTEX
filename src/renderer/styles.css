@@ -25,6 +25,39 @@
   src: url('../fonts/fa-brands-400.woff2') format('woff2');
 }
 
+/* The scrollbars, the same everywhere: a thin rounded bar in the theme's
+   colours, with no arrows and no track of its own. (Nothing may be given
+   scrollbar-width or scrollbar-color: these are not used then.) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  min-width: 28px;
+  min-height: 28px;
+  border: 2px solid transparent; /* (the bar does not touch the edges) */
+  border-radius: 5px;
+  background: var(--hover) content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-dim);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--accent);
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+}
+
 /* Colours of the default theme, for the first paint; theme.js sets the
    current theme's values on top of these. */
 :root {
@@ -1096,9 +1129,6 @@ select.color-palette-name option {
       var(--bg-raised) calc(var(--tl-names, 220px) - 1px),
       var(--border) calc(var(--tl-names, 220px) - 1px) var(--tl-names, 220px),
       transparent var(--tl-names, 220px)) local;
-  /* A scrollbar of the theme's: thin, the colour of the panels' borders. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--hover) transparent;
   overflow-y: auto;
 }
 
@@ -2359,15 +2389,6 @@ select.color-palette-name option {
   font-weight: 600;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-}
-
-/* Scrollbars in the side panel: thin and of the theme. (The guide's too.) */
-#panel,
-#outliner,
-#guide-nav,
-.guide-page {
-  scrollbar-width: thin;
-  scrollbar-color: var(--hover) transparent;
 }
 
 /* The list of objects fills the panel above the statistics. */
@@ -4554,12 +4575,6 @@ input.refused {
 
 .settings-pages label > span {
   width: 200px;
-}
-
-#settings-nav,
-.settings-pages {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 /* The hotkeys page. */
